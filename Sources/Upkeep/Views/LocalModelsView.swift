@@ -37,14 +37,29 @@ struct LocalModelsView: View {
     }
 
     private var modelList: some View {
-        List(store.localModels, selection: $store.selectedLocalModelID) { model in
+        List(sortedModels, selection: $store.selectedLocalModelID) { model in
             LocalModelRow(model: model).tag(model.id)
-        }.listStyle(.inset)
+        }
+        .listStyle(.inset)
+        .onAppear { ensureModelSelection() }
+        .onChange(of: store.localModels.map(\.id)) { _, _ in ensureModelSelection() }
     }
 
     private var selectedModel: LocalLLMModel? {
-        guard let id = store.selectedLocalModelID else { return store.localModels.first }
+        guard let id = store.selectedLocalModelID else { return nil }
         return store.localModels.first { $0.id == id }
+    }
+
+    private var sortedModels: [LocalLLMModel] {
+        store.localModels.sorted { left, right in
+            if left.isOutdated != right.isOutdated { return left.isOutdated }
+            return left.name.localizedStandardCompare(right.name) == .orderedAscending
+        }
+    }
+
+    private func ensureModelSelection() {
+        guard !store.localModels.contains(where: { $0.id == store.selectedLocalModelID }) else { return }
+        store.selectedLocalModelID = store.localModels.first?.id
     }
 }
 
@@ -56,30 +71,34 @@ private struct LocalModelRow: View {
         StandardItemRow {
             LocalModelRuntimeIcon(runtime: model.runtime, size: 36)
         } content: {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack {
-                    Text(model.name).fontWeight(.semibold).lineLimit(1)
-                    Text(model.runtime.rawValue.uppercased()).font(.system(size: 9, weight: .bold)).lineLimit(1)
-                        .foregroundStyle(.secondary).padding(.horizontal, 5).padding(.vertical, 2)
-                        .background(.quaternary, in: Capsule())
-                }
-                Text(model.variant ?? "Local language model")
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            }
+            ItemIdentityView(
+                title: model.name,
+                detail: model.variant.map { "\(model.runtime.rawValue) · \($0)" } ?? model.runtime.rawValue
+            )
         } accessories: {
             if let exclusion = store.exclusion(for: model) {
-                Label(exclusion.mode.rawValue, systemImage: exclusion.mode == .ignored ? "eye.slash" : "forward.end")
-                    .font(.caption.weight(.medium)).foregroundStyle(.orange)
-                    .frame(width: 128, alignment: .trailing)
+                ItemStatusView(
+                    title: exclusion.mode.rawValue,
+                    systemImage: exclusion.mode == .ignored ? "eye.slash" : "forward.end",
+                    color: .orange
+                )
+                InstalledVersionView(version: model.installedRevision)
+            } else if model.isOutdated {
+                VersionTransitionView(current: model.installedRevision, latest: model.latestRevision)
             } else {
-                VersionTransitionView(current: model.installedRevision, latest: model.isOutdated ? model.latestRevision : nil)
+                InstalledVersionView(version: model.installedRevision)
             }
             if model.isOutdated && !store.isExcluded(model) {
                 Button("Update") { Task { await store.updateLocalModel(model) } }
                     .buttonStyle(.bordered).controlSize(.small)
                     .disabled(store.workingIDs.contains(model.id))
+                    .frame(width: 120)
+            } else {
+                Color.clear.frame(width: 120, height: 1).accessibilityHidden(true)
             }
-            Menu {
+        }
+        .contextMenu {
+            Group {
                 if store.isExcluded(model) {
                     if let exclusion = store.exclusion(for: model) {
                         Button("Restore Updates") { store.restore(exclusion) }
@@ -88,12 +107,12 @@ private struct LocalModelRow: View {
                     if model.isOutdated { Button("Skip This Revision") { store.skip(model) } }
                     Button("Ignore \(model.name)") { store.ignore(model) }
                 }
-            } label: { MoreMenuIcon() }.menuStyle(.borderlessButton).menuIndicator(.hidden)
+            }
         }
     }
 }
 
-private struct LocalModelDetail: View {
+struct LocalModelDetail: View {
     @EnvironmentObject private var store: UpkeepStore
     let model: LocalLLMModel?
 

@@ -40,14 +40,29 @@ struct HomebrewView: View {
     }
 
     private var packageList: some View {
-        List(store.filteredHomebrewPackages, selection: $store.selectedPackageID) { package in
+        List(sortedPackages, selection: $store.selectedPackageID) { package in
             PackageRow(package: package).tag(package.id)
-        }.listStyle(.inset)
+        }
+        .listStyle(.inset)
+        .onAppear { ensurePackageSelection() }
+        .onChange(of: store.filteredHomebrewPackages.map(\.id)) { _, _ in ensurePackageSelection() }
     }
 
     private var selectedPackage: HomebrewPackage? {
-        guard let id = store.selectedPackageID else { return store.filteredHomebrewPackages.first }
+        guard let id = store.selectedPackageID else { return nil }
         return store.homebrewPackages.first { $0.id == id }
+    }
+
+    private var sortedPackages: [HomebrewPackage] {
+        store.filteredHomebrewPackages.sorted { left, right in
+            if left.isOutdated != right.isOutdated { return left.isOutdated }
+            return left.displayName.localizedStandardCompare(right.displayName) == .orderedAscending
+        }
+    }
+
+    private func ensurePackageSelection() {
+        guard !store.filteredHomebrewPackages.contains(where: { $0.id == store.selectedPackageID }) else { return }
+        store.selectedPackageID = store.filteredHomebrewPackages.first?.id
     }
 }
 
@@ -59,32 +74,16 @@ private struct PackageRow: View {
         StandardItemRow {
             BundledPackageIcon(name: "homebrew", size: 36)
         } content: {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack {
-                    Text(package.displayName).fontWeight(.semibold).lineLimit(1)
-                    if package.isDependency { badge("DEPENDENCY") }
-                    else if package.kind == .cask { badge("CASK") }
-                    if let exclusion = store.exclusion(for: package) { badge(exclusion.mode.rawValue.uppercased()) }
-                }
-                Text(package.description ?? "Homebrew \(package.kind.rawValue.lowercased())")
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            }
+            ItemIdentityView(title: package.displayName, detail: rowDetail)
         } accessories: {
-            VersionTransitionView(current: package.installedVersion, latest: package.isOutdated ? package.currentVersion : nil)
+            packageVersions
             if package.isOutdated && !store.isExcluded(package) {
                 Button("Update") { Task { await store.updatePackage(package) } }
                     .buttonStyle(.bordered).controlSize(.small)
                     .disabled(store.workingIDs.contains(package.id))
-            }
-            if package.isOutdated {
-                Menu {
-                    if let exclusion = store.exclusion(for: package) {
-                        Button("Restore Updates") { store.restore(exclusion) }
-                    } else {
-                        Button("Skip Version \(package.currentVersion)") { store.skip(package) }
-                        Button("Ignore \(package.displayName)") { store.ignore(package) }
-                    }
-                } label: { MoreMenuIcon() }.menuStyle(.borderlessButton).menuIndicator(.hidden)
+                    .frame(width: 120)
+            } else {
+                Color.clear.frame(width: 120, height: 1).accessibilityHidden(true)
             }
         }
         .contextMenu {
@@ -97,13 +96,29 @@ private struct PackageRow: View {
         }
     }
 
-    private func badge(_ text: String) -> some View {
-        Text(text).font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary)
-            .padding(.horizontal, 5).padding(.vertical, 2).background(.quaternary, in: Capsule())
+    private var rowDetail: String {
+        var details = [package.kind.rawValue]
+        if package.isDependency { details.append("Dependency") }
+        return details.joined(separator: " · ")
+    }
+
+    @ViewBuilder private var packageVersions: some View {
+        if let exclusion = store.exclusion(for: package) {
+            ItemStatusView(
+                title: exclusion.mode.rawValue,
+                systemImage: exclusion.mode == .ignored ? "eye.slash" : "forward.end",
+                color: .orange
+            )
+            InstalledVersionView(version: package.installedVersion)
+        } else if package.isOutdated {
+            VersionTransitionView(current: package.installedVersion, latest: package.currentVersion)
+        } else {
+            InstalledVersionView(version: package.installedVersion)
+        }
     }
 }
 
-private struct PackageDetail: View {
+struct PackageDetail: View {
     @EnvironmentObject private var store: UpkeepStore
     let package: HomebrewPackage?
 

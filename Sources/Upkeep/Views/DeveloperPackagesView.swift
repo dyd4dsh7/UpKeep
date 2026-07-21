@@ -48,10 +48,12 @@ struct DeveloperPackagesView: View {
     }
 
     private var packageList: some View {
-        List(store.filteredDeveloperPackages, selection: $store.selectedDeveloperPackageID) { package in
+        List(sortedPackages, selection: $store.selectedDeveloperPackageID) { package in
             DeveloperPackageRow(package: package).tag(package.id)
         }
         .listStyle(.inset)
+        .onAppear { ensurePackageSelection() }
+        .onChange(of: store.filteredDeveloperPackages.map(\.id)) { _, _ in ensurePackageSelection() }
         .onChange(of: store.selectedDeveloperPackageID) { _, identifier in
             if let identifier, let package = store.developerPackages.first(where: { $0.id == identifier }) {
                 Task { await store.loadAvailableVersions(for: package) }
@@ -60,8 +62,20 @@ struct DeveloperPackagesView: View {
     }
 
     private var selectedPackage: DeveloperPackage? {
-        guard let id = store.selectedDeveloperPackageID else { return store.filteredDeveloperPackages.first }
+        guard let id = store.selectedDeveloperPackageID else { return nil }
         return store.developerPackages.first { $0.id == id }
+    }
+
+    private var sortedPackages: [DeveloperPackage] {
+        store.filteredDeveloperPackages.sorted { left, right in
+            if left.isOutdated != right.isOutdated { return left.isOutdated }
+            return left.name.localizedStandardCompare(right.name) == .orderedAscending
+        }
+    }
+
+    private func ensurePackageSelection() {
+        guard !store.filteredDeveloperPackages.contains(where: { $0.id == store.selectedDeveloperPackageID }) else { return }
+        store.selectedDeveloperPackageID = store.filteredDeveloperPackages.first?.id
     }
 
     private var selectedManagerFilter: DeveloperPackageManager? {
@@ -108,31 +122,17 @@ private struct DeveloperPackageRow: View {
         StandardItemRow {
             PackageManagerIcon(manager: package.manager)
         } content: {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack {
-                    Text(package.name).fontWeight(.semibold).lineLimit(1)
-                    if let exclusion = store.exclusion(for: package) {
-                        Text(exclusion.mode.rawValue.uppercased()).font(.system(size: 9, weight: .bold)).foregroundStyle(.orange)
-                    }
-                }
-                Text("Global \(package.manager.packageLabel.lowercased())")
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            }
+            ItemIdentityView(title: package.name, detail: rowDetail)
         } accessories: {
-            VersionTransitionView(current: package.currentVersion, latest: package.isOutdated ? package.latestVersion : nil)
+            packageVersions
             if package.isOutdated && !store.isExcluded(package) {
                 Button("Update") { Task { await store.updateDeveloperPackage(package) } }
                     .buttonStyle(.bordered).controlSize(.small)
                     .disabled(store.workingIDs.contains(package.id))
+                    .frame(width: 120)
+            } else {
+                Color.clear.frame(width: 120, height: 1).accessibilityHidden(true)
             }
-            Menu {
-                if let exclusion = store.exclusion(for: package) {
-                    Button("Restore Updates") { store.restore(exclusion) }
-                } else {
-                    if package.isOutdated { Button("Skip Version \(package.latestVersion)") { store.skip(package) } }
-                    Button("Ignore \(package.name)") { store.ignore(package) }
-                }
-            } label: { MoreMenuIcon() }.menuStyle(.borderlessButton).menuIndicator(.hidden)
         }
         .contentShape(Rectangle())
         .contextMenu {
@@ -144,9 +144,28 @@ private struct DeveloperPackageRow: View {
             }
         }
     }
+
+    private var rowDetail: String {
+        package.manager.rawValue
+    }
+
+    @ViewBuilder private var packageVersions: some View {
+        if let exclusion = store.exclusion(for: package) {
+            ItemStatusView(
+                title: exclusion.mode.rawValue,
+                systemImage: exclusion.mode == .ignored ? "eye.slash" : "forward.end",
+                color: .orange
+            )
+            InstalledVersionView(version: package.currentVersion)
+        } else if package.isOutdated {
+            VersionTransitionView(current: package.currentVersion, latest: package.latestVersion)
+        } else {
+            InstalledVersionView(version: package.currentVersion)
+        }
+    }
 }
 
-private struct DeveloperPackageDetail: View {
+struct DeveloperPackageDetail: View {
     @EnvironmentObject private var store: UpkeepStore
     let package: DeveloperPackage?
 

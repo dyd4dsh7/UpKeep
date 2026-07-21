@@ -12,8 +12,10 @@ struct UpdatesView: View {
                 systemImage: "arrow.down.circle.fill"
             )
 
-            if !store.scanWarnings.isEmpty {
-                ScanWarningsBanner(warnings: store.scanWarnings)
+            if !store.scanWarningsHidden && !store.scanWarnings.isEmpty {
+                ScanWarningsBanner(warnings: store.scanWarnings) {
+                    withAnimation { store.scanWarningsHidden = true }
+                }
             }
 
             if store.isScanning && store.apps.isEmpty {
@@ -21,7 +23,7 @@ struct UpdatesView: View {
             } else if store.filteredUpdates.isEmpty && filteredPackages.isEmpty && systemUpdates.isEmpty && filteredDeveloperPackages.isEmpty && filteredModels.isEmpty {
                 emptyState
             } else {
-                List {
+                List(selection: selectedUpdateItemID) {
                     if !store.filteredUpdates.isEmpty {
                         Section("Applications") {
                             ForEach(store.filteredUpdates) { UpdateCard(update: $0) }
@@ -51,6 +53,49 @@ struct UpdatesView: View {
                 .listStyle(.inset)
             }
         }
+    }
+
+    private var selectedUpdateItemID: Binding<String?> {
+        Binding(
+            get: {
+                if let selected = store.selectedApp,
+                   store.filteredUpdates.contains(where: { $0.app.id == selected.id }) {
+                    return "app:\(selected.id)"
+                }
+                return store.updateInspectorSelection?.listID
+            },
+            set: { identifier in
+                guard let identifier else {
+                    store.selectedApp = nil
+                    store.updateInspectorSelection = nil
+                    return
+                }
+                if identifier.hasPrefix("app:") {
+                    let id = String(identifier.dropFirst(4))
+                    store.selectedApp = store.filteredUpdates.first { $0.app.id == id }?.app
+                    store.updateInspectorSelection = nil
+                } else if identifier.hasPrefix("homebrew:") {
+                    let id = String(identifier.dropFirst("homebrew:".count))
+                    store.selectedApp = nil
+                    store.selectedPackageID = id
+                    store.updateInspectorSelection = .homebrew(id)
+                } else if identifier.hasPrefix("developer:") {
+                    let id = String(identifier.dropFirst("developer:".count))
+                    store.selectedApp = nil
+                    store.selectedDeveloperPackageID = id
+                    store.updateInspectorSelection = .developer(id)
+                    if let package = store.developerPackages.first(where: { $0.id == id }) {
+                        store.selectedDeveloperVersion = package.latestVersion
+                        Task { await store.loadAvailableVersions(for: package) }
+                    }
+                } else if identifier.hasPrefix("model:") {
+                    let id = String(identifier.dropFirst("model:".count))
+                    store.selectedApp = nil
+                    store.selectedLocalModelID = id
+                    store.updateInspectorSelection = .model(id)
+                }
+            }
+        )
     }
 
     private var filteredPackages: [HomebrewPackage] {
@@ -116,15 +161,24 @@ struct UpdatesView: View {
 
 private struct ScanWarningsBanner: View {
     let warnings: [ScanWarning]
+    let dismiss: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label(
-                "\(warnings.count) update source \(warnings.count == 1 ? "warning" : "warnings")",
-                systemImage: "exclamationmark.triangle.fill"
-            )
-            .font(.callout.weight(.medium))
-            .foregroundStyle(.orange)
+            HStack {
+                Label(
+                    "\(warnings.count) update source \(warnings.count == 1 ? "warning" : "warnings")",
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.orange)
+                Spacer()
+                Button(action: dismiss) { Image(systemName: "xmark") }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("Hide warnings until the next scan")
+                    .accessibilityLabel("Hide update source warnings")
+            }
 
             ForEach(warnings.prefix(3)) { warning in
                 VStack(alignment: .leading, spacing: 2) {
@@ -153,25 +207,19 @@ private struct DeveloperUpdateCard: View {
         StandardItemRow {
             PackageManagerIcon(manager: package.manager, size: 36)
         } content: {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack { Text(package.name).fontWeight(.semibold).lineLimit(1); Text(package.manager.rawValue).font(.caption2.bold()).foregroundStyle(.secondary).lineLimit(1) }
-                Text("Global developer package").font(.caption).foregroundStyle(.secondary)
-            }
+            ItemIdentityView(title: package.name, detail: package.manager.rawValue)
         } accessories: {
             VersionTransitionView(current: package.currentVersion, latest: package.latestVersion)
             Button("Update") { Task { await store.updateDeveloperPackage(package) } }
                 .buttonStyle(.bordered).controlSize(.small)
                 .disabled(store.workingIDs.contains(package.id))
-            Menu {
-                Button("Skip Version \(package.latestVersion)") { store.skip(package) }
-                Button("Ignore \(package.name)") { store.ignore(package) }
-            } label: { MoreMenuIcon() }.menuStyle(.borderlessButton).menuIndicator(.hidden)
+                .frame(width: 120)
         }
+        .tag(UpdateInspectorSelection.developer(package.id).listID)
         .contentShape(Rectangle())
-        .onTapGesture {
-            store.selectedDeveloperPackageID = package.id
-            store.selectedDeveloperVersion = package.latestVersion
-            store.selection = .developerPackages
+        .contextMenu {
+            Button("Skip Version \(package.latestVersion)") { store.skip(package) }
+            Button("Ignore \(package.name)") { store.ignore(package) }
         }
     }
 }
@@ -186,14 +234,15 @@ private struct MacOSUpdateCard: View {
                 Image(systemName: "apple.logo").font(.title2).foregroundStyle(.blue)
             }.frame(width: 36, height: 36)
         } content: {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack { Text(update.title).fontWeight(.semibold); if update.isBeta { Text("BETA").font(.caption2.bold()).foregroundStyle(.purple) } }
-                Text("macOS \(update.version)" + (update.requiresRestart ? " · Restart required" : ""))
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+            ItemIdentityView(
+                title: update.title,
+                detail: "macOS" + (update.requiresRestart ? " · Restart required" : ""),
+                tag: update.isBeta ? "Beta" : nil
+            )
         } accessories: {
             Button("Open Software Update") { Task { await store.prepareMacOSUpdate(update) } }
                 .buttonStyle(.bordered).controlSize(.small)
+                .frame(width: 120)
         }
     }
 }
@@ -206,26 +255,11 @@ struct UpdateCard: View {
         StandardItemRow {
             AppIcon(url: update.app.url, size: 36)
         } content: {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 7) {
-                    Text(update.app.name)
-                        .fontWeight(.semibold)
-                        .lineLimit(1)
-                    SourceBadge(source: update.source)
-                    if store.isRunning(update.app) { RunningBadge() }
-                }
-
-                if let notes = update.releaseNotes, !notes.isEmpty {
-                    Text(notes)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                } else {
-                    Text("A newer version is available from \(update.source.rawValue).")
-                        .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-            }
+            ItemIdentityView(
+                title: update.app.name,
+                detail: update.source.rawValue,
+                isRunning: store.isRunning(update.app)
+            )
         } accessories: {
             VersionTransitionView(current: update.app.installedVersion, latest: update.availableVersion)
             Button {
@@ -237,16 +271,10 @@ struct UpdateCard: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
             .disabled(store.workingIDs.contains(update.id))
-            Menu {
-                Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([update.app.url]) }
-                Divider()
-                Button("Skip Version \(update.availableVersion)") { store.skip(update) }
-                Button("Ignore \(update.app.name)") { store.ignore(update.app) }
-            } label: { MoreMenuIcon() }
-            .menuStyle(.borderlessButton).menuIndicator(.hidden)
+            .frame(width: 120)
         }
+        .tag("app:\(update.app.id)")
         .contentShape(Rectangle())
-        .onTapGesture { store.selectedApp = update.app }
     }
 
     private var actionTitle: String {
@@ -267,29 +295,22 @@ private struct HomebrewUpdateCard: View {
         StandardItemRow {
             BundledPackageIcon(name: "homebrew", size: 36)
         } content: {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack {
-                    Text(package.displayName).fontWeight(.semibold).lineLimit(1)
-                    SourceBadge(source: .homebrew)
-                    if package.isDependency { Text("DEPENDENCY").font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary) }
-                }
-                Text(package.description ?? "Homebrew \(package.kind.rawValue.lowercased())")
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            }
+            ItemIdentityView(
+                title: package.displayName,
+                detail: package.kind.rawValue + (package.isDependency ? " · Dependency" : "")
+            )
         } accessories: {
             VersionTransitionView(current: package.installedVersion, latest: package.currentVersion)
             Button("Update") { Task { await store.updatePackage(package) } }
                 .buttonStyle(.bordered).controlSize(.small)
                 .disabled(store.workingIDs.contains(package.id))
-            Menu {
-                Button("Skip Version \(package.currentVersion)") { store.skip(package) }
-                Button("Ignore \(package.displayName)") { store.ignore(package) }
-            } label: { MoreMenuIcon() }.menuStyle(.borderlessButton).menuIndicator(.hidden)
+                .frame(width: 120)
         }
+        .tag(UpdateInspectorSelection.homebrew(package.id).listID)
         .contentShape(Rectangle())
-        .onTapGesture {
-            store.selectedPackageID = package.id
-            store.selection = .homebrewPackages
+        .contextMenu {
+            Button("Skip Version \(package.currentVersion)") { store.skip(package) }
+            Button("Ignore \(package.displayName)") { store.ignore(package) }
         }
     }
 }
@@ -302,21 +323,22 @@ private struct LocalModelUpdateCard: View {
         StandardItemRow {
             LocalModelRuntimeIcon(runtime: model.runtime, size: 36)
         } content: {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack { Text(model.name).fontWeight(.semibold).lineLimit(1); Text(model.runtime.rawValue).font(.caption2.bold()).foregroundStyle(.secondary).lineLimit(1) }
-                Text(model.variant ?? "Local language model").font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            }
+            ItemIdentityView(
+                title: model.name,
+                detail: model.variant.map { "\(model.runtime.rawValue) · \($0)" } ?? model.runtime.rawValue
+            )
         } accessories: {
             VersionTransitionView(current: model.installedRevision, latest: model.latestRevision)
             Button("Update") { Task { await store.updateLocalModel(model) } }
                 .buttonStyle(.bordered).controlSize(.small)
                 .disabled(store.workingIDs.contains(model.id))
-            Menu {
-                Button("Skip This Revision") { store.skip(model) }
-                Button("Ignore \(model.name)") { store.ignore(model) }
-            } label: { MoreMenuIcon() }.menuStyle(.borderlessButton).menuIndicator(.hidden)
+                .frame(width: 120)
         }
+        .tag(UpdateInspectorSelection.model(model.id).listID)
         .contentShape(Rectangle())
-        .onTapGesture { store.selectedLocalModelID = model.id; store.selection = .localModels }
+        .contextMenu {
+            Button("Skip This Revision") { store.skip(model) }
+            Button("Ignore \(model.name)") { store.ignore(model) }
+        }
     }
 }

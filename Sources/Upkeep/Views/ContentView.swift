@@ -10,11 +10,12 @@ struct ContentView: View {
             Sidebar()
                 .navigationSplitViewColumnWidth(min: 215, ideal: 235, max: 300)
         } detail: {
-            detail
+            detailWithInspector
                 .searchable(text: $store.searchText, placement: .toolbar, prompt: "Search apps and packages")
                 .toolbar { toolbar }
         }
         .navigationTitle("Upkeep")
+        .dynamicTypeSize(.xLarge...)
         .task {
             AppBrand.applyApplicationIcon(for: colorScheme)
             MenuBarController.shared.configure(store: store, settings: settings)
@@ -32,6 +33,10 @@ struct ContentView: View {
         .onChange(of: settings.showMenuBarCount) { _, _ in
             refreshMenuBar()
         }
+        .onChange(of: store.selection) { _, destination in
+            store.selectedApp = nil
+            store.updateInspectorSelection = nil
+        }
         .onChange(of: colorScheme) { _, newColorScheme in
             AppBrand.applyApplicationIcon(for: newColorScheme)
             AppBrand.applyDockBadge(updateCount: store.totalUpdateCount)
@@ -43,17 +48,7 @@ struct ContentView: View {
         .alert("The operation couldn’t be completed", isPresented: Binding(
             get: { store.errorMessage != nil }, set: { if !$0 { store.errorMessage = nil } }
         )) { Button("OK", role: .cancel) {} } message: { Text(store.errorMessage ?? "Unknown error") }
-        .alert(item: $store.pendingRunningAppConfirmation) { confirmation in
-            Alert(
-                title: Text(confirmation.title),
-                message: Text(confirmation.message),
-                primaryButton: .destructive(Text(confirmation.buttonTitle)) {
-                    Task { await store.confirmRunningAppUpdate(confirmation) }
-                },
-                secondaryButton: .cancel()
-            )
-        }
-        .sheet(item: $store.selectedApp) { app in AppDetailView(app: app) }
+        .upkeepRunningAppConfirmationAlert(store)
     }
 
     private func refreshMenuBar() {
@@ -80,6 +75,35 @@ struct ContentView: View {
                 title: store.selection.rawValue,
                 subtitle: "\(store.count(for: store.selection)) apps"
             )
+        }
+    }
+
+    @ViewBuilder private var detailWithInspector: some View {
+        if let app = store.selectedApp {
+            HSplitView {
+                detail.frame(minWidth: 390)
+                AppDetailView(app: app)
+                    .frame(minWidth: 380, idealWidth: 460, maxWidth: 580)
+            }
+        } else if store.selection == .updates, let inspector = store.updateInspectorSelection {
+            HSplitView {
+                detail.frame(minWidth: 390)
+                updateInspector(inspector)
+                    .frame(minWidth: 380, idealWidth: 460, maxWidth: 580)
+            }
+        } else {
+            detail
+        }
+    }
+
+    @ViewBuilder private func updateInspector(_ selection: UpdateInspectorSelection) -> some View {
+        switch selection {
+        case let .homebrew(id):
+            PackageDetail(package: store.homebrewPackages.first { $0.id == id })
+        case let .developer(id):
+            DeveloperPackageDetail(package: store.developerPackages.first { $0.id == id })
+        case let .model(id):
+            LocalModelDetail(model: store.localModels.first { $0.id == id })
         }
     }
 
@@ -129,6 +153,24 @@ struct ContentView: View {
         return store.scanWarnings.isEmpty
             ? "All supported apps and packages are up to date"
             : "Some update sources could not be checked"
+    }
+}
+
+extension View {
+    func upkeepRunningAppConfirmationAlert(_ store: UpkeepStore) -> some View {
+        alert(item: Binding(
+            get: { store.pendingRunningAppConfirmation },
+            set: { store.pendingRunningAppConfirmation = $0 }
+        )) { confirmation in
+            Alert(
+                title: Text(confirmation.title),
+                message: Text(confirmation.message),
+                primaryButton: .destructive(Text(confirmation.buttonTitle)) {
+                    Task { await store.confirmRunningAppUpdate(confirmation) }
+                },
+                secondaryButton: .cancel()
+            )
+        }
     }
 }
 

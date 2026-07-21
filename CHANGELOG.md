@@ -2,6 +2,87 @@
 
 All notable changes to Upkeep are documented here.
 
+## 0.15.0 — 2026-07-21
+
+- Kept the Updates workspace selected when opening Homebrew, developer-package, or AI-model update details.
+- Added update-specific package and model selection so the chosen row remains highlighted.
+- Reused the complete package and model detail views as side inspectors beside the Updates list.
+
+## 0.14.9 — 2026-07-21
+
+- Removed the raw source URL bar from app details.
+- Rebuilt app actions as a responsive grid of large capsule buttons.
+- Promoted update and restore to a clear blue primary action while keeping Open App, Finder, source, skip, and ignore directly visible.
+
+## 0.14.8 — 2026-07-21
+
+- Tightened list version transitions into compact current → new groups while retaining aligned action columns.
+- Refreshed the open-app inspector header with larger artwork, the version transition beneath the title, and the source directly below it.
+- Removed the duplicated version transition from the status card.
+- Added a full-width clickable source URL with a copy action.
+
+## 0.14.7 — 2026-07-21
+
+- Aligned current versions, arrows, new versions, and update actions into fixed columns across inventory and update lists.
+- Reserved the action column for current package and model rows so version positions remain stable throughout each list.
+- Corrected app source links to open the detected source, including Homebrew cask pages instead of unrelated fallback feeds.
+- Renamed generic source actions to explicit Open Homebrew, Open GitHub, Open Sparkle Feed, and Open App Store labels.
+
+## 0.14.6 — 2026-07-21
+
+- Displayed update versions as a single current → new transition across app, Homebrew, developer package, and AI model inventories.
+- Increased shared row title, subtitle, status, and version typography with more vertical breathing room.
+- Applied a larger minimum Dynamic Type size throughout the interface while continuing to respect larger accessibility settings.
+
+## 0.14.5 — 2026-07-21
+
+- Removed the redundant Current label from installed app, Homebrew, developer package, and AI model rows.
+- Sorted apps with detected updates to the top of All Apps, source, and Adoptable lists by default.
+- Sorted outdated Homebrew, developer, and AI model packages above current items while preserving alphabetical order within each group.
+
+## 0.14.4 — 2026-07-21
+
+- Removed separators between list items across app, package, model, macOS, and history workspaces.
+- Replaced the app inspector’s Controls menu with visible Open, Finder, source, skip, and ignore buttons.
+- Shortened update status columns to display only the new version number.
+- Left-aligned the selected app’s installed-to-new version transition instead of reserving list-column spacing.
+
+## 0.14.3 — 2026-07-21
+
+- Moved the Running state beside the app name in list rows and the inspector title.
+- Added native app-row selection so the app shown in the inspector remains visibly highlighted, and closes stale details when switching workspaces.
+- Unified installed app, Homebrew, developer package, AI model, macOS, and history rows with shared identity, status, and version columns.
+- Synchronized package and model detail panes with their selected list row.
+
+## 0.14.2 — 2026-07-21
+
+- Standardized installed app, adoptable app, Homebrew, developer package, AI model, macOS, and history rows around the same compact detail hierarchy.
+- Replaced technical bundle IDs, paths, prose descriptions, and oversized status badges with a single useful source or type line.
+- Removed duplicate row menus where the adjacent detail pane already exposes the complete control set; advanced actions remain available from details and context menus.
+
+## 0.14.1 — 2026-07-21
+
+- Simplified update rows for the narrower inspector layout by removing release-note previews and repeated source badges.
+- Reduced package and model rows to essential identity, type or runtime, version, and action information.
+- Removed the redundant app-row More menu because the side inspector now contains the complete control set.
+
+## 0.14.0 — 2026-07-21
+
+- Replaced modal app details with a resizable side inspector that remains alongside app and update lists.
+- Removed the small GroupBox legends and reorganized details around status, controls, What's New, Homebrew, and information sections.
+- Automatically closes the app inspector when navigating to package, model, macOS, or history workspaces.
+
+## 0.13.0 — 2026-07-21
+
+- Redesigned app details as a larger native dialog with a clearer identity header, update-status summary, and structured sections.
+- Consolidated every per-app action into the dialog: update, update and adopt, adopt, skip, ignore, restore, open, reveal in Finder, and source links.
+- Added complete release notes and expanded technical and update-source metadata to app details.
+
+## 0.12.1 — 2026-07-21
+
+- Added a dismiss control for scan warnings; dismissed warnings return after the next full or targeted scan.
+- Added Homebrew adoption to app details, including a clear Update & Adopt action when a newer cask is available.
+
 ## 0.12.0 — 2026-07-21
 
 - Added live Running indicators to installed apps, available updates, app details, and adoptable apps.

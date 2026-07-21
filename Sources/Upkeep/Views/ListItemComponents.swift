@@ -30,13 +30,68 @@ struct StandardItemRow<Icon: View, Content: View, Accessories: View>: View {
             .fixedSize(horizontal: true, vertical: false)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 6)
+        .padding(.vertical, 8)
+        .listRowSeparator(.hidden)
+    }
+}
+
+struct ItemIdentityView: View {
+    let title: String
+    let detail: String
+    var isRunning = false
+    var tag: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 7) {
+                Text(title).font(.body.weight(.semibold)).lineLimit(1)
+                if isRunning { RunningIndicator() }
+                if let tag {
+                    Text(tag.uppercased())
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Text(detail)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+    }
+}
+
+struct ItemStatusView: View {
+    let title: String
+    let systemImage: String
+    var color: Color = .secondary
+
+    var body: some View {
+        Label(title, systemImage: systemImage)
+            .font(.callout.weight(.medium))
+            .foregroundStyle(color)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .frame(width: 128, alignment: .trailing)
+    }
+}
+
+struct InstalledVersionView: View {
+    let version: String
+
+    var body: some View {
+        Text(version)
+            .font(.callout.monospacedDigit())
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .frame(width: 92, alignment: .trailing)
     }
 }
 
 struct VersionTransitionView: View {
     let current: String
     var latest: String?
+    var usesFixedWidth = true
 
     var body: some View {
         Group {
@@ -45,7 +100,7 @@ struct VersionTransitionView: View {
                     Text(current)
                         .foregroundStyle(.secondary)
                     Image(systemName: "arrow.right")
-                        .font(.caption2)
+                        .font(.caption)
                         .foregroundStyle(.tertiary)
                     Text(latest)
                         .fontWeight(.semibold)
@@ -60,10 +115,10 @@ struct VersionTransitionView: View {
                 }
             }
         }
-        .font(.caption.monospacedDigit())
+        .font(.callout.monospacedDigit())
         .lineLimit(1)
         .minimumScaleFactor(0.8)
-        .frame(width: 128, alignment: .trailing)
+        .frame(width: usesFixedWidth ? 190 : nil, alignment: usesFixedWidth ? .trailing : .leading)
         .accessibilityElement(children: .combine)
     }
 }
@@ -74,5 +129,15 @@ struct MoreMenuIcon: View {
             .frame(width: 18, height: 18)
             .contentShape(Rectangle())
             .accessibilityLabel("More")
+    }
+}
+
+struct RunningIndicator: View {
+    var body: some View {
+        Circle()
+            .fill(.green)
+            .frame(width: 7, height: 7)
+            .help("This app is currently running")
+            .accessibilityLabel("Running")
     }
 }

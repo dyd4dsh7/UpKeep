@@ -56,21 +56,21 @@ struct MacOSUpdatesView: View {
             Image(systemName: update.isFullInstaller ? "internaldrive" : "apple.logo")
                 .font(.title2).foregroundStyle(update.isBeta ? .purple : .blue)
         } content: {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text(update.title).fontWeight(.semibold).lineLimit(1)
-                    if update.isBeta { Text("BETA").font(.caption2.bold()).padding(.horizontal, 6).padding(.vertical, 2).background(.purple.opacity(0.12), in: Capsule()).foregroundStyle(.purple) }
-                }
-                Text((update.isFullInstaller ? "Full installer" : "System update") + (update.size.map { " · \($0)" } ?? ""))
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+            ItemIdentityView(
+                title: update.title,
+                detail: (update.isFullInstaller ? "Full installer" : "System update") + (update.size.map { " · \($0)" } ?? ""),
+                tag: update.isBeta ? "Beta" : nil
+            )
         } accessories: {
-            Text(update.version)
-                .font(.caption.monospacedDigit()).fontWeight(.semibold)
-                .frame(width: 128, alignment: .trailing)
+            ItemStatusView(
+                title: update.isFullInstaller ? "Installer" : "Available",
+                systemImage: update.isFullInstaller ? "internaldrive" : "arrow.down.circle.fill",
+                color: update.isBeta ? .purple : .accentColor
+            )
+            InstalledVersionView(version: update.version)
             Button(update.isFullInstaller ? "View in Software Update" : "Prepare Update") {
                 Task { await store.prepareMacOSUpdate(update) }
-            }.buttonStyle(.bordered).controlSize(.small)
+            }.buttonStyle(.bordered).controlSize(.small).frame(width: 150)
         }
     }
 }

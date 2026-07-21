@@ -21,11 +21,10 @@ struct UpdateHistoryView: View {
                     StandardItemRow {
                         Image(systemName: icon(for: record.kind)).font(.title3).foregroundStyle(color(for: record.kind))
                     } content: {
-                        VStack(alignment: .leading, spacing: 3) {
-                            HStack { Text(record.name).fontWeight(.semibold); Text(record.kind.rawValue.uppercased()).font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary) }
-                            Text(record.recoveryNote ?? "Updated with Upkeep")
-                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                        }
+                        ItemIdentityView(
+                            title: record.name,
+                            detail: record.kind.rawValue + " · " + (record.recoveryNote ?? "Updated with Upkeep")
+                        )
                     } accessories: {
                         VersionTransitionView(current: record.fromVersion, latest: record.toVersion)
                         Text(record.date.formatted(date: .abbreviated, time: .shortened))

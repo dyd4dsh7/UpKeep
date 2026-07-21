@@ -11,6 +11,20 @@ enum HomebrewFilter: String, CaseIterable, Identifiable {
     var id: Self { self }
 }
 
+enum UpdateInspectorSelection: Equatable {
+    case homebrew(String)
+    case developer(String)
+    case model(String)
+
+    var listID: String {
+        switch self {
+        case let .homebrew(id): "homebrew:\(id)"
+        case let .developer(id): "developer:\(id)"
+        case let .model(id): "model:\(id)"
+        }
+    }
+}
+
 struct RunningAppConfirmation: Identifiable {
     enum Action {
         case update(AvailableUpdate)
@@ -71,11 +85,13 @@ final class UpkeepStore: ObservableObject {
     @Published var availableDeveloperVersions: [String] = []
     @Published var isLoadingDeveloperVersions = false
     @Published var selectedApp: InstalledApp?
+    @Published var updateInspectorSelection: UpdateInspectorSelection?
     @Published var searchText = ""
     @Published var isScanning = false
     @Published var lastChecked: Date?
     @Published var errorMessage: String?
     @Published var scanWarnings: [ScanWarning] = []
+    @Published var scanWarningsHidden = false
     @Published var workingIDs = Set<String>()
     @Published var pendingRevert: UpdateRecord?
     @Published var pendingRunningAppConfirmation: RunningAppConfirmation?
@@ -184,6 +200,7 @@ final class UpkeepStore: ObservableObject {
         installedDeveloperManagers = report.installedDeveloperManagers
         localModels = mergedLocalModels(from: report)
         scanWarnings = report.warnings
+        scanWarningsHidden = false
         if developerManagerFilter != "all", !installedDeveloperManagers.contains(where: { $0.rawValue == developerManagerFilter }) {
             developerManagerFilter = "all"
         }
@@ -231,6 +248,7 @@ final class UpkeepStore: ObservableObject {
         let report = await DeveloperPackageClient().scan(enabledManagers: managers)
         let warnings = report.warnings.map { ScanWarning(source: .developerPackages, message: $0) }
         scanWarnings = (scanWarnings.filter { $0.source != .developerPackages } + warnings)
+        scanWarningsHidden = false
         if let manager {
             guard !report.failedManagers.contains(manager) else { return }
             developerPackages.removeAll { $0.manager == manager }
@@ -445,6 +463,7 @@ final class UpkeepStore: ObservableObject {
         localModels = merged.values.sorted(by: localModelOrder)
         scanWarnings = scanWarnings.filter { $0.source != .localModels }
             + report.warnings.map { ScanWarning(source: .localModels, message: $0) }
+        scanWarningsHidden = false
         if selectedLocalModelID == nil || !localModels.contains(where: { $0.id == selectedLocalModelID }) {
             selectedLocalModelID = localModels.first?.id
         }
@@ -633,7 +652,7 @@ final class UpkeepStore: ObservableObject {
         return apps.first { normalize($0.name) == packageName || normalize($0.name) == token }
     }
 
-    private func homebrewPackage(for app: InstalledApp) -> HomebrewPackage? {
+    func homebrewPackage(for app: InstalledApp) -> HomebrewPackage? {
         let name = normalize(app.name)
         return homebrewPackages.first { $0.kind == .cask && (normalize($0.displayName) == name || normalize($0.token) == name) }
     }

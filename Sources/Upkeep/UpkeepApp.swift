@@ -17,7 +17,7 @@ struct UpkeepApp: App {
             ContentView()
                 .environmentObject(store)
                 .environmentObject(settings)
-                .frame(minWidth: 860, minHeight: 560)
+                .frame(minWidth: 1000, minHeight: 560)
         }
         .windowToolbarStyle(.unified(showsTitle: true))
 

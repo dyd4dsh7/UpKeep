@@ -51,6 +51,74 @@ private struct UpkeepRelease: Identifiable {
     let changes: [String]
 
     static let all = [
+        UpkeepRelease(version: "0.15.0", date: "21 July 2026", changes: [
+            "Keeps the Updates workspace selected when opening package or model details.",
+            "Keeps the chosen Homebrew, developer-package, or AI-model update row highlighted.",
+            "Shows the complete package or model detail view beside the Updates list."
+        ]),
+        UpkeepRelease(version: "0.14.9", date: "21 July 2026", changes: [
+            "Removes the raw source URL bar from app details.",
+            "Rebuilds app actions as a responsive grid of large capsule buttons.",
+            "Promotes update and restore while keeping Open App, Finder, source, skip, and ignore visible."
+        ]),
+        UpkeepRelease(version: "0.14.8", date: "21 July 2026", changes: [
+            "Tightens list versions into compact current → new groups while retaining aligned actions.",
+            "Refreshes the open-app header with larger artwork, versions beneath the title, and source below.",
+            "Removes the duplicated version transition from the status card.",
+            "Adds a full-width clickable and copyable source URL."
+        ]),
+        UpkeepRelease(version: "0.14.7", date: "21 July 2026", changes: [
+            "Aligns current versions, arrows, new versions, and actions into fixed list columns.",
+            "Keeps version positions stable by reserving the package and model action column.",
+            "Opens the detected update source, including the correct Homebrew cask page.",
+            "Uses explicit Open Homebrew, Open GitHub, Open Sparkle Feed, and Open App Store labels."
+        ]),
+        UpkeepRelease(version: "0.14.6", date: "21 July 2026", changes: [
+            "Shows update versions as one current → new transition throughout inventory lists.",
+            "Increases shared row typography and vertical spacing for easier scanning.",
+            "Applies a larger minimum Dynamic Type size across the interface while respecting accessibility settings."
+        ]),
+        UpkeepRelease(version: "0.14.5", date: "21 July 2026", changes: [
+            "Removes the redundant Current label from installed inventory rows.",
+            "Sorts apps with detected updates to the top of All Apps, source, and Adoptable lists.",
+            "Sorts outdated Homebrew, developer, and AI model packages above current items by default."
+        ]),
+        UpkeepRelease(version: "0.14.4", date: "21 July 2026", changes: [
+            "Removes separators between list items throughout the app.",
+            "Replaces the app inspector’s Controls menu with visible action buttons.",
+            "Shows only the new version number in update status columns.",
+            "Left-aligns the selected app’s version transition without list-column indentation."
+        ]),
+        UpkeepRelease(version: "0.14.3", date: "21 July 2026", changes: [
+            "Moves the Running state beside the app name in rows and the inspector title.",
+            "Keeps the app shown in the inspector visibly selected and closes stale details when changing workspaces.",
+            "Uses shared identity, status, and version columns across app, package, model, macOS, and history lists.",
+            "Synchronizes package and model detail panes with their selected row."
+        ]),
+        UpkeepRelease(version: "0.14.2", date: "21 July 2026", changes: [
+            "Standardizes app, package, model, macOS, and history rows around the same compact detail hierarchy.",
+            "Replaces technical metadata and oversized badges with one useful source or type line.",
+            "Removes duplicate row menus where the adjacent detail pane already provides the complete control set."
+        ]),
+        UpkeepRelease(version: "0.14.1", date: "21 July 2026", changes: [
+            "Simplifies update rows by removing release-note previews and repeated source badges.",
+            "Keeps package and model rows focused on identity, type or runtime, version, and action.",
+            "Removes the redundant app-row More menu now that the side inspector contains every control."
+        ]),
+        UpkeepRelease(version: "0.14.0", date: "21 July 2026", changes: [
+            "Replaces modal app details with a resizable side inspector beside app and update lists.",
+            "Removes small GroupBox legends and uses clearer status, controls, What’s New, Homebrew, and information sections.",
+            "Closes app details automatically when moving into non-app workspaces."
+        ]),
+        UpkeepRelease(version: "0.13.0", date: "21 July 2026", changes: [
+            "Redesigned app details with a larger native layout, clearer status summary, and structured sections.",
+            "Consolidates update, adoption, exclusion, launch, Finder, and update-source actions in one dialog.",
+            "Shows complete release notes and expanded application and source metadata."
+        ]),
+        UpkeepRelease(version: "0.12.1", date: "21 July 2026", changes: [
+            "Lets you hide scan warnings until the next full or targeted scan.",
+            "Adds Homebrew adoption to app details, including Update & Adopt when a newer cask is available."
+        ]),
         UpkeepRelease(version: "0.12.0", date: "21 July 2026", changes: [
             "Shows live Running indicators in app lists, update rows, app details, and the Adoptable workspace.",
             "Asks before Homebrew changes a running GUI app and quits it gracefully before updating.",
