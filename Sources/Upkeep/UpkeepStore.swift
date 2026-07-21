@@ -245,7 +245,10 @@ final class UpkeepStore: ObservableObject {
         workingIDs.insert(identifier)
         defer { workingIDs.remove(identifier) }
         let managers = manager.map { Set([$0]) } ?? settings.enabledDeveloperManagers
-        let report = await DeveloperPackageClient().scan(enabledManagers: managers)
+        let report = await DeveloperPackageClient().scan(
+            enabledManagers: managers,
+            includePrereleases: settings.includePrereleaseUpdates
+        )
         let warnings = report.warnings.map { ScanWarning(source: .developerPackages, message: $0) }
         scanWarnings = (scanWarnings.filter { $0.source != .developerPackages } + warnings)
         scanWarningsHidden = false
@@ -268,21 +271,28 @@ final class UpkeepStore: ObservableObject {
 
     func loadAvailableVersions(for package: DeveloperPackage, force: Bool = false) async {
         selectedDeveloperVersion = package.latestVersion
-        if !force, let cached = versionCache[package.id] {
+        let cacheKey = developerVersionCacheKey(for: package)
+        if !force, let cached = versionCache[cacheKey] {
             availableDeveloperVersions = cached
             return
         }
         isLoadingDeveloperVersions = true
         availableDeveloperVersions = [package.latestVersion]
         let versions = await DeveloperPackageClient().availableVersions(
-            for: package, includePrereleases: settings.includePrereleaseVersions
+            for: package, includePrereleases: settings.includePrereleaseUpdates
         )
-        versionCache[package.id] = versions
+        versionCache[cacheKey] = versions
         if selectedDeveloperPackageID == package.id {
             availableDeveloperVersions = versions
-            selectedDeveloperVersion = versions.first ?? package.latestVersion
+            selectedDeveloperVersion = versions.contains(package.latestVersion)
+                ? package.latestVersion
+                : (versions.first ?? package.currentVersion)
             isLoadingDeveloperVersions = false
         }
+    }
+
+    private func developerVersionCacheKey(for package: DeveloperPackage) -> String {
+        "\(package.id)|prereleases:\(settings.includePrereleaseUpdates)"
     }
 
     func performUpdate(_ update: AvailableUpdate) async {

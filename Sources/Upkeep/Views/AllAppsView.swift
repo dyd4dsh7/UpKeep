@@ -19,7 +19,9 @@ struct AllAppsView: View {
                     ItemIdentityView(
                         title: app.name,
                         detail: store.source(for: app)?.rawValue ?? "No update source",
-                        isRunning: store.isRunning(app)
+                        isRunning: store.isRunning(app),
+                        prereleaseChannel: update(for: app)?.prereleaseChannel ?? app.prereleaseChannel,
+                        prereleaseIsInstalled: update(for: app)?.prereleaseIsInstalled ?? (app.prereleaseChannel != nil)
                     )
                 } accessories: {
                     versions(for: app)
@@ -70,6 +72,10 @@ struct AllAppsView: View {
         if let update = store.updates.first(where: { $0.app.id == app.id }),
            let exclusion = store.exclusion(for: app, version: update.availableVersion) { return exclusion }
         return store.ignoredExclusion(for: app)
+    }
+
+    private func update(for app: InstalledApp) -> AvailableUpdate? {
+        store.updates.first { $0.app.id == app.id }
     }
 
     @ViewBuilder
@@ -149,6 +155,12 @@ struct AppDetailView: View {
                 }
                 HStack(spacing: 8) {
                     if let source = store.source(for: app) { SourceBadge(source: source) }
+                    if let channel = update?.prereleaseChannel ?? app.prereleaseChannel {
+                        PrereleaseBadge(
+                            channel: channel,
+                            isInstalled: update?.prereleaseIsInstalled ?? (app.prereleaseChannel != nil)
+                        )
+                    }
                     if let exclusion {
                         Label(exclusion.mode.rawValue, systemImage: exclusion.mode == .ignored ? "eye.slash.fill" : "forward.end.fill")
                             .font(.caption2.weight(.semibold))

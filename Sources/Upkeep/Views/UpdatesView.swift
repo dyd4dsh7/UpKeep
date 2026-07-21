@@ -207,7 +207,12 @@ private struct DeveloperUpdateCard: View {
         StandardItemRow {
             PackageManagerIcon(manager: package.manager, size: 36)
         } content: {
-            ItemIdentityView(title: package.name, detail: package.manager.rawValue)
+            ItemIdentityView(
+                title: package.name,
+                detail: package.manager.rawValue,
+                prereleaseChannel: package.prereleaseChannel,
+                prereleaseIsInstalled: package.prereleaseIsInstalled
+            )
         } accessories: {
             VersionTransitionView(current: package.currentVersion, latest: package.latestVersion)
             Button("Update") { Task { await store.updateDeveloperPackage(package) } }
@@ -237,7 +242,7 @@ private struct MacOSUpdateCard: View {
             ItemIdentityView(
                 title: update.title,
                 detail: "macOS" + (update.requiresRestart ? " · Restart required" : ""),
-                tag: update.isBeta ? "Beta" : nil
+                prereleaseChannel: update.prereleaseChannel
             )
         } accessories: {
             Button("Open Software Update") { Task { await store.prepareMacOSUpdate(update) } }
@@ -258,7 +263,9 @@ struct UpdateCard: View {
             ItemIdentityView(
                 title: update.app.name,
                 detail: update.source.rawValue,
-                isRunning: store.isRunning(update.app)
+                isRunning: store.isRunning(update.app),
+                prereleaseChannel: update.prereleaseChannel,
+                prereleaseIsInstalled: update.prereleaseIsInstalled
             )
         } accessories: {
             VersionTransitionView(current: update.app.installedVersion, latest: update.availableVersion)
@@ -297,7 +304,9 @@ private struct HomebrewUpdateCard: View {
         } content: {
             ItemIdentityView(
                 title: package.displayName,
-                detail: package.kind.rawValue + (package.isDependency ? " · Dependency" : "")
+                detail: package.kind.rawValue + (package.isDependency ? " · Dependency" : ""),
+                prereleaseChannel: package.prereleaseChannel,
+                prereleaseIsInstalled: package.prereleaseIsInstalled
             )
         } accessories: {
             VersionTransitionView(current: package.installedVersion, latest: package.currentVersion)
@@ -325,7 +334,8 @@ private struct LocalModelUpdateCard: View {
         } content: {
             ItemIdentityView(
                 title: model.name,
-                detail: model.variant.map { "\(model.runtime.rawValue) · \($0)" } ?? model.runtime.rawValue
+                detail: model.variant.map { "\(model.runtime.rawValue) · \($0)" } ?? model.runtime.rawValue,
+                prereleaseChannel: model.prereleaseChannel
             )
         } accessories: {
             VersionTransitionView(current: model.installedRevision, latest: model.latestRevision)

@@ -10,6 +10,7 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
     let sparkleFeedURL: URL?
     let githubRepository: String?
     let hasAppStoreReceipt: Bool
+    var prereleaseChannel: PrereleaseChannel? { VersionComparator.prereleaseChannel(for: installedVersion) }
 
     init(
         name: String,
@@ -40,6 +41,17 @@ enum UpdateSource: String, Codable, Sendable {
     case github = "GitHub"
 }
 
+enum PrereleaseChannel: String, Codable, Hashable, Sendable {
+    case development = "DEV"
+    case nightly = "NIGHTLY"
+    case snapshot = "SNAPSHOT"
+    case alpha = "ALPHA"
+    case beta = "BETA"
+    case preview = "PREVIEW"
+    case releaseCandidate = "RC"
+    case prerelease = "PRERELEASE"
+}
+
 struct AvailableUpdate: Identifiable, Hashable, Sendable {
     var id: String { app.id }
     let app: InstalledApp
@@ -48,6 +60,33 @@ struct AvailableUpdate: Identifiable, Hashable, Sendable {
     let releaseNotes: String?
     let actionURL: URL?
     let homebrewToken: String?
+    let sourcePrereleaseChannel: PrereleaseChannel?
+
+    init(
+        app: InstalledApp,
+        availableVersion: String,
+        source: UpdateSource,
+        releaseNotes: String?,
+        actionURL: URL?,
+        homebrewToken: String?,
+        sourcePrereleaseChannel: PrereleaseChannel? = nil
+    ) {
+        self.app = app
+        self.availableVersion = availableVersion
+        self.source = source
+        self.releaseNotes = releaseNotes
+        self.actionURL = actionURL
+        self.homebrewToken = homebrewToken
+        self.sourcePrereleaseChannel = sourcePrereleaseChannel
+    }
+
+    var availablePrereleaseChannel: PrereleaseChannel? {
+        sourcePrereleaseChannel ?? VersionComparator.prereleaseChannel(for: availableVersion)
+    }
+    var prereleaseChannel: PrereleaseChannel? {
+        availablePrereleaseChannel ?? app.prereleaseChannel
+    }
+    var prereleaseIsInstalled: Bool { availablePrereleaseChannel == nil && app.prereleaseChannel != nil }
 }
 
 struct ScanReport: Sendable {
@@ -164,6 +203,9 @@ struct LocalLLMModel: Identifiable, Hashable, Sendable {
     let executablePath: String?
     let updateReference: String
     let isOutdated: Bool
+    var prereleaseChannel: PrereleaseChannel? {
+        variant.flatMap { VersionComparator.prereleaseChannel(for: $0) }
+    }
 }
 
 enum HomebrewPackageKind: String, Codable, Sendable {
@@ -184,6 +226,16 @@ struct HomebrewPackage: Identifiable, Hashable, Sendable {
     let isOutdated: Bool
     let isDependency: Bool
     let dependencies: [String]
+    var availablePrereleaseChannel: PrereleaseChannel? {
+        VersionComparator.prereleaseChannel(for: currentVersion)
+    }
+    var prereleaseChannel: PrereleaseChannel? {
+        availablePrereleaseChannel
+            ?? VersionComparator.prereleaseChannel(for: installedVersion)
+    }
+    var prereleaseIsInstalled: Bool {
+        availablePrereleaseChannel == nil && VersionComparator.isPrerelease(installedVersion)
+    }
 }
 
 struct AdoptableApp: Identifiable, Hashable, Sendable {
@@ -191,6 +243,7 @@ struct AdoptableApp: Identifiable, Hashable, Sendable {
     let app: InstalledApp
     let caskToken: String
     let caskVersion: String
+    var prereleaseChannel: PrereleaseChannel? { VersionComparator.prereleaseChannel(for: caskVersion) }
 }
 
 struct MacOSUpdate: Identifiable, Hashable, Sendable {
@@ -202,6 +255,10 @@ struct MacOSUpdate: Identifiable, Hashable, Sendable {
     let requiresRestart: Bool
     let isBeta: Bool
     let isFullInstaller: Bool
+    var prereleaseChannel: PrereleaseChannel? {
+        VersionComparator.prereleaseChannel(for: "\(title) \(label) \(version)")
+            ?? (isBeta ? .beta : nil)
+    }
 }
 
 enum UpdateRecordKind: String, Codable, Sendable {
@@ -269,4 +326,14 @@ struct DeveloperPackage: Identifiable, Hashable, Sendable {
     let manager: DeveloperPackageManager
     let executablePath: String
     var isOutdated: Bool { VersionComparator.isNewer(latestVersion, than: currentVersion) }
+    var availablePrereleaseChannel: PrereleaseChannel? {
+        VersionComparator.prereleaseChannel(for: latestVersion)
+    }
+    var prereleaseChannel: PrereleaseChannel? {
+        availablePrereleaseChannel
+            ?? VersionComparator.prereleaseChannel(for: currentVersion)
+    }
+    var prereleaseIsInstalled: Bool {
+        availablePrereleaseChannel == nil && VersionComparator.isPrerelease(currentVersion)
+    }
 }

@@ -1,7 +1,7 @@
 import Foundation
 
 struct SparkleClient: Sendable {
-    func update(for app: InstalledApp) async throws -> AvailableUpdate? {
+    func update(for app: InstalledApp, includePrereleases: Bool = false) async throws -> AvailableUpdate? {
         guard let feedURL = app.sparkleFeedURL else { return nil }
         do {
             var request = URLRequest(url: feedURL)
@@ -12,10 +12,11 @@ struct SparkleClient: Sendable {
             guard 200..<300 ~= http.statusCode else { throw UpdateSourceError.httpStatus(http.statusCode) }
 
             let parser = SparkleFeedParser(data: data, baseURL: feedURL)
-            guard let item = parser.parse() else {
+            guard let item = parser.parse(includePrereleases: includePrereleases) else {
+                if parser.hasParsedItems { return nil }
                 throw UpdateSourceError.malformedData("No valid release entries were found.")
             }
-            guard VersionComparator.isNewer(item.version, than: app.installedVersion) else { return nil }
+            guard item.isNewer(than: app) else { return nil }
 
             return AvailableUpdate(
                 app: app,
@@ -23,7 +24,8 @@ struct SparkleClient: Sendable {
                 source: .sparkle,
                 releaseNotes: item.releaseNotes,
                 actionURL: item.downloadURL ?? feedURL,
-                homebrewToken: nil
+                homebrewToken: nil,
+                sourcePrereleaseChannel: item.prereleaseChannel
             )
         } catch { throw UpdateSourceError(error) }
     }
@@ -31,8 +33,24 @@ struct SparkleClient: Sendable {
 
 struct SparkleFeedItem: Equatable {
     let version: String
+    let buildVersion: String?
+    let hasMarketingVersion: Bool
+    let sourcePrereleaseChannel: PrereleaseChannel?
     let releaseNotes: String?
     let downloadURL: URL?
+
+    var prereleaseChannel: PrereleaseChannel? {
+        sourcePrereleaseChannel ?? VersionComparator.prereleaseChannel(for: version)
+    }
+
+    func isNewer(than app: InstalledApp) -> Bool {
+        if hasMarketingVersion {
+            let marketingComparison = VersionComparator.compare(version, app.installedVersion)
+            if marketingComparison != .orderedSame { return marketingComparison == .orderedDescending }
+        }
+        guard let buildVersion else { return false }
+        return VersionComparator.isNewer(buildVersion, than: app.buildVersion ?? app.installedVersion)
+    }
 }
 
 final class SparkleFeedParser: NSObject, XMLParserDelegate {
@@ -43,19 +61,34 @@ final class SparkleFeedParser: NSObject, XMLParserDelegate {
     private var currentElement = ""
     private var currentText = ""
     private var version: String?
+    private var buildVersion: String?
+    private var hasMarketingVersion = false
+    private var sourcePrereleaseChannel: PrereleaseChannel?
     private var releaseNotes: String?
     private var downloadURL: URL?
+    private(set) var hasParsedItems = false
 
     init(data: Data, baseURL: URL) {
         self.data = data
         self.baseURL = baseURL
     }
 
-    func parse() -> SparkleFeedItem? {
+    func parse(includePrereleases: Bool = true) -> SparkleFeedItem? {
+        items.removeAll(keepingCapacity: true)
+        hasParsedItems = false
         let parser = XMLParser(data: data)
         parser.delegate = self
         guard parser.parse() else { return nil }
-        return items.max { VersionComparator.compare($0.version, $1.version) == .orderedAscending }
+        return items
+            .filter { includePrereleases || $0.prereleaseChannel == nil }
+            .max { left, right in
+                let versionComparison = VersionComparator.compare(left.version, right.version)
+                if versionComparison != .orderedSame { return versionComparison == .orderedAscending }
+                guard let leftBuild = left.buildVersion, let rightBuild = right.buildVersion else {
+                    return left.buildVersion == nil && right.buildVersion != nil
+                }
+                return VersionComparator.compare(leftBuild, rightBuild) == .orderedAscending
+            }
     }
 
     func parser(
@@ -70,14 +103,21 @@ final class SparkleFeedParser: NSObject, XMLParserDelegate {
         if elementName == "item" {
             inItem = true
             version = nil
+            buildVersion = nil
+            hasMarketingVersion = false
+            sourcePrereleaseChannel = nil
             releaseNotes = nil
             downloadURL = nil
         }
         guard inItem, elementName == "enclosure" else { return }
-        version = attributeDict["sparkle:shortVersionString"]
+        let shortVersion = attributeDict["sparkle:shortVersionString"]
             ?? attributeDict["shortVersionString"]
-            ?? attributeDict["sparkle:version"]
-            ?? attributeDict["version"]
+        buildVersion = attributeDict["sparkle:version"] ?? attributeDict["version"]
+        if let channel = attributeDict["sparkle:channel"] ?? attributeDict["channel"] {
+            sourcePrereleaseChannel = VersionComparator.prereleaseChannel(for: channel)
+        }
+        version = shortVersion ?? buildVersion
+        hasMarketingVersion = shortVersion != nil
         if let urlString = attributeDict["url"] {
             downloadURL = URL(string: urlString, relativeTo: baseURL)?.absoluteURL
         }
@@ -97,12 +137,30 @@ final class SparkleFeedParser: NSObject, XMLParserDelegate {
         let qualified = qName ?? elementName
         let text = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
         if qualified == "sparkle:shortVersionString" || elementName == "shortVersionString" {
-            if !text.isEmpty { version = text }
+            if !text.isEmpty {
+                version = text
+                hasMarketingVersion = true
+            }
+        } else if qualified == "sparkle:version" || elementName == "version" {
+            if !text.isEmpty {
+                buildVersion = text
+                if version == nil { version = text }
+            }
+        } else if qualified == "sparkle:channel" || elementName == "channel" {
+            if !text.isEmpty { sourcePrereleaseChannel = VersionComparator.prereleaseChannel(for: text) }
         } else if elementName == "description" {
             releaseNotes = text.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
         } else if elementName == "item" {
             if let version {
-                items.append(SparkleFeedItem(version: version, releaseNotes: releaseNotes, downloadURL: downloadURL))
+                items.append(SparkleFeedItem(
+                    version: version,
+                    buildVersion: buildVersion,
+                    hasMarketingVersion: hasMarketingVersion,
+                    sourcePrereleaseChannel: sourcePrereleaseChannel,
+                    releaseNotes: releaseNotes,
+                    downloadURL: downloadURL
+                ))
+                hasParsedItems = true
             }
             inItem = false
         }

@@ -8,7 +8,10 @@ struct DeveloperPackageClient: Sendable {
         let failedManagers: Set<DeveloperPackageManager>
     }
 
-    func scan(enabledManagers: Set<DeveloperPackageManager> = Set(DeveloperPackageManager.allCases)) async -> Report {
+    func scan(
+        enabledManagers: Set<DeveloperPackageManager> = Set(DeveloperPackageManager.allCases),
+        includePrereleases: Bool = false
+    ) async -> Report {
         var tools: [(DeveloperPackageManager, String)] = []
         if enabledManagers.contains(.npm), let npm = executable(named: "npm", extra: nvmExecutables(named: "npm")) { tools.append((.npm, npm)) }
         if enabledManagers.contains(.pnpm), let pnpm = executable(named: "pnpm", extra: nvmExecutables(named: "pnpm")) { tools.append((.pnpm, pnpm)) }
@@ -32,10 +35,13 @@ struct DeveloperPackageClient: Sendable {
             for await result in group { values.append(result) }
             return values
         }
-        let packages = results.flatMap(\.packages).sorted {
+        let stablePackages = results.flatMap(\.packages).sorted {
                 if $0.manager != $1.manager { return $0.manager.rawValue < $1.manager.rawValue }
                 return $0.name.localizedStandardCompare($1.name) == .orderedAscending
         }
+        let packages = includePrereleases
+            ? await includingPrereleaseUpdates(in: stablePackages)
+            : stablePackages
         return Report(
             packages: packages,
             installedManagers: tools.map(\.0),
@@ -44,12 +50,45 @@ struct DeveloperPackageClient: Sendable {
         )
     }
 
+    private func includingPrereleaseUpdates(in packages: [DeveloperPackage]) async -> [DeveloperPackage] {
+        var enriched: [DeveloperPackage] = []
+        // Keep registry traffic bounded; enabling prereleases can otherwise launch hundreds of commands at once.
+        for start in stride(from: 0, to: packages.count, by: 6) {
+            let batch = Array(packages[start..<min(start + 6, packages.count)])
+            let values = await withTaskGroup(of: DeveloperPackage.self) { group in
+                for package in batch {
+                    group.addTask {
+                        let versions = await availableVersions(for: package, includePrereleases: true)
+                        let latest = versions.first(where: {
+                            VersionComparator.isNewer($0, than: package.currentVersion)
+                        }) ?? package.latestVersion
+                        return DeveloperPackage(
+                            name: package.name,
+                            currentVersion: package.currentVersion,
+                            latestVersion: latest,
+                            manager: package.manager,
+                            executablePath: package.executablePath
+                        )
+                    }
+                }
+                var output: [DeveloperPackage] = []
+                for await package in group { output.append(package) }
+                return output
+            }
+            enriched.append(contentsOf: values)
+        }
+        return enriched.sorted {
+            if $0.manager != $1.manager { return $0.manager.rawValue < $1.manager.rawValue }
+            return $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+    }
+
     func availableVersions(for package: DeveloperPackage, includePrereleases: Bool) async -> [String] {
         let discovered: [String]
         switch package.manager {
         case .npm, .pnpm:
             discovered = await Task.detached(priority: .utility) {
-                let result = capture(URL(fileURLWithPath: package.executablePath), ["view", package.name, "versions", "--json"])
+                let result = captureDeveloperCommand(URL(fileURLWithPath: package.executablePath), ["view", package.name, "versions", "--json"])
                 guard result.status == 0 else { return [] }
                 if let values = try? JSONDecoder().decode([String].self, from: result.data) { return values }
                 if let value = try? JSONDecoder().decode(String.self, from: result.data) { return [value] }
@@ -58,11 +97,11 @@ struct DeveloperPackageClient: Sendable {
         case .python:
             discovered = await Task.detached(priority: .utility) {
                 let executable = URL(fileURLWithPath: package.executablePath)
-                let result = capture(executable, ["-m", "pip", "index", "versions", package.name, "--json", "--disable-pip-version-check"])
+                let result = captureDeveloperCommand(executable, ["-m", "pip", "index", "versions", package.name, "--json", "--disable-pip-version-check"])
                 if result.status == 0,
                    let object = try? JSONSerialization.jsonObject(with: result.data) as? [String: Any],
                    let versions = object["versions"] as? [String] { return versions }
-                let fallback = capture(executable, ["-m", "pip", "index", "versions", package.name, "--disable-pip-version-check"])
+                let fallback = captureDeveloperCommand(executable, ["-m", "pip", "index", "versions", package.name, "--disable-pip-version-check"])
                 let output = String(data: fallback.data, encoding: .utf8) ?? ""
                 guard let line = output.split(separator: "\n").first(where: { $0.localizedCaseInsensitiveContains("Available versions:") }),
                       let colon = line.firstIndex(of: ":") else { return [] }
@@ -70,7 +109,7 @@ struct DeveloperPackageClient: Sendable {
             }.value
         case .rubyGems:
             discovered = await Task.detached(priority: .utility) {
-                let result = capture(URL(fileURLWithPath: package.executablePath), ["list", "--remote", "--all", "--exact", package.name])
+                let result = captureDeveloperCommand(URL(fileURLWithPath: package.executablePath), ["list", "--remote", "--all", "--exact", package.name])
                 let output = String(data: result.data, encoding: .utf8) ?? ""
                 guard let open = output.firstIndex(of: "("), let close = output[open...].firstIndex(of: ")") else { return [] }
                 return output[output.index(after: open)..<close].split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
@@ -84,9 +123,11 @@ struct DeveloperPackageClient: Sendable {
             discovered = response.versions.filter { !$0.yanked }.map(\.num)
         }
 
-        let allowed = includePrereleases ? discovered : discovered.filter { !isPrerelease($0) }
-        let unique = Set(allowed + [package.latestVersion, package.currentVersion])
-        return unique.sorted { VersionComparator.compare($0, $1) == .orderedDescending }
+        return selectableDeveloperPackageVersions(
+            discovered: discovered,
+            package: package,
+            includePrereleases: includePrereleases
+        )
     }
 
     func install(_ package: DeveloperPackage, version: String) async throws {
@@ -100,7 +141,7 @@ struct DeveloperPackageClient: Sendable {
         case .cargo: arguments = ["install", package.name, "--version", version, "--force"]
         }
         try await Task.detached(priority: .userInitiated) {
-            let result = capture(executable, arguments)
+            let result = captureDeveloperCommand(executable, arguments)
             guard result.status == 0 else {
                 throw ClientError.failed(String(data: result.data, encoding: .utf8) ?? "Package update failed")
             }
@@ -113,6 +154,22 @@ struct DeveloperPackageClient: Sendable {
     }
 }
 
+func selectableDeveloperPackageVersions(
+    discovered: [String],
+    package: DeveloperPackage,
+    includePrereleases: Bool
+) -> [String] {
+    var allowed = includePrereleases
+        ? discovered
+        : discovered.filter { !VersionComparator.isPrerelease($0) }
+    // Always preserve the installed version so an existing prerelease remains visible and identifiable.
+    allowed.append(package.currentVersion)
+    if includePrereleases || !VersionComparator.isPrerelease(package.latestVersion) {
+        allowed.append(package.latestVersion)
+    }
+    return Set(allowed).sorted(by: VersionComparator.newestFirst)
+}
+
 private struct ManagerScanResult: Sendable {
     let manager: DeveloperPackageManager
     let packages: [DeveloperPackage]
@@ -120,11 +177,11 @@ private struct ManagerScanResult: Sendable {
 }
 
 private func scanNPM(_ path: String) -> ManagerScanResult {
-    let installedResult = capture(URL(fileURLWithPath: path), ["ls", "-g", "--depth=0", "--json"])
+    let installedResult = captureDeveloperCommand(URL(fileURLWithPath: path), ["ls", "-g", "--depth=0", "--json"])
     guard let installed = try? JSONDecoder().decode(NPMList.self, from: installedResult.data).dependencies else {
         return failedManagerScan(.npm, command: "inventory", result: installedResult)
     }
-    let outdatedResult = capture(URL(fileURLWithPath: path), ["outdated", "-g", "--json"])
+    let outdatedResult = captureDeveloperCommand(URL(fileURLWithPath: path), ["outdated", "-g", "--json"])
     let outdated = try? JSONDecoder().decode([String: NPMOutdated].self, from: outdatedResult.data)
     let packages = installed.map { name, entry in
         DeveloperPackage(name: name, currentVersion: entry.version, latestVersion: outdated?[name]?.latest ?? entry.version, manager: .npm, executablePath: path)
@@ -138,7 +195,7 @@ private func scanNPM(_ path: String) -> ManagerScanResult {
 }
 
 private func scanPNPM(_ path: String) -> ManagerScanResult {
-    let installedResult = capture(URL(fileURLWithPath: path), ["list", "-g", "--depth=0", "--json"])
+    let installedResult = captureDeveloperCommand(URL(fileURLWithPath: path), ["list", "-g", "--depth=0", "--json"])
     guard let roots = try? JSONDecoder().decode([PNPMRoot].self, from: installedResult.data) else {
         return failedManagerScan(.pnpm, command: "inventory", result: installedResult)
     }
@@ -146,7 +203,7 @@ private func scanPNPM(_ path: String) -> ManagerScanResult {
         values.merge(root.dependencies ?? [:]) { current, _ in current }
         values.merge(root.devDependencies ?? [:]) { current, _ in current }
     }
-    let outdatedResult = capture(URL(fileURLWithPath: path), ["outdated", "-g", "--format", "json"])
+    let outdatedResult = captureDeveloperCommand(URL(fileURLWithPath: path), ["outdated", "-g", "--format", "json"])
     let outdated = try? JSONDecoder().decode([String: NPMOutdated].self, from: outdatedResult.data)
     let packages = installed.map { name, entry in
         DeveloperPackage(name: name, currentVersion: entry.version, latestVersion: outdated?[name]?.latest ?? entry.version, manager: .pnpm, executablePath: path)
@@ -160,11 +217,11 @@ private func scanPNPM(_ path: String) -> ManagerScanResult {
 }
 
 private func scanPython(_ path: String) -> ManagerScanResult {
-    let installedResult = capture(URL(fileURLWithPath: path), ["-m", "pip", "list", "--format=json", "--disable-pip-version-check"])
+    let installedResult = captureDeveloperCommand(URL(fileURLWithPath: path), ["-m", "pip", "list", "--format=json", "--disable-pip-version-check"])
     guard let installed = try? JSONDecoder().decode([PipInstalled].self, from: installedResult.data) else {
         return failedManagerScan(.python, command: "inventory", result: installedResult)
     }
-    let outdatedResult = capture(URL(fileURLWithPath: path), ["-m", "pip", "list", "--outdated", "--format=json", "--disable-pip-version-check"])
+    let outdatedResult = captureDeveloperCommand(URL(fileURLWithPath: path), ["-m", "pip", "list", "--outdated", "--format=json", "--disable-pip-version-check"])
     let outdatedValues = try? JSONDecoder().decode([PipOutdated].self, from: outdatedResult.data)
     let outdated = Dictionary(uniqueKeysWithValues: (outdatedValues ?? []).map { ($0.name.lowercased(), $0.latestVersion) })
     let packages = installed.map {
@@ -178,10 +235,10 @@ private func scanPython(_ path: String) -> ManagerScanResult {
 }
 
 private func scanGems(_ path: String) -> ManagerScanResult {
-    let installedResult = capture(URL(fileURLWithPath: path), ["list", "--local"])
+    let installedResult = captureDeveloperCommand(URL(fileURLWithPath: path), ["list", "--local"])
     guard installedResult.status == 0 else { return failedManagerScan(.rubyGems, command: "inventory", result: installedResult) }
     let installedOutput = String(data: installedResult.data, encoding: .utf8) ?? ""
-    let outdatedResult = capture(URL(fileURLWithPath: path), ["outdated"])
+    let outdatedResult = captureDeveloperCommand(URL(fileURLWithPath: path), ["outdated"])
     let outdatedOutput = String(data: outdatedResult.data, encoding: .utf8) ?? ""
     let outdated = parseGemOutdated(outdatedOutput)
     let regex = try? NSRegularExpression(pattern: #"^(.+?)\s+\((?:default:\s*)?([^,\)]+)"#, options: .anchorsMatchLines)
@@ -212,7 +269,7 @@ private func parseGemOutdated(_ output: String) -> [String: String] {
 }
 
 private func scanCargo(_ path: String) async -> ManagerScanResult {
-    let installedResult = capture(URL(fileURLWithPath: path), ["install", "--list"])
+    let installedResult = captureDeveloperCommand(URL(fileURLWithPath: path), ["install", "--list"])
     guard installedResult.status == 0 else { return failedManagerScan(.cargo, command: "inventory", result: installedResult) }
     let output = String(data: installedResult.data, encoding: .utf8) ?? ""
     let installed = output.split(separator: "\n").compactMap { line -> (String, String)? in
@@ -272,13 +329,54 @@ private func nvmExecutables(named name: String) -> [String] {
         .map { $0.appendingPathComponent("bin/\(name)").path }
 }
 
-private func capture(_ executable: URL, _ arguments: [String]) -> (data: Data, status: Int32) {
+func captureDeveloperCommand(
+    _ executable: URL,
+    _ arguments: [String],
+    baseEnvironment: [String: String] = ProcessInfo.processInfo.environment
+) -> (data: Data, status: Int32) {
     let process = Process(); let output = Pipe()
     process.executableURL = executable; process.arguments = arguments
+    process.environment = developerCommandEnvironment(for: executable, base: baseEnvironment)
     process.standardOutput = output; process.standardError = output
-    do { try process.run() } catch { return (Data(), -1) }
+    do { try process.run() }
+    catch { return (Data(error.localizedDescription.utf8), -1) }
     let data = output.fileHandleForReading.readDataToEndOfFile(); process.waitUntilExit()
     return (data, process.terminationStatus)
+}
+
+func developerCommandEnvironment(
+    for executable: URL,
+    base: [String: String] = ProcessInfo.processInfo.environment
+) -> [String: String] {
+    var environment = base
+    let executableDirectory = executable.deletingLastPathComponent().standardizedFileURL.path
+    let homeDirectory = environment["HOME"] ?? FileManager.default.homeDirectoryForCurrentUser.path
+    let pnpmHome = environment["PNPM_HOME"] ?? "\(homeDirectory)/Library/pnpm"
+    let fallbackDirectories = [
+        executableDirectory,
+        "\(pnpmHome)/bin",
+        pnpmHome,
+        "\(homeDirectory)/.local/share/pnpm",
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin"
+    ]
+    let existingDirectories = (environment["PATH"] ?? "")
+        .split(separator: ":")
+        .map(String.init)
+    var seen = Set<String>()
+    environment["PATH"] = (fallbackDirectories + existingDirectories)
+        .filter { !$0.isEmpty && seen.insert($0).inserted }
+        .joined(separator: ":")
+
+    if executableDirectory.contains("/.nvm/versions/node/") {
+        environment["NVM_BIN"] = executableDirectory
+    }
+    environment["PNPM_HOME"] = pnpmHome
+    return environment
 }
 
 private struct NPMList: Decodable { let dependencies: [String: NPMInstalled] }
@@ -301,11 +399,6 @@ private struct CrateResponse: Decodable {
 private struct CrateVersionsResponse: Decodable {
     let versions: [Version]
     struct Version: Decodable { let num: String; let yanked: Bool }
-}
-
-private func isPrerelease(_ version: String) -> Bool {
-    let value = version.lowercased()
-    return ["alpha", "beta", "-rc", ".rc", "-pre", ".dev", "snapshot"].contains { value.contains($0) }
 }
 
 private func registryData(from url: URL) async -> Data? {

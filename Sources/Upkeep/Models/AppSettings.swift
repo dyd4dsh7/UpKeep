@@ -48,7 +48,7 @@ struct ScanSettings: Sendable {
     let checkGitHub: Bool
     let checkMacOS: Bool
     let checkLocalModels: Bool
-    let includeBetas: Bool
+    let includePrereleaseUpdates: Bool
     let enabledDeveloperManagers: Set<DeveloperPackageManager>
 }
 
@@ -62,17 +62,17 @@ final class AppSettings: ObservableObject {
     @Published var showMenuBarCount: Bool { didSet { save(showMenuBarCount, "showMenuBarCount") } }
     @Published var notificationsEnabled: Bool { didSet { save(notificationsEnabled, "notificationsEnabled") } }
     @Published var showCurrentDeveloperPackages: Bool { didSet { save(showCurrentDeveloperPackages, "showCurrentDeveloperPackages") } }
-    @Published var includePrereleaseVersions: Bool { didSet { save(includePrereleaseVersions, "includePrereleaseVersions") } }
     @Published var checkAppStore: Bool { didSet { save(checkAppStore, "checkAppStore") } }
     @Published var checkSparkle: Bool { didSet { save(checkSparkle, "checkSparkle") } }
     @Published var checkHomebrew: Bool { didSet { save(checkHomebrew, "checkHomebrew") } }
     @Published var checkGitHub: Bool { didSet { save(checkGitHub, "checkGitHub") } }
     @Published var checkMacOS: Bool { didSet { save(checkMacOS, "checkMacOS") } }
     @Published var checkLocalModels: Bool { didSet { save(checkLocalModels, "checkLocalModels") } }
-    @Published var includeBetas: Bool { didSet { save(includeBetas, "includeBetas") } }
+    @Published var includePrereleaseUpdates: Bool { didSet { save(includePrereleaseUpdates, "includePrereleaseUpdates") } }
     @Published private(set) var enabledDeveloperManagers: Set<DeveloperPackageManager>
     @Published private(set) var updateExclusions: [UpdateExclusion]
     @Published var selectedSection: SettingsSection = .general
+    @Published var confirmingPrereleaseUpdates = false
 
     init() {
         defaults.register(defaults: [
@@ -82,14 +82,13 @@ final class AppSettings: ObservableObject {
             "showMenuBarCount": true,
             "notificationsEnabled": false,
             "showCurrentDeveloperPackages": true,
-            "includePrereleaseVersions": false,
             "checkAppStore": true,
             "checkSparkle": true,
             "checkHomebrew": true,
             "checkGitHub": true,
             "checkMacOS": true,
             "checkLocalModels": true,
-            "includeBetas": true
+            "includePrereleaseUpdates": false
         ])
         if !defaults.bool(forKey: "didRestoreSwiftUIMenuBarItem") {
             defaults.set(true, forKey: "showMenuBarItem")
@@ -101,14 +100,13 @@ final class AppSettings: ObservableObject {
         showMenuBarCount = defaults.bool(forKey: "showMenuBarCount")
         notificationsEnabled = defaults.bool(forKey: "notificationsEnabled")
         showCurrentDeveloperPackages = defaults.bool(forKey: "showCurrentDeveloperPackages")
-        includePrereleaseVersions = defaults.bool(forKey: "includePrereleaseVersions")
         checkAppStore = defaults.bool(forKey: "checkAppStore")
         checkSparkle = defaults.bool(forKey: "checkSparkle")
         checkHomebrew = defaults.bool(forKey: "checkHomebrew")
         checkGitHub = defaults.bool(forKey: "checkGitHub")
         checkMacOS = defaults.bool(forKey: "checkMacOS")
         checkLocalModels = defaults.bool(forKey: "checkLocalModels")
-        includeBetas = defaults.bool(forKey: "includeBetas")
+        includePrereleaseUpdates = defaults.bool(forKey: "includePrereleaseUpdates")
         let disabled = Set(defaults.stringArray(forKey: "disabledDeveloperManagers") ?? [])
         enabledDeveloperManagers = Set(DeveloperPackageManager.allCases.filter { !disabled.contains($0.rawValue) })
         updateExclusions = (defaults.data(forKey: "updateExclusions")
@@ -180,7 +178,7 @@ final class AppSettings: ObservableObject {
             checkAppStore: checkAppStore, checkSparkle: checkSparkle,
             checkHomebrew: checkHomebrew, checkGitHub: checkGitHub,
             checkMacOS: checkMacOS, checkLocalModels: checkLocalModels,
-            includeBetas: includeBetas,
+            includePrereleaseUpdates: includePrereleaseUpdates,
             enabledDeveloperManagers: enabledDeveloperManagers
         )
     }

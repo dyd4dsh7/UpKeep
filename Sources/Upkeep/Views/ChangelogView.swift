@@ -51,6 +51,13 @@ private struct UpkeepRelease: Identifiable {
     let changes: [String]
 
     static let all = [
+        UpkeepRelease(version: "0.16.0", date: "21 July 2026", changes: [
+            "Adds opt-in prerelease updates for apps, packages, and macOS, with a warning before enabling unstable releases.",
+            "Labels Alpha, Beta, RC, Preview, Nightly, Dev, and other prereleases throughout update and inventory lists.",
+            "Keeps installed prereleases identifiable while hiding other prerelease and platform-specific package versions when the setting is off.",
+            "Improves GitHub and Sparkle channel detection and makes semantic, calendar, and package-version ordering deterministic.",
+            "Fixes npm and pnpm discovery and commands when Upkeep launches outside a terminal, including NVM and pnpm paths."
+        ]),
         UpkeepRelease(version: "0.15.0", date: "21 July 2026", changes: [
             "Keeps the Updates workspace selected when opening package or model details.",
             "Keeps the chosen Homebrew, developer-package, or AI-model update row highlighted.",

@@ -19,6 +19,15 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(width: 780, height: 540)
+        .alert("Include prerelease updates?", isPresented: $settings.confirmingPrereleaseUpdates) {
+            Button("Cancel", role: .cancel) {}
+            Button("Include Prereleases", role: .destructive) {
+                settings.includePrereleaseUpdates = true
+                Task { await store.scan() }
+            }
+        } message: {
+            Text("Alpha, beta, preview, release-candidate, nightly, and other non-stable software may be unreliable, incompatible, or cause data loss. UpKeep will check every enabled app and package source for these releases.")
+        }
     }
 
     @ViewBuilder private var selectedContent: some View {
@@ -66,10 +75,28 @@ struct SettingsView: View {
                 Text("Checks model files directly against upstream registries. Ollama and LM Studio can remain closed.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section("Prerelease Updates") {
+                Toggle("Include prerelease updates for all apps and packages", isOn: Binding(
+                    get: { settings.includePrereleaseUpdates },
+                    set: { enabled in
+                        if enabled { settings.confirmingPrereleaseUpdates = true }
+                        else {
+                            settings.includePrereleaseUpdates = false
+                            Task { await store.scan() }
+                        }
+                    }
+                ))
+                Label(
+                    "Warning: prerelease software may be unstable, incompatible, or unsafe for important data.",
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.orange)
+                Text("Applies to Sparkle, GitHub, Homebrew, developer packages, and macOS updates. Sources such as the Mac App Store only expose releases available through their public update service.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("macOS") {
                 sourceToggle("Software Update and full installers", "apple.logo", $settings.checkMacOS)
-                Toggle("Include beta and release-candidate updates", isOn: $settings.includeBetas)
-                    .disabled(!settings.checkMacOS)
             }
         }
         .formStyle(.grouped)
@@ -129,7 +156,8 @@ struct SettingsView: View {
             }
             Section("Display and Versions") {
                 Toggle("Show packages that are already current", isOn: $settings.showCurrentDeveloperPackages)
-                Toggle("Include prerelease versions in version menus", isOn: $settings.includePrereleaseVersions)
+                Text("Prerelease package versions are controlled by the global option in Sources.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

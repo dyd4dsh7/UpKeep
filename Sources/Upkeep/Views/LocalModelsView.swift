@@ -73,7 +73,8 @@ private struct LocalModelRow: View {
         } content: {
             ItemIdentityView(
                 title: model.name,
-                detail: model.variant.map { "\(model.runtime.rawValue) · \($0)" } ?? model.runtime.rawValue
+                detail: model.variant.map { "\(model.runtime.rawValue) · \($0)" } ?? model.runtime.rawValue,
+                prereleaseChannel: model.prereleaseChannel
             )
         } accessories: {
             if let exclusion = store.exclusion(for: model) {

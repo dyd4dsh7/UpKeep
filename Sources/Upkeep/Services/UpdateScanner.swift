@@ -3,9 +3,14 @@ import Foundation
 struct UpdateScanner: Sendable {
     func scan(settings: ScanSettings) async -> ScanReport {
         async let installedApps = AppDiscovery.discover()
-        async let brewInventory = scopedResult(enabled: settings.checkHomebrew) { try await HomebrewClient().inventory() }
+        async let brewInventory = scopedResult(enabled: settings.checkHomebrew) {
+            try await HomebrewClient().inventory(includePrereleases: settings.includePrereleaseUpdates)
+        }
         async let macOSReport = settings.checkMacOS ? MacOSUpdateClient().scan() : MacOSUpdateClient.Report.empty
-        async let developerReport = DeveloperPackageClient().scan(enabledManagers: settings.enabledDeveloperManagers)
+        async let developerReport = DeveloperPackageClient().scan(
+            enabledManagers: settings.enabledDeveloperManagers,
+            includePrereleases: settings.includePrereleaseUpdates
+        )
         async let localModels = settings.checkLocalModels ? LocalModelClient().scan() : LocalModelClient.Report.empty
         let (apps, brewResult, systemReport, devReport, modelReport) = await (installedApps, brewInventory, macOSReport, developerReport, localModels)
 
@@ -64,7 +69,9 @@ struct UpdateScanner: Sendable {
             homebrewCatalogStatus = .failed
         } else {
             do {
-                adoptable = try await HomebrewClient().adoptableApps(from: apps, excluding: packages)
+                adoptable = try await HomebrewClient().adoptableApps(from: apps, excluding: packages).filter {
+                    settings.includePrereleaseUpdates || !VersionComparator.isPrerelease($0.caskVersion)
+                }
                 homebrewCatalogStatus = .succeeded
             } catch {
                 adoptable = []
@@ -110,7 +117,7 @@ struct UpdateScanner: Sendable {
             failedLocalModelRuntimes: modelReport.failedRuntimes,
             homebrewPackages: packages,
             adoptableApps: adoptable,
-            macOSUpdates: systemReport.updates.filter { settings.includeBetas || !$0.isBeta },
+            macOSUpdates: systemReport.updates.filter { settings.includePrereleaseUpdates || !$0.isBeta },
             developerPackages: devReport.packages,
             installedDeveloperManagers: devReport.installedManagers,
             localModels: modelReport.models
@@ -134,14 +141,18 @@ struct UpdateScanner: Sendable {
         }
         if settings.checkSparkle, app.sparkleFeedURL != nil {
             do {
-                if let update = try await SparkleClient().update(for: app) {
+                if let update = try await SparkleClient().update(
+                    for: app, includePrereleases: settings.includePrereleaseUpdates
+                ) {
                     return AppCheckResult(appID: app.id, update: update, warnings: warnings)
                 }
             } catch { warnings.append(scanWarning(.sparkle, error: error, itemName: app.name)) }
         }
         if settings.checkGitHub, app.sparkleFeedURL == nil, app.githubRepository != nil {
             do {
-                if let update = try await GitHubClient().update(for: app) {
+                if let update = try await GitHubClient().update(
+                    for: app, includePrereleases: settings.includePrereleaseUpdates
+                ) {
                     return AppCheckResult(appID: app.id, update: update, warnings: warnings)
                 }
             } catch { warnings.append(scanWarning(.github, error: error, itemName: app.name)) }

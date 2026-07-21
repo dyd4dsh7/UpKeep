@@ -26,7 +26,8 @@ struct AdoptableView: View {
                         ItemIdentityView(
                             title: item.app.name,
                             detail: "Homebrew cask · \(item.caskToken)",
-                            isRunning: store.isRunning(item.app)
+                            isRunning: store.isRunning(item.app),
+                            prereleaseChannel: item.prereleaseChannel
                         )
                     } accessories: {
                         VersionTransitionView(current: item.app.installedVersion, latest: item.caskVersion)

@@ -74,7 +74,12 @@ private struct PackageRow: View {
         StandardItemRow {
             BundledPackageIcon(name: "homebrew", size: 36)
         } content: {
-            ItemIdentityView(title: package.displayName, detail: rowDetail)
+            ItemIdentityView(
+                title: package.displayName,
+                detail: rowDetail,
+                prereleaseChannel: package.prereleaseChannel,
+                prereleaseIsInstalled: package.prereleaseIsInstalled
+            )
         } accessories: {
             packageVersions
             if package.isOutdated && !store.isExcluded(package) {

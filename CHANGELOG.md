@@ -2,6 +2,14 @@
 
 All notable changes to Upkeep are documented here.
 
+## 0.16.0 — 2026-07-21
+
+- Added an opt-in prerelease setting for apps, packages, and macOS updates, with a confirmation warning before enabling potentially unstable releases.
+- Added Alpha, Beta, RC, Preview, Nightly, Dev, and Prerelease badges throughout update and inventory lists, including recognition of an already-installed prerelease when the setting is off.
+- Filtered prerelease and platform-specific package builds from version menus unless prereleases are enabled, while preserving the installed version for recovery or replacement.
+- Improved GitHub and Sparkle channel detection, semantic and calendar version ordering, and deterministic package-version sorting.
+- Fixed npm and pnpm discovery and commands when Upkeep launches outside a terminal, including NVM and pnpm environment paths.
+
 ## 0.15.0 — 2026-07-21
 
 - Kept the Updates workspace selected when opening Homebrew, developer-package, or AI-model update details.

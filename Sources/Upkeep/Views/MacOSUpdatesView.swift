@@ -59,7 +59,7 @@ struct MacOSUpdatesView: View {
             ItemIdentityView(
                 title: update.title,
                 detail: (update.isFullInstaller ? "Full installer" : "System update") + (update.size.map { " · \($0)" } ?? ""),
-                tag: update.isBeta ? "Beta" : nil
+                prereleaseChannel: update.prereleaseChannel
             )
         } accessories: {
             ItemStatusView(

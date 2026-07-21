@@ -1,7 +1,7 @@
 import Foundation
 
 struct HomebrewClient: Sendable {
-    func inventory() async throws -> [HomebrewPackage] {
+    func inventory(includePrereleases: Bool = false) async throws -> [HomebrewPackage] {
         guard let brew = Self.brewURL else { return [] }
         return try await Task.detached(priority: .utility) {
             let data = try await runWithRetry(brew, ["info", "--json=v2", "--installed"])
@@ -20,7 +20,7 @@ struct HomebrewClient: Sendable {
                     installedVersion: installed.version,
                     currentVersion: formula.versions.stable ?? installed.version,
                     kind: .formula,
-                    isOutdated: formula.outdated,
+                    isOutdated: formula.outdated && (includePrereleases || !VersionComparator.isPrerelease(formula.versions.stable ?? installed.version)),
                     isDependency: !installed.installedOnRequest,
                     dependencies: formula.dependencies
                 )
@@ -36,7 +36,7 @@ struct HomebrewClient: Sendable {
                     installedVersion: installed,
                     currentVersion: cask.version,
                     kind: .cask,
-                    isOutdated: cask.outdated,
+                    isOutdated: cask.outdated && (includePrereleases || !VersionComparator.isPrerelease(cask.version)),
                     isDependency: false,
                     dependencies: []
                 )

@@ -40,6 +40,8 @@ struct ItemIdentityView: View {
     let detail: String
     var isRunning = false
     var tag: String?
+    var prereleaseChannel: PrereleaseChannel?
+    var prereleaseIsInstalled = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -51,6 +53,9 @@ struct ItemIdentityView: View {
                         .font(.caption.weight(.bold))
                         .foregroundStyle(.secondary)
                 }
+                if let prereleaseChannel {
+                    PrereleaseBadge(channel: prereleaseChannel, isInstalled: prereleaseIsInstalled)
+                }
             }
             Text(detail)
                 .font(.callout)
@@ -58,6 +63,32 @@ struct ItemIdentityView: View {
                 .lineLimit(1)
         }
     }
+}
+
+struct PrereleaseBadge: View {
+    let channel: PrereleaseChannel
+    var isInstalled = false
+
+    var body: some View {
+        Text(isInstalled ? "INSTALLED \(channel.rawValue)" : channel.rawValue)
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(foregroundColor)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(backgroundColor, in: Capsule())
+            .accessibilityLabel(isInstalled
+                ? "Installed \(channel.rawValue) prerelease"
+                : "\(channel.rawValue) prerelease")
+    }
+
+    private var foregroundColor: Color {
+        switch channel {
+        case .alpha, .development, .nightly, .snapshot: .orange
+        case .beta, .preview, .releaseCandidate, .prerelease: .purple
+        }
+    }
+
+    private var backgroundColor: Color { foregroundColor.opacity(0.13) }
 }
 
 struct ItemStatusView: View {

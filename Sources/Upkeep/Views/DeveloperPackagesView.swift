@@ -122,7 +122,12 @@ private struct DeveloperPackageRow: View {
         StandardItemRow {
             PackageManagerIcon(manager: package.manager)
         } content: {
-            ItemIdentityView(title: package.name, detail: rowDetail)
+            ItemIdentityView(
+                title: package.name,
+                detail: rowDetail,
+                prereleaseChannel: package.prereleaseChannel,
+                prereleaseIsInstalled: package.prereleaseIsInstalled
+            )
         } accessories: {
             packageVersions
             if package.isOutdated && !store.isExcluded(package) {
@@ -218,7 +223,7 @@ private struct DeveloperPackageDetailContent: View {
                     HStack {
                         Picker("Version", selection: $store.selectedDeveloperVersion) {
                             ForEach(store.availableDeveloperVersions, id: \.self) { version in
-                                Text(version == package.latestVersion ? "\(version) — Latest" : version).tag(version)
+                                Text(versionMenuLabel(version, package: package)).tag(version)
                             }
                         }
                         .frame(maxWidth: 260)
@@ -233,9 +238,19 @@ private struct DeveloperPackageDetailContent: View {
                 }
             }.padding(26).frame(maxWidth: .infinity, alignment: .leading)
         }
-        .task(id: package.id + String(store.settings.includePrereleaseVersions)) {
-            await store.loadAvailableVersions(for: package, force: store.settings.includePrereleaseVersions)
+        .task(id: package.id + String(store.settings.includePrereleaseUpdates)) {
+            await store.loadAvailableVersions(for: package)
         }
+    }
+
+    private func versionMenuLabel(_ version: String, package: DeveloperPackage) -> String {
+        var labels: [String] = []
+        if version == package.latestVersion { labels.append("Latest") }
+        if version == package.currentVersion { labels.append("Installed") }
+        if let channel = VersionComparator.prereleaseChannel(for: version) {
+            labels.append(channel.rawValue)
+        }
+        return labels.isEmpty ? version : "\(version) — \(labels.joined(separator: " · "))"
     }
 
     private var packageURL: URL? {
