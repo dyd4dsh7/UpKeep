@@ -31,14 +31,16 @@ struct UpdateScanner: Sendable {
         }
 
         var updates: [AvailableUpdate] = []
-        var failedAppIDs = Set<String>()
+        var failedAppSources: [String: Set<UpdateSource>] = [:]
         await withTaskGroup(of: AppCheckResult.self) { group in
             for app in apps {
                 group.addTask { await checkApp(app, settings: settings) }
             }
             for await check in group {
-                if let update = check.update { updates.append(update) }
-                if !check.warnings.isEmpty { failedAppIDs.insert(check.appID) }
+                updates.append(contentsOf: check.updates)
+                if !check.failedSources.isEmpty {
+                    failedAppSources[check.appID] = check.failedSources
+                }
                 warnings.append(contentsOf: check.warnings)
             }
         }
@@ -46,9 +48,7 @@ struct UpdateScanner: Sendable {
         let normalizedApps = Dictionary(grouping: apps) { normalize($0.name) }
         for package in packages where package.kind == .cask && package.isOutdated {
             let caskName = normalize(package.displayName)
-            guard let app = normalizedApps[caskName]?.first ?? normalizedApps[normalize(package.token)]?.first,
-                  !updates.contains(where: { $0.app.id == app.id })
-            else { continue }
+            guard let app = normalizedApps[caskName]?.first ?? normalizedApps[normalize(package.token)]?.first else { continue }
             updates.append(AvailableUpdate(
                 app: app,
                 availableVersion: package.currentVersion,
@@ -80,16 +80,20 @@ struct UpdateScanner: Sendable {
             }
         }
         for item in adoptable where caskIsNewer(item.caskVersion, than: item.app) {
-            guard !updates.contains(where: { $0.app.id == item.app.id }) else { continue }
             updates.append(AvailableUpdate(
                 app: item.app,
                 availableVersion: item.caskVersion,
                 source: .homebrew,
                 releaseNotes: "A newer version is available from Homebrew. Updating will move this app under Homebrew management.",
                 actionURL: nil,
-                homebrewToken: item.caskToken
+                homebrewToken: item.caskToken,
+                requiresHomebrewAdoption: true
             ))
         }
+
+        let consolidatedUpdates = Dictionary(grouping: updates, by: { $0.app.id })
+            .values
+            .compactMap(AvailableUpdate.merging)
 
         warnings.append(contentsOf: systemReport.warnings.map {
             ScanWarning(source: .macOS, message: $0)
@@ -103,10 +107,10 @@ struct UpdateScanner: Sendable {
 
         return ScanReport(
             apps: apps,
-            updates: updates.sorted { $0.app.name.localizedStandardCompare($1.app.name) == .orderedAscending },
+            updates: consolidatedUpdates.sorted { $0.app.name.localizedStandardCompare($1.app.name) == .orderedAscending },
             checkedAt: Date(),
             warnings: aggregate(warnings),
-            failedAppIDs: failedAppIDs,
+            failedAppSources: failedAppSources,
             homebrewInventoryStatus: homebrewInventoryStatus,
             homebrewCatalogStatus: homebrewCatalogStatus,
             macOSUpdatesStatus: status(enabled: settings.checkMacOS, succeeded: systemReport.updatesSucceeded),
@@ -126,38 +130,50 @@ struct UpdateScanner: Sendable {
 
     private struct AppCheckResult: Sendable {
         let appID: String
-        let update: AvailableUpdate?
+        let updates: [AvailableUpdate]
+        let failedSources: Set<UpdateSource>
         let warnings: [ScanWarning]
     }
 
     private func checkApp(_ app: InstalledApp, settings: ScanSettings) async -> AppCheckResult {
+        var updates: [AvailableUpdate] = []
+        var failedSources = Set<UpdateSource>()
         var warnings: [ScanWarning] = []
         if settings.checkAppStore, app.hasAppStoreReceipt {
             do {
                 if let update = try await AppStoreClient().update(for: app) {
-                    return AppCheckResult(appID: app.id, update: update, warnings: warnings)
+                    updates.append(update)
                 }
-            } catch { warnings.append(scanWarning(.appStore, error: error, itemName: app.name)) }
+            } catch {
+                failedSources.insert(.appStore)
+                warnings.append(scanWarning(.appStore, error: error, itemName: app.name))
+            }
         }
         if settings.checkSparkle, app.sparkleFeedURL != nil {
             do {
                 if let update = try await SparkleClient().update(
                     for: app, includePrereleases: settings.includePrereleaseUpdates
                 ) {
-                    return AppCheckResult(appID: app.id, update: update, warnings: warnings)
+                    updates.append(update)
                 }
-            } catch { warnings.append(scanWarning(.sparkle, error: error, itemName: app.name)) }
+            } catch {
+                failedSources.insert(.sparkle)
+                warnings.append(scanWarning(.sparkle, error: error, itemName: app.name))
+            }
         }
-        if settings.checkGitHub, app.sparkleFeedURL == nil, app.githubRepository != nil {
+        if settings.checkGitHub, app.githubRepository != nil {
             do {
                 if let update = try await GitHubClient().update(
                     for: app, includePrereleases: settings.includePrereleaseUpdates
                 ) {
-                    return AppCheckResult(appID: app.id, update: update, warnings: warnings)
+                    updates.append(update)
                 }
-            } catch { warnings.append(scanWarning(.github, error: error, itemName: app.name)) }
+            } catch {
+                failedSources.insert(.github)
+                warnings.append(scanWarning(.github, error: error, itemName: app.name))
+            }
         }
-        return AppCheckResult(appID: app.id, update: nil, warnings: warnings)
+        return AppCheckResult(appID: app.id, updates: updates, failedSources: failedSources, warnings: warnings)
     }
 
     private func normalize(_ value: String) -> String {

@@ -34,11 +34,13 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
     }
 }
 
-enum UpdateSource: String, Codable, Sendable {
+enum UpdateSource: String, Codable, CaseIterable, Identifiable, Sendable {
     case appStore = "App Store"
     case sparkle = "Sparkle"
     case homebrew = "Homebrew"
     case github = "GitHub"
+
+    var id: Self { self }
 }
 
 enum PrereleaseChannel: String, Codable, Hashable, Sendable {
@@ -52,15 +54,33 @@ enum PrereleaseChannel: String, Codable, Hashable, Sendable {
     case prerelease = "PRERELEASE"
 }
 
-struct AvailableUpdate: Identifiable, Hashable, Sendable {
-    var id: String { app.id }
-    let app: InstalledApp
+struct UpdateCandidate: Identifiable, Hashable, Sendable {
+    var id: UpdateSource { source }
     let availableVersion: String
     let source: UpdateSource
     let releaseNotes: String?
     let actionURL: URL?
     let homebrewToken: String?
     let sourcePrereleaseChannel: PrereleaseChannel?
+    let requiresHomebrewAdoption: Bool
+
+    var availablePrereleaseChannel: PrereleaseChannel? {
+        sourcePrereleaseChannel ?? VersionComparator.prereleaseChannel(for: availableVersion)
+    }
+}
+
+struct AvailableUpdate: Identifiable, Hashable, Sendable {
+    var id: String { app.id }
+    let app: InstalledApp
+    let candidates: [UpdateCandidate]
+
+    var primaryCandidate: UpdateCandidate { candidates[0] }
+    var availableVersion: String { primaryCandidate.availableVersion }
+    var source: UpdateSource { primaryCandidate.source }
+    var releaseNotes: String? { primaryCandidate.releaseNotes }
+    var actionURL: URL? { primaryCandidate.actionURL }
+    var homebrewToken: String? { primaryCandidate.homebrewToken }
+    var sourcePrereleaseChannel: PrereleaseChannel? { primaryCandidate.sourcePrereleaseChannel }
 
     init(
         app: InstalledApp,
@@ -69,15 +89,69 @@ struct AvailableUpdate: Identifiable, Hashable, Sendable {
         releaseNotes: String?,
         actionURL: URL?,
         homebrewToken: String?,
-        sourcePrereleaseChannel: PrereleaseChannel? = nil
+        sourcePrereleaseChannel: PrereleaseChannel? = nil,
+        requiresHomebrewAdoption: Bool = false
     ) {
         self.app = app
-        self.availableVersion = availableVersion
-        self.source = source
-        self.releaseNotes = releaseNotes
-        self.actionURL = actionURL
-        self.homebrewToken = homebrewToken
-        self.sourcePrereleaseChannel = sourcePrereleaseChannel
+        self.candidates = [UpdateCandidate(
+            availableVersion: availableVersion,
+            source: source,
+            releaseNotes: releaseNotes,
+            actionURL: actionURL,
+            homebrewToken: homebrewToken,
+            sourcePrereleaseChannel: sourcePrereleaseChannel,
+            requiresHomebrewAdoption: requiresHomebrewAdoption
+        )]
+    }
+
+    init(app: InstalledApp, candidates: [UpdateCandidate]) {
+        precondition(!candidates.isEmpty, "An available update requires at least one source candidate.")
+        self.app = app
+        self.candidates = Self.preferredCandidates(candidates)
+    }
+
+    static func merging(_ updates: [AvailableUpdate]) -> AvailableUpdate? {
+        guard let app = updates.first?.app else { return nil }
+        return AvailableUpdate(app: app, candidates: updates.flatMap(\.candidates))
+    }
+
+    func selecting(_ candidate: UpdateCandidate) -> AvailableUpdate {
+        AvailableUpdate(
+            app: app,
+            availableVersion: candidate.availableVersion,
+            source: candidate.source,
+            releaseNotes: candidate.releaseNotes,
+            actionURL: candidate.actionURL,
+            homebrewToken: candidate.homebrewToken,
+            sourcePrereleaseChannel: candidate.sourcePrereleaseChannel,
+            requiresHomebrewAdoption: candidate.requiresHomebrewAdoption
+        )
+    }
+
+    private static func preferredCandidates(_ candidates: [UpdateCandidate]) -> [UpdateCandidate] {
+        let bestBySource = Dictionary(grouping: candidates, by: \.source).compactMap { _, values in
+            values.sorted { left, right in
+                if left.requiresHomebrewAdoption != right.requiresHomebrewAdoption {
+                    return !left.requiresHomebrewAdoption
+                }
+                return VersionComparator.compare(left.availableVersion, right.availableVersion) == .orderedDescending
+            }.first
+        }
+        return bestBySource.sorted { left, right in
+            let leftRank = sourceRank(left)
+            let rightRank = sourceRank(right)
+            if leftRank != rightRank { return leftRank < rightRank }
+            return left.source.rawValue < right.source.rawValue
+        }
+    }
+
+    private static func sourceRank(_ candidate: UpdateCandidate) -> Int {
+        switch candidate.source {
+        case .appStore: 0
+        case .homebrew: candidate.requiresHomebrewAdoption ? 4 : 1
+        case .sparkle: 2
+        case .github: 3
+        }
     }
 
     var availablePrereleaseChannel: PrereleaseChannel? {
@@ -94,7 +168,7 @@ struct ScanReport: Sendable {
     let updates: [AvailableUpdate]
     let checkedAt: Date
     let warnings: [ScanWarning]
-    let failedAppIDs: Set<String>
+    let failedAppSources: [String: Set<UpdateSource>]
     let homebrewInventoryStatus: ScanStatus
     let homebrewCatalogStatus: ScanStatus
     let macOSUpdatesStatus: ScanStatus

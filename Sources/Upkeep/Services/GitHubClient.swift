@@ -2,7 +2,7 @@ import Foundation
 
 struct GitHubClient: Sendable {
     func update(for app: InstalledApp, includePrereleases: Bool = false) async throws -> AvailableUpdate? {
-        guard app.sparkleFeedURL == nil, let repository = app.githubRepository else { return nil }
+        guard let repository = app.githubRepository else { return nil }
 
         do {
             let release = try await fetchRelease(

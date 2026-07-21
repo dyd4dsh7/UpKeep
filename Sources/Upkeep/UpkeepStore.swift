@@ -146,19 +146,30 @@ final class UpkeepStore: ObservableObject {
             case .appStore: app.hasAppStoreReceipt
             case .sparkle: app.sparkleFeedURL != nil
             case .homebrewApps: homebrewPackage(for: app) != nil
-            case .github: app.githubRepository != nil && app.sparkleFeedURL == nil
-            case .noSource: source(for: app) == nil
+            case .github: app.githubRepository != nil
+            case .noSource: sources(for: app).isEmpty
             default: false
             }
         }
     }
 
     func source(for app: InstalledApp) -> UpdateSource? {
-        if app.hasAppStoreReceipt { return .appStore }
-        if homebrewPackage(for: app) != nil { return .homebrew }
-        if app.sparkleFeedURL != nil { return .sparkle }
-        if app.githubRepository != nil { return .github }
-        return nil
+        updates.first(where: { $0.app.id == app.id })?.source ?? sources(for: app).first
+    }
+
+    func sources(for app: InstalledApp) -> [UpdateSource] {
+        var detected = Set<UpdateSource>()
+        if let update = updates.first(where: { $0.app.id == app.id }) {
+            detected.formUnion(update.candidates.map(\.source))
+        }
+        if app.hasAppStoreReceipt { detected.insert(.appStore) }
+        if homebrewPackage(for: app) != nil { detected.insert(.homebrew) }
+        if app.sparkleFeedURL != nil { detected.insert(.sparkle) }
+        if app.githubRepository != nil { detected.insert(.github) }
+        let preferredOrder: [UpdateSource] = [.appStore, .homebrew, .sparkle, .github]
+        let ordered = preferredOrder.filter(detected.contains)
+        guard let primary = updates.first(where: { $0.app.id == app.id })?.source else { return ordered }
+        return [primary] + ordered.filter { $0 != primary }
     }
 
     func count(for destination: SidebarDestination) -> Int {
@@ -719,19 +730,39 @@ final class UpkeepStore: ObservableObject {
     private func mergedUpdates(from report: ScanReport) -> [AvailableUpdate] {
         var merged = Dictionary(uniqueKeysWithValues: report.updates.map { ($0.id, $0) })
 
-        for previous in updates where report.failedAppIDs.contains(previous.app.id) && merged[previous.id] == nil {
-            merged[previous.id] = previous
+        for previous in updates {
+            let failedSources = report.failedAppSources[previous.app.id] ?? []
+            let retained = previous.candidates.filter { failedSources.contains($0.source) }
+            guard !retained.isEmpty else { continue }
+            let retainedUpdate = AvailableUpdate(app: previous.app, candidates: retained)
+            if let fresh = merged[previous.id] {
+                merged[previous.id] = AvailableUpdate.merging([fresh, retainedUpdate])
+            } else {
+                merged[previous.id] = retainedUpdate
+            }
         }
 
         if report.homebrewInventoryStatus == .failed {
-            for previous in updates where previous.source == .homebrew && merged[previous.id] == nil {
-                merged[previous.id] = previous
+            for previous in updates {
+                let retained = previous.candidates.filter { $0.source == .homebrew && !$0.requiresHomebrewAdoption }
+                guard !retained.isEmpty else { continue }
+                let retainedUpdate = AvailableUpdate(app: previous.app, candidates: retained)
+                if let fresh = merged[previous.id] {
+                    merged[previous.id] = AvailableUpdate.merging([fresh, retainedUpdate])
+                } else {
+                    merged[previous.id] = retainedUpdate
+                }
             }
         } else if report.homebrewCatalogStatus == .failed {
-            let priorAdoptableTokens = Set(adoptableApps.map(\.caskToken))
-            for previous in updates where previous.source == .homebrew && merged[previous.id] == nil {
-                guard let token = previous.homebrewToken, priorAdoptableTokens.contains(token) else { continue }
-                merged[previous.id] = previous
+            for previous in updates {
+                let retained = previous.candidates.filter { $0.source == .homebrew && $0.requiresHomebrewAdoption }
+                guard !retained.isEmpty else { continue }
+                let retainedUpdate = AvailableUpdate(app: previous.app, candidates: retained)
+                if let fresh = merged[previous.id] {
+                    merged[previous.id] = AvailableUpdate.merging([fresh, retainedUpdate])
+                } else {
+                    merged[previous.id] = retainedUpdate
+                }
             }
         }
 

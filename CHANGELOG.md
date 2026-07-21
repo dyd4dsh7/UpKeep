@@ -2,6 +2,14 @@
 
 All notable changes to Upkeep are documented here.
 
+## 0.17.0 — 2026-07-22
+
+- Retained every App Store, Homebrew, Sparkle, and GitHub source that reports an available update instead of stopping at the first match.
+- Added a deterministic preferred-source policy while keeping alternate source versions and actions available from app details.
+- Checked GitHub releases alongside Sparkle feeds and displayed all detected sources throughout app lists and details.
+- Preserved last-known candidates for individual sources when a later scan partially fails.
+- Added coverage for multi-source merging, preferred-source ordering, Homebrew adoption priority, and duplicate-source version selection.
+
 ## 0.16.0 — 2026-07-21
 
 - Added an opt-in prerelease setting for apps, packages, and macOS updates, with a confirmation warning before enabling potentially unstable releases.

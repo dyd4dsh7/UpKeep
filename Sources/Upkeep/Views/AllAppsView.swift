@@ -18,7 +18,7 @@ struct AllAppsView: View {
                 } content: {
                     ItemIdentityView(
                         title: app.name,
-                        detail: store.source(for: app)?.rawValue ?? "No update source",
+                        detail: sourceSummary(for: app),
                         isRunning: store.isRunning(app),
                         prereleaseChannel: update(for: app)?.prereleaseChannel ?? app.prereleaseChannel,
                         prereleaseIsInstalled: update(for: app)?.prereleaseIsInstalled ?? (app.prereleaseChannel != nil)
@@ -78,6 +78,12 @@ struct AllAppsView: View {
         store.updates.first { $0.app.id == app.id }
     }
 
+    private func sourceSummary(for app: InstalledApp) -> String {
+        let sources = store.sources(for: app)
+        guard let first = sources.first else { return "No update source" }
+        return sources.count == 1 ? first.rawValue : "\(first.rawValue) + \(sources.count - 1) more"
+    }
+
     @ViewBuilder
     private func versions(for app: InstalledApp) -> some View {
         if let exclusion = activeExclusion(for: app) {
@@ -103,7 +109,7 @@ struct AppDetailView: View {
     private var adoptableItem: AdoptableApp? { store.adoptableApps.first { $0.app.id == app.id } }
     private var updateAdoptsWithHomebrew: Bool {
         guard let update, let adoptableItem else { return false }
-        return update.source == .homebrew && update.homebrewToken == adoptableItem.caskToken
+        return update.source == .homebrew && update.primaryCandidate.requiresHomebrewAdoption && update.homebrewToken == adoptableItem.caskToken
     }
     private var adoptionHandledByUpdate: Bool { updateAdoptsWithHomebrew && exclusion == nil }
     private var exclusion: UpdateExclusion? {
@@ -119,6 +125,7 @@ struct AppDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     updateStatus
+                    updateSources
                     releaseNotes
                     homebrewManagement
                     technicalDetails
@@ -154,7 +161,7 @@ struct AppDetailView: View {
                         .foregroundStyle(.secondary)
                 }
                 HStack(spacing: 8) {
-                    if let source = store.source(for: app) { SourceBadge(source: source) }
+                    ForEach(store.sources(for: app)) { source in SourceBadge(source: source) }
                     if let channel = update?.prereleaseChannel ?? app.prereleaseChannel {
                         PrereleaseBadge(
                             channel: channel,
@@ -182,6 +189,55 @@ struct AppDetailView: View {
         }
         .padding(20)
         .background(.bar)
+    }
+
+    @ViewBuilder
+    private var updateSources: some View {
+        if let update, update.candidates.count > 1 {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Update Sources").font(.title2.weight(.semibold))
+                Text("Upkeep prefers the first source below, but every source that reported a newer version remains available.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                VStack(spacing: 0) {
+                    ForEach(Array(update.candidates.enumerated()), id: \.element.id) { index, candidate in
+                        if index > 0 { Divider() }
+                        HStack(spacing: 12) {
+                            SourceBadge(source: candidate.source)
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 7) {
+                                    Text("Version \(candidate.availableVersion)")
+                                        .font(.callout.weight(.medium))
+                                        .monospacedDigit()
+                                    if index == 0 {
+                                        Text("PREFERRED")
+                                            .font(.system(size: 9, weight: .bold))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                if candidate.requiresHomebrewAdoption {
+                                    Text("Using this source will move the app under Homebrew management.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
+                            if index > 0 {
+                                Button(candidateActionTitle(candidate)) {
+                                    Task { await store.performUpdate(update.selecting(candidate)) }
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .disabled(store.workingIDs.contains(update.id))
+                            }
+                        }
+                        .padding(12)
+                    }
+                }
+                .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 14))
+            }
+        }
     }
 
     private var updateStatus: some View {
@@ -284,7 +340,10 @@ struct AppDetailView: View {
                 GridRow { detailLabel("Location"); Text(app.url.path).lineLimit(2).textSelection(.enabled) }
                 GridRow { detailLabel("Installed version"); Text(app.installedVersion).monospacedDigit() }
                 if let build = app.buildVersion { GridRow { detailLabel("Build"); Text(build).monospacedDigit() } }
-                GridRow { detailLabel("Update source"); Text(store.source(for: app)?.rawValue ?? "No source") }
+                GridRow {
+                    detailLabel("Update sources")
+                    Text(sourceNames)
+                }
                 GridRow { detailLabel("App Store receipt"); Text(app.hasAppStoreReceipt ? "Present" : "Not found") }
                 if let feed = app.sparkleFeedURL { GridRow { detailLabel("Sparkle feed"); Link(feed.host() ?? feed.absoluteString, destination: feed) } }
                 if let repository = app.githubRepository,
@@ -368,6 +427,16 @@ struct AppDetailView: View {
         }
     }
 
+    private func candidateActionTitle(_ candidate: UpdateCandidate) -> String {
+        if candidate.requiresHomebrewAdoption { return "Update & Adopt" }
+        return switch candidate.source {
+        case .homebrew: "Update"
+        case .appStore: "Open App Store"
+        case .sparkle: "Download"
+        case .github: "View Release"
+        }
+    }
+
     private var statusTitle: String {
         if let exclusion { return exclusion.mode == .ignored ? "Updates ignored" : "Version skipped" }
         return update == nil ? "Up to date" : "Update available"
@@ -422,6 +491,10 @@ struct AppDetailView: View {
     }
 
     private var buildText: String { app.buildVersion.map { " (build \($0))" } ?? "" }
+    private var sourceNames: String {
+        let names = store.sources(for: app).map(\.rawValue).joined(separator: ", ")
+        return names.isEmpty ? "No source" : names
+    }
     private func detailLabel(_ text: String) -> some View { Text(text).foregroundStyle(.secondary) }
 }
 
