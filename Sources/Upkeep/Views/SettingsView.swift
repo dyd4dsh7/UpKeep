@@ -142,6 +142,12 @@ struct SettingsView: View {
             Text(versionText).foregroundStyle(.secondary)
             Text("Every app, package, and system update in one native macOS workspace.")
                 .multilineTextAlignment(.center).foregroundStyle(.secondary).frame(maxWidth: 390)
+            Divider().frame(width: 220).padding(.vertical, 4)
+            VStack(spacing: 5) {
+                Text("Developed by Hayden Thorn")
+                Link("haydenthorn.com", destination: URL(string: "https://haydenthorn.com")!)
+            }
+            .font(.callout)
             Spacer()
         }.padding(.top, 28)
     }
