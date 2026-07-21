@@ -12,25 +12,25 @@ struct UpdatesView: View {
                 systemImage: "arrow.down.circle.fill"
             )
 
-            if !store.scanWarningsHidden && !store.scanWarnings.isEmpty {
+            if store.updateListFilter != .warnings && !store.scanWarningsHidden && !store.scanWarnings.isEmpty {
                 ScanWarningsBanner(warnings: store.scanWarnings) {
                     withAnimation { store.scanWarningsHidden = true }
                 }
             }
 
-            if !store.availableBatchUpdateItems.isEmpty {
-                batchUpdateBar
-            }
+            listControls
 
             if store.isScanning && store.apps.isEmpty {
                 scanningState
-            } else if store.filteredUpdates.isEmpty && filteredPackages.isEmpty && systemUpdates.isEmpty && filteredDeveloperPackages.isEmpty && filteredModels.isEmpty {
+            } else if store.updateListFilter == .warnings {
+                warningsList
+            } else if appUpdates.isEmpty && filteredPackages.isEmpty && systemUpdates.isEmpty && filteredDeveloperPackages.isEmpty && filteredModels.isEmpty {
                 emptyState
             } else {
                 List(selection: selectedUpdateItemID) {
-                    if !store.filteredUpdates.isEmpty {
+                    if !appUpdates.isEmpty {
                         Section("Applications") {
-                            ForEach(store.filteredUpdates) { UpdateCard(update: $0) }
+                            ForEach(appUpdates) { UpdateCard(update: $0) }
                         }
                     }
                     if !filteredPackages.isEmpty {
@@ -63,35 +63,122 @@ struct UpdatesView: View {
         }
     }
 
-    private var batchUpdateBar: some View {
-        HStack(spacing: 12) {
-            Label(
-                "\(store.availableBatchUpdateItems.count) actionable \(store.availableBatchUpdateItems.count == 1 ? "update" : "updates")",
-                systemImage: "checklist"
-            )
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            Spacer()
-            if !systemUpdates.isEmpty {
-                Text("macOS updates open separately")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+    private var listControls: some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 4) {
+                updateSortMenu
+                updateFilterMenu
+                ListDensityButton()
             }
-            Button("Review Updates…") { store.isShowingBatchReview = true }
-                .buttonStyle(.borderedProminent)
-                .disabled(store.workingIDs.contains("unified-update-batch"))
+            .frame(width: 98, alignment: .leading)
+            Spacer()
+            if !store.availableBatchUpdateItems.isEmpty {
+                Button("Update All…") { store.isShowingBatchReview = true }
+                    .buttonStyle(.borderless)
+                    .fontWeight(.medium)
+                    .disabled(store.workingIDs.contains("unified-update-batch"))
+            }
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 10)
-        .background(.bar)
+        .padding(.vertical, 8)
         .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private var updateSortMenu: some View {
+        Menu {
+            Section("Sort") {
+                updateSortButton("Default", order: .recommended)
+                updateSortButton("Name: A–Z", order: .name)
+                updateSortButton("Name: Z–A", order: .name, ascending: false)
+                updateSortButton("Install Date", order: .installDate, ascending: false)
+                updateSortButton("Recently Updated", order: .recentlyUpdated, ascending: false)
+                updateSortButton("Source", order: .source)
+                updateSortButton("Installed Version", order: .installedVersion)
+                updateSortButton("Available Version", order: .availableVersion)
+            }
+        } label: {
+            ListControlLabel(
+                systemImage: "list.bullet",
+                isActive: store.updateSortOrder != .recommended
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .frame(width: 30, height: 26)
+        .fixedSize()
+        .disabled(store.updateListFilter == .warnings)
+        .help("Sort updates")
+        .accessibilityLabel("Sort updates")
+    }
+
+    private var updateFilterMenu: some View {
+        Menu {
+            Section("Filter") {
+                ForEach(UpdateListFilter.allCases) { filter in
+                    Button {
+                        store.updateListFilter = filter
+                    } label: {
+                        MenuSelectionLabel(title: filter.rawValue, isSelected: store.updateListFilter == filter)
+                    }
+                }
+            }
+        } label: {
+            ListControlLabel(
+                systemImage: "line.3.horizontal.decrease",
+                isActive: store.updateListFilter != .all
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .frame(width: 30, height: 26)
+        .fixedSize()
+        .help("Filter updates")
+        .accessibilityLabel("Filter updates")
+    }
+
+    private func updateSortButton(
+        _ title: String,
+        order: UpdateSortOrder,
+        ascending: Bool = true
+    ) -> some View {
+        Button {
+            store.updateSortOrder = order
+            store.updateSortAscending = ascending
+        } label: {
+            MenuSelectionLabel(
+                title: title,
+                isSelected: store.updateSortOrder == order &&
+                    (order == .recommended || store.updateSortAscending == ascending)
+            )
+        }
+    }
+
+    @ViewBuilder private var warningsList: some View {
+        if store.scanWarnings.isEmpty {
+            ContentUnavailableView(
+                "No Scan Warnings", systemImage: "checkmark.seal.fill",
+                description: Text("Every enabled update source completed its latest check.")
+            ).frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            List(store.scanWarnings) { warning in
+                StandardItemRow {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                } content: {
+                    ItemIdentityView(title: warning.title, detail: warning.detail)
+                } accessories: {
+                    Text(warning.source.rawValue)
+                        .font(.caption.weight(.semibold)).foregroundStyle(.orange)
+                }
+            }
+            .listStyle(.inset)
+        }
     }
 
     private var selectedUpdateItemID: Binding<String?> {
         Binding(
             get: {
                 if let selected = store.selectedApp,
-                   store.filteredUpdates.contains(where: { $0.app.id == selected.id }) {
+                   appUpdates.contains(where: { $0.app.id == selected.id }) {
                     return "app:\(selected.id)"
                 }
                 return store.updateInspectorSelection?.listID
@@ -104,7 +191,7 @@ struct UpdatesView: View {
                 }
                 if identifier.hasPrefix("app:") {
                     let id = String(identifier.dropFirst(4))
-                    store.selectedApp = store.filteredUpdates.first { $0.app.id == id }?.app
+                    store.selectedApp = appUpdates.first { $0.app.id == id }?.app
                     store.updateInspectorSelection = nil
                 } else if identifier.hasPrefix("homebrew:") {
                     let id = String(identifier.dropFirst("homebrew:".count))
@@ -130,22 +217,86 @@ struct UpdatesView: View {
         )
     }
 
+    private var appUpdates: [AvailableUpdate] {
+        guard store.updateListFilter == .all || store.updateListFilter == .applications else { return [] }
+        return store.filteredUpdates.sorted { compareUpdates($0, $1) }
+    }
+
     private var filteredPackages: [HomebrewPackage] {
-        store.homebrewPackages.filter {
+        guard store.updateListFilter == .all || store.updateListFilter == .homebrew else { return [] }
+        return store.homebrewPackages.filter {
             $0.isOutdated && !store.isExcluded($0) && (store.searchText.isEmpty || $0.displayName.localizedCaseInsensitiveContains(store.searchText))
-        }
+        }.sorted { comparePackage($0.displayName, $0.installedVersion, $0.currentVersion, "Homebrew", $1.displayName, $1.installedVersion, $1.currentVersion, "Homebrew") }
     }
 
     private var systemUpdates: [MacOSUpdate] {
-        store.macOSUpdates.filter { !$0.isFullInstaller && (store.searchText.isEmpty || $0.title.localizedCaseInsensitiveContains(store.searchText)) }
+        guard store.updateListFilter == .all || store.updateListFilter == .macOS else { return [] }
+        return store.macOSUpdates.filter { !$0.isFullInstaller && (store.searchText.isEmpty || $0.title.localizedCaseInsensitiveContains(store.searchText)) }
+            .sorted { comparePackage($0.title, $0.version, $0.version, "macOS", $1.title, $1.version, $1.version, "macOS") }
     }
 
     private var filteredDeveloperPackages: [DeveloperPackage] {
-        store.developerPackages.filter { $0.isOutdated && !store.isExcluded($0) && (store.searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(store.searchText)) }
+        guard store.updateListFilter == .all || store.updateListFilter == .developer else { return [] }
+        return store.developerPackages.filter { $0.isOutdated && !store.isExcluded($0) && (store.searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(store.searchText)) }
+            .sorted { comparePackage($0.name, $0.currentVersion, $0.latestVersion, $0.manager.rawValue, $1.name, $1.currentVersion, $1.latestVersion, $1.manager.rawValue) }
     }
 
     private var filteredModels: [LocalLLMModel] {
-        store.visibleOutdatedLocalModels.filter { store.searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(store.searchText) }
+        guard store.updateListFilter == .all || store.updateListFilter == .models else { return [] }
+        return store.visibleOutdatedLocalModels.filter { store.searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(store.searchText) }
+            .sorted { comparePackage($0.name, $0.installedRevision, $0.latestRevision, $0.runtime.rawValue, $1.name, $1.installedRevision, $1.latestRevision, $1.runtime.rawValue) }
+    }
+
+    private func compareUpdates(_ left: AvailableUpdate, _ right: AvailableUpdate) -> Bool {
+        if store.updateSortOrder == .installDate || store.updateSortOrder == .recentlyUpdated {
+            let leftDate = store.updateSortOrder == .installDate ? left.app.installedAt : left.app.modifiedAt
+            let rightDate = store.updateSortOrder == .installDate ? right.app.installedAt : right.app.modifiedAt
+            let comparison = compareDate(
+                leftDate, rightDate,
+                leftName: left.app.name, rightName: right.app.name
+            )
+            return store.updateSortAscending
+                ? comparison == .orderedAscending
+                : comparison == .orderedDescending
+        }
+        return comparePackage(
+            left.app.name, left.app.installedVersion, left.availableVersion, left.source.rawValue,
+            right.app.name, right.app.installedVersion, right.availableVersion, right.source.rawValue
+        )
+    }
+
+    private func comparePackage(
+        _ leftName: String, _ leftCurrent: String, _ leftLatest: String, _ leftSource: String,
+        _ rightName: String, _ rightCurrent: String, _ rightLatest: String, _ rightSource: String
+    ) -> Bool {
+        let comparison: ComparisonResult
+        switch store.updateSortOrder {
+        case .recommended: return leftName.localizedStandardCompare(rightName) == .orderedAscending
+        case .name: comparison = leftName.localizedStandardCompare(rightName)
+        case .source: comparison = leftSource.localizedStandardCompare(rightSource)
+        case .installedVersion: comparison = VersionComparator.compare(leftCurrent, rightCurrent)
+        case .availableVersion: comparison = VersionComparator.compare(leftLatest, rightLatest)
+        case .installDate, .recentlyUpdated: comparison = leftName.localizedStandardCompare(rightName)
+        }
+        return store.updateSortAscending ? comparison == .orderedAscending : comparison == .orderedDescending
+    }
+
+    private func compareDate(
+        _ left: Date?,
+        _ right: Date?,
+        leftName: String,
+        rightName: String
+    ) -> ComparisonResult {
+        switch (left, right) {
+        case let (left?, right?) where left != right:
+            return left < right ? .orderedAscending : .orderedDescending
+        case (nil, .some):
+            return .orderedAscending
+        case (.some, nil):
+            return .orderedDescending
+        default:
+            return leftName.localizedStandardCompare(rightName)
+        }
     }
 
     private var subtitle: String {
@@ -172,7 +323,9 @@ struct UpdatesView: View {
             Label(emptyTitle, systemImage: store.scanWarnings.isEmpty ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
         } description: {
             Text(store.searchText.isEmpty
-                 ? (store.scanWarnings.isEmpty
+                 ? (store.updateListFilter != .all
+                    ? "No available updates match the selected category."
+                    : store.scanWarnings.isEmpty
                     ? "Supported update sources reported no newer versions for your apps."
                     : "Some update sources could not be checked. Last-known results were preserved where possible.")
                  : "Try a different search term.")
@@ -187,6 +340,7 @@ struct UpdatesView: View {
 
     private var emptyTitle: String {
         if !store.searchText.isEmpty { return "No matching updates" }
+        if store.updateListFilter != .all { return "No \(store.updateListFilter.rawValue)" }
         return store.scanWarnings.isEmpty ? "No updates found" : "Scan incomplete"
     }
 }

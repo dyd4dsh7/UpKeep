@@ -41,6 +41,7 @@ enum AppDiscovery {
 
     private static func app(at url: URL, microsoftRegisteredPaths: Set<String>) -> InstalledApp? {
         guard let bundle = Bundle(url: url) else { return nil }
+        let dates = try? url.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey])
         let info = bundle.infoDictionary ?? [:]
         let name = (info["CFBundleDisplayName"] as? String)
             ?? (info["CFBundleName"] as? String)
@@ -76,7 +77,9 @@ enum AppDiscovery {
             sparkleFeedURL: feed,
             githubRepository: repository,
             hasAppStoreReceipt: hasReceipt,
-            updateManagement: management
+            updateManagement: management,
+            installedAt: dates?.creationDate,
+            modifiedAt: dates?.contentModificationDate
         )
     }
 

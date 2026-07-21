@@ -11,7 +11,6 @@ struct ContentView: View {
                 .navigationSplitViewColumnWidth(min: 215, ideal: 235, max: 300)
         } detail: {
             detailWithInspector
-                .searchable(text: $store.searchText, placement: .toolbar, prompt: "Search apps and packages")
                 .toolbar { toolbar }
         }
         .navigationTitle("Upkeep")
@@ -36,9 +35,16 @@ struct ContentView: View {
         .onChange(of: settings.showDockBadge) { _, _ in
             refreshDockBadge()
         }
-        .onChange(of: store.selection) { _, destination in
+        .onChange(of: store.selection) { _, _ in
             store.selectedApp = nil
             store.updateInspectorSelection = nil
+            store.searchText = ""
+        }
+        .onChange(of: store.searchText) { _, value in
+            if !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                store.selectedApp = nil
+                store.updateInspectorSelection = nil
+            }
         }
         .onChange(of: colorScheme) { _, newColorScheme in
             AppBrand.applyApplicationIcon(for: newColorScheme)
@@ -67,6 +73,14 @@ struct ContentView: View {
     }
 
     @ViewBuilder private var detail: some View {
+        if !store.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            GlobalSearchView()
+        } else {
+            destinationDetail
+        }
+    }
+
+    @ViewBuilder private var destinationDetail: some View {
         switch store.selection {
         case .updates: UpdatesView()
         case .allApps: AllAppsView(
@@ -99,7 +113,8 @@ struct ContentView: View {
                 AppDetailView(app: app)
                     .frame(minWidth: 380, idealWidth: 460, maxWidth: 580)
             }
-        } else if store.selection == .updates, let inspector = store.updateInspectorSelection {
+        } else if (store.selection == .updates || !store.searchText.isEmpty),
+                  let inspector = store.updateInspectorSelection {
             HSplitView {
                 detail.frame(minWidth: 390)
                 updateInspector(inspector)
@@ -192,39 +207,65 @@ private struct Sidebar: View {
     @EnvironmentObject private var store: UpkeepStore
 
     var body: some View {
-        List(selection: $store.selection) {
-            Section("Updates") {
-                item(.updates)
-            }
-            Section("Installed") {
-                item(.allApps)
-                item(.adoptable)
-            }
-            Section("Sources") {
-                item(.appStore)
-                item(.testFlight)
-                item(.setapp)
-                item(.microsoftAutoUpdate)
-                item(.homebrewApps)
-                item(.sparkle)
-                item(.github)
-                item(.noSource)
-            }
-            Section("Packages") {
-                item(.homebrewPackages)
-                if !store.installedDeveloperManagers.isEmpty {
-                    item(.developerPackages)
+        VStack(spacing: 0) {
+            globalSearchField
+            List(selection: $store.selection) {
+                Section("Updates") {
+                    item(.updates)
                 }
-                if !store.localModels.isEmpty {
-                    item(.localModels)
+                Section("Installed") {
+                    item(.allApps)
+                    item(.adoptable)
+                }
+                Section("Sources") {
+                    item(.appStore)
+                    item(.testFlight)
+                    item(.setapp)
+                    item(.microsoftAutoUpdate)
+                    item(.homebrewApps)
+                    item(.sparkle)
+                    item(.github)
+                    item(.noSource)
+                }
+                Section("Packages") {
+                    item(.homebrewPackages)
+                    if !store.installedDeveloperManagers.isEmpty {
+                        item(.developerPackages)
+                    }
+                    if !store.localModels.isEmpty {
+                        item(.localModels)
+                    }
+                }
+                Section("System") {
+                    item(.macOSUpdates)
+                    item(.history)
                 }
             }
-            Section("System") {
-                item(.macOSUpdates)
-                item(.history)
+            .listStyle(.sidebar)
+        }
+    }
+
+    private var globalSearchField: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Search everything", text: $store.searchText)
+                .textFieldStyle(.plain)
+            if !store.searchText.isEmpty {
+                Button { store.searchText = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
             }
         }
-        .listStyle(.sidebar)
+        .padding(.horizontal, 9)
+        .frame(height: 28)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .padding(.horizontal, 10)
+        .padding(.top, 9)
+        .padding(.bottom, 5)
     }
 
     private func item(_ destination: SidebarDestination) -> some View {

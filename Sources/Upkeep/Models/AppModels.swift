@@ -11,6 +11,8 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
     let githubRepository: String?
     let hasAppStoreReceipt: Bool
     let updateManagement: AppUpdateManagement
+    let installedAt: Date?
+    let modifiedAt: Date?
     var prereleaseChannel: PrereleaseChannel? { VersionComparator.prereleaseChannel(for: installedVersion) }
 
     init(
@@ -22,7 +24,9 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
         sparkleFeedURL: URL?,
         githubRepository: String?,
         hasAppStoreReceipt: Bool,
-        updateManagement: AppUpdateManagement? = nil
+        updateManagement: AppUpdateManagement? = nil,
+        installedAt: Date? = nil,
+        modifiedAt: Date? = nil
     ) {
         self.id = bundleIdentifier.map { "\($0)|\(url.path)" } ?? url.path
         self.name = name
@@ -34,6 +38,8 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
         self.githubRepository = githubRepository
         self.hasAppStoreReceipt = hasAppStoreReceipt
         self.updateManagement = updateManagement ?? (hasAppStoreReceipt ? .appStore : .direct)
+        self.installedAt = installedAt
+        self.modifiedAt = modifiedAt
     }
 
     var updateExclusionKey: String {

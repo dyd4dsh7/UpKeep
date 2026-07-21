@@ -2,6 +2,17 @@
 
 All notable changes to Upkeep are documented here.
 
+## 0.22.0 — 2026-07-22
+
+- Added compact icon menus for sorting, filtering, and list density, grouped with consistent spacing at the far-left edge of each list toolbar.
+- Kept batch update actions on the far right and moved search into the sidebar.
+- Replaced list-scoped search with global results across apps, packages, models, macOS, warnings, and update history.
+- Added Default, A–Z, Z–A, install-date, recently-updated, source, and version sorting where applicable.
+- Added app filters for available updates, source warnings, and unmapped applications, with warning-severity sorting and inline issue indicators.
+- Added an Unmapped Homebrew filter for casks without a matching application bundle.
+- Added persisted Comfortable and Compact list densities, available from list controls and Settings.
+- Added a complete warnings-only view so every source failure remains inspectable beyond the summary banner.
+
 ## 0.21.0 — 2026-07-22
 
 - Distinguished TestFlight builds from Mac App Store releases and routed them back to TestFlight for updates.

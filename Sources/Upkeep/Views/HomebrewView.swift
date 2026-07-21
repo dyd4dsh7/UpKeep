@@ -23,20 +23,90 @@ struct HomebrewView: View {
     }
 
     private var filterBar: some View {
-        HStack {
-            Picker("Filter", selection: $store.homebrewFilter) {
-                ForEach(HomebrewFilter.allCases) { Text($0.rawValue).tag($0) }
+        HStack(spacing: 0) {
+            HStack(spacing: 4) {
+                homebrewSortMenu
+                homebrewFilterMenu
+                ListDensityButton()
             }
-            .pickerStyle(.segmented)
-            .frame(maxWidth: 540)
+            .frame(width: 98, alignment: .leading)
             Spacer()
             if store.outdatedPackageCount > 0 {
                 Button("Update All") { Task { await store.updateAllPackages() } }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.borderless)
+                    .fontWeight(.medium)
                     .disabled(store.workingIDs.contains("homebrew-all"))
             }
         }
-        .padding(.horizontal, 20).padding(.bottom, 10)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 8)
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private var homebrewSortMenu: some View {
+        Menu {
+            Section("Sort") {
+                homebrewSortButton("Default", order: .recommended)
+                homebrewSortButton("Name: A–Z", order: .name)
+                homebrewSortButton("Name: Z–A", order: .name, ascending: false)
+                homebrewSortButton("Installed Version", order: .installedVersion)
+                homebrewSortButton("Available Version", order: .availableVersion)
+                homebrewSortButton("Package Type", order: .kind)
+            }
+        } label: {
+            ListControlLabel(
+                systemImage: "list.bullet",
+                isActive: store.homebrewSortOrder != .recommended
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .frame(width: 30, height: 26)
+        .fixedSize()
+        .help("Sort Homebrew packages")
+        .accessibilityLabel("Sort Homebrew packages")
+    }
+
+    private var homebrewFilterMenu: some View {
+        Menu {
+            Section("Filter") {
+                ForEach(HomebrewFilter.allCases) { filter in
+                    Button {
+                        store.homebrewFilter = filter
+                    } label: {
+                        MenuSelectionLabel(title: filter.rawValue, isSelected: store.homebrewFilter == filter)
+                    }
+                }
+            }
+        } label: {
+            ListControlLabel(
+                systemImage: "line.3.horizontal.decrease",
+                isActive: store.homebrewFilter != .all
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .frame(width: 30, height: 26)
+        .fixedSize()
+        .help("Filter Homebrew packages")
+        .accessibilityLabel("Filter Homebrew packages")
+    }
+
+    private func homebrewSortButton(
+        _ title: String,
+        order: HomebrewSortOrder,
+        ascending: Bool = true
+    ) -> some View {
+        Button {
+            store.homebrewSortOrder = order
+            store.homebrewSortAscending = ascending
+        } label: {
+            MenuSelectionLabel(
+                title: title,
+                isSelected: store.homebrewSortOrder == order &&
+                    (order == .recommended || store.homebrewSortAscending == ascending)
+            )
+        }
     }
 
     private var packageList: some View {
@@ -55,8 +125,21 @@ struct HomebrewView: View {
 
     private var sortedPackages: [HomebrewPackage] {
         store.filteredHomebrewPackages.sorted { left, right in
-            if left.isOutdated != right.isOutdated { return left.isOutdated }
-            return left.displayName.localizedStandardCompare(right.displayName) == .orderedAscending
+            let comparison: ComparisonResult
+            switch store.homebrewSortOrder {
+            case .recommended:
+                if left.isOutdated != right.isOutdated { return left.isOutdated }
+                comparison = left.displayName.localizedStandardCompare(right.displayName)
+            case .name:
+                comparison = left.displayName.localizedStandardCompare(right.displayName)
+            case .installedVersion:
+                comparison = VersionComparator.compare(left.installedVersion, right.installedVersion)
+            case .availableVersion:
+                comparison = VersionComparator.compare(left.currentVersion, right.currentVersion)
+            case .kind:
+                comparison = left.kind.rawValue.localizedStandardCompare(right.kind.rawValue)
+            }
+            return store.homebrewSortAscending ? comparison == .orderedAscending : comparison == .orderedDescending
         }
     }
 
@@ -81,6 +164,12 @@ private struct PackageRow: View {
                 prereleaseIsInstalled: package.prereleaseIsInstalled
             )
         } accessories: {
+            if store.isUnmapped(package) {
+                Image(systemName: "questionmark.diamond.fill")
+                    .foregroundStyle(.orange)
+                    .help("No matching app bundle was found. This may be a command-line or non-GUI cask.")
+                    .accessibilityLabel("Unmapped Homebrew cask")
+            }
             packageVersions
             if package.isOutdated && !store.isExcluded(package) {
                 Button("Update") { Task { await store.updatePackage(package) } }

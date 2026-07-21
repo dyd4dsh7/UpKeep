@@ -1,5 +1,14 @@
 import Foundation
 
+enum ListDensity: String, CaseIterable, Identifiable, Sendable {
+    case comfortable
+    case compact
+
+    var id: Self { self }
+    var title: String { self == .comfortable ? "Comfortable" : "Compact" }
+    var systemImage: String { self == .comfortable ? "rectangle.grid.1x2" : "list.bullet" }
+}
+
 enum RefreshInterval: Int, CaseIterable, Identifiable, Sendable {
     case never = 0
     case hourly = 3600
@@ -140,6 +149,7 @@ final class AppSettings: ObservableObject {
     @Published var showMenuBarCount: Bool { didSet { save(showMenuBarCount, "showMenuBarCount") } }
     @Published var showDockBadge: Bool { didSet { save(showDockBadge, "showDockBadge") } }
     @Published var notificationsEnabled: Bool { didSet { save(notificationsEnabled, "notificationsEnabled") } }
+    @Published var listDensity: ListDensity { didSet { save(listDensity.rawValue, "listDensity") } }
     @Published var showCurrentDeveloperPackages: Bool { didSet { save(showCurrentDeveloperPackages, "showCurrentDeveloperPackages") } }
     @Published var checkAppStore: Bool { didSet { save(checkAppStore, "checkAppStore") } }
     @Published var checkSparkle: Bool { didSet { save(checkSparkle, "checkSparkle") } }
@@ -164,6 +174,7 @@ final class AppSettings: ObservableObject {
             "showMenuBarCount": true,
             "showDockBadge": true,
             "notificationsEnabled": false,
+            "listDensity": ListDensity.comfortable.rawValue,
             "showCurrentDeveloperPackages": true,
             "checkAppStore": true,
             "checkSparkle": true,
@@ -184,6 +195,7 @@ final class AppSettings: ObservableObject {
         showMenuBarCount = defaults.bool(forKey: "showMenuBarCount")
         showDockBadge = defaults.bool(forKey: "showDockBadge")
         notificationsEnabled = defaults.bool(forKey: "notificationsEnabled")
+        listDensity = ListDensity(rawValue: defaults.string(forKey: "listDensity") ?? "") ?? .comfortable
         showCurrentDeveloperPackages = defaults.bool(forKey: "showCurrentDeveloperPackages")
         checkAppStore = defaults.bool(forKey: "checkAppStore")
         checkSparkle = defaults.bool(forKey: "checkSparkle")

@@ -11,12 +11,13 @@ struct AllAppsView: View {
     var body: some View {
         VStack(spacing: 0) {
             HeaderView(title: title, subtitle: subtitle, systemImage: systemImage)
+            listControls
 
-            if apps.isEmpty {
+            if displayedApps.isEmpty {
                 emptyState
             } else {
                 List(selection: selectedAppID) {
-                    ForEach(sortedApps) { app in
+                    ForEach(displayedApps) { app in
                     StandardItemRow {
                         AppIcon(url: app.url, size: 36)
                     } content: {
@@ -28,6 +29,12 @@ struct AllAppsView: View {
                             prereleaseIsInstalled: update(for: app)?.prereleaseIsInstalled ?? (app.prereleaseChannel != nil)
                         )
                     } accessories: {
+                        if !issues(for: app).isEmpty {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                                .help(issues(for: app).joined(separator: "\n"))
+                                .accessibilityLabel("Warnings: " + issues(for: app).joined(separator: ", "))
+                        }
                         versions(for: app)
                     }
                     .tag(app.id)
@@ -52,6 +59,86 @@ struct AllAppsView: View {
         }
     }
 
+    private var listControls: some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 4) {
+                appSortMenu
+                appFilterMenu
+                ListDensityButton()
+            }
+            .frame(width: 98, alignment: .leading)
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 8)
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private var appSortMenu: some View {
+        Menu {
+            Section("Sort") {
+                appSortButton("Default", order: .recommended)
+                appSortButton("Name: A–Z", order: .name)
+                appSortButton("Name: Z–A", order: .name, ascending: false)
+                appSortButton("Install Date", order: .installDate, ascending: false)
+                appSortButton("Recently Updated", order: .recentlyUpdated, ascending: false)
+                appSortButton("Update Source", order: .source)
+                appSortButton("Installed Version", order: .installedVersion)
+                appSortButton("Available Version", order: .availableVersion)
+                appSortButton("Warning Severity", order: .warningSeverity, ascending: false)
+            }
+        } label: {
+            ListControlLabel(
+                systemImage: "list.bullet",
+                isActive: store.appSortOrder != .recommended
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .frame(width: 30, height: 26)
+        .fixedSize()
+        .help("Sort apps")
+        .accessibilityLabel("Sort apps")
+    }
+
+    private var appFilterMenu: some View {
+        Menu {
+            Section("Filter") {
+                ForEach(AppListFilter.allCases) { filter in
+                    Button {
+                        store.appListFilter = filter
+                    } label: {
+                        MenuSelectionLabel(title: filter.rawValue, isSelected: store.appListFilter == filter)
+                    }
+                }
+            }
+        } label: {
+            ListControlLabel(
+                systemImage: "line.3.horizontal.decrease",
+                isActive: store.appListFilter != .all
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .frame(width: 30, height: 26)
+        .fixedSize()
+        .help("Filter apps")
+        .accessibilityLabel("Filter apps")
+    }
+
+    private func appSortButton(_ title: String, order: AppSortOrder, ascending: Bool = true) -> some View {
+        Button {
+            store.appSortOrder = order
+            store.appSortAscending = ascending
+        } label: {
+            MenuSelectionLabel(
+                title: title,
+                isSelected: store.appSortOrder == order &&
+                    (order == .recommended || store.appSortAscending == ascending)
+            )
+        }
+    }
+
     private var emptyState: some View {
         ContentUnavailableView {
             Label(emptyTitle, systemImage: emptySystemImage)
@@ -70,6 +157,9 @@ struct AllAppsView: View {
     }
 
     private var emptyTitle: String {
+        if store.appListFilter == .warnings { return "No App Warnings" }
+        if store.appListFilter == .unmapped { return "Every App Is Mapped" }
+        if store.appListFilter == .updates { return "No App Updates" }
         if !store.searchText.isEmpty { return "No Matching Apps" }
         return switch title {
         case "Setapp": "No Setapp Apps"
@@ -81,6 +171,9 @@ struct AllAppsView: View {
     }
 
     private var emptyDescription: String {
+        if store.appListFilter == .warnings { return "No app-specific source failures or version issues were found in this list." }
+        if store.appListFilter == .unmapped { return "Every app in this list has a supported source or external update manager." }
+        if store.appListFilter == .updates { return "No apps in this list currently have an available update." }
         if !store.searchText.isEmpty {
             return "No apps in \(title) match “\(store.searchText)”."
         }
@@ -94,16 +187,85 @@ struct AllAppsView: View {
     }
 
     private var emptySystemImage: String {
-        title == "No Source" ? "checkmark.seal" : systemImage
+        if store.appListFilter == .warnings { return "exclamationmark.triangle" }
+        if store.appListFilter == .unmapped { return "link.badge.plus" }
+        return title == "No Source" ? "checkmark.seal" : systemImage
     }
 
-    private var sortedApps: [InstalledApp] {
-        apps.sorted { left, right in
-            let leftHasUpdate = store.updates.contains { $0.app.id == left.id }
-            let rightHasUpdate = store.updates.contains { $0.app.id == right.id }
-            if leftHasUpdate != rightHasUpdate { return leftHasUpdate }
-            return left.name.localizedStandardCompare(right.name) == .orderedAscending
+    private var displayedApps: [InstalledApp] {
+        apps.filter(matchesFilter).sorted { left, right in
+            let comparison: ComparisonResult
+            switch store.appSortOrder {
+            case .recommended:
+                let leftHasUpdate = store.updates.contains { $0.app.id == left.id }
+                let rightHasUpdate = store.updates.contains { $0.app.id == right.id }
+                if leftHasUpdate != rightHasUpdate { return leftHasUpdate }
+                comparison = left.name.localizedStandardCompare(right.name)
+            case .name:
+                comparison = left.name.localizedStandardCompare(right.name)
+            case .source:
+                comparison = sourceSummary(for: left).localizedStandardCompare(sourceSummary(for: right))
+            case .installedVersion:
+                comparison = VersionComparator.compare(left.installedVersion, right.installedVersion)
+            case .availableVersion:
+                comparison = VersionComparator.compare(
+                    update(for: left)?.availableVersion ?? left.installedVersion,
+                    update(for: right)?.availableVersion ?? right.installedVersion
+                )
+            case .installDate:
+                comparison = compareDate(left.installedAt, right.installedAt, leftName: left.name, rightName: right.name)
+            case .recentlyUpdated:
+                comparison = compareDate(left.modifiedAt, right.modifiedAt, leftName: left.name, rightName: right.name)
+            case .warningSeverity:
+                let leftCount = issues(for: left).count
+                let rightCount = issues(for: right).count
+                if leftCount != rightCount { comparison = leftCount < rightCount ? .orderedAscending : .orderedDescending }
+                else { comparison = left.name.localizedStandardCompare(right.name) }
+            }
+            return store.appSortAscending ? comparison == .orderedAscending : comparison == .orderedDescending
         }
+    }
+
+    private func compareDate(
+        _ left: Date?,
+        _ right: Date?,
+        leftName: String,
+        rightName: String
+    ) -> ComparisonResult {
+        switch (left, right) {
+        case let (left?, right?) where left != right:
+            return left < right ? .orderedAscending : .orderedDescending
+        case (nil, .some):
+            return .orderedAscending
+        case (.some, nil):
+            return .orderedDescending
+        default:
+            return leftName.localizedStandardCompare(rightName)
+        }
+    }
+
+    private func matchesFilter(_ app: InstalledApp) -> Bool {
+        switch store.appListFilter {
+        case .all: true
+        case .updates: update(for: app) != nil
+        case .warnings: !issues(for: app).isEmpty
+        case .unmapped: isUnmapped(app)
+        }
+    }
+
+    private func isUnmapped(_ app: InstalledApp) -> Bool {
+        store.sources(for: app).isEmpty && !app.updateManagement.isExternallyManaged
+    }
+
+    private func issues(for app: InstalledApp) -> [String] {
+        var messages = store.scanWarnings.compactMap { warning in
+            warning.itemNames.contains(app.name) ? "\(warning.source.rawValue): \(warning.message)" : nil
+        }
+        if isUnmapped(app) { messages.append("No supported update source") }
+        if app.installedVersion.localizedCaseInsensitiveCompare("unknown") == .orderedSame {
+            messages.append("Installed version could not be read")
+        }
+        return messages
     }
 
     private var selectedAppID: Binding<String?> {

@@ -8,6 +8,58 @@ enum HomebrewFilter: String, CaseIterable, Identifiable {
     case requested = "Requested"
     case dependencies = "Dependencies"
     case casks = "Casks"
+    case unmapped = "Unmapped"
+    var id: Self { self }
+}
+
+enum AppListFilter: String, CaseIterable, Identifiable {
+    case all = "All Apps"
+    case updates = "Updates"
+    case warnings = "Warnings"
+    case unmapped = "Unmapped"
+    var id: Self { self }
+}
+
+enum AppSortOrder: String, CaseIterable, Identifiable {
+    case recommended = "Recommended"
+    case name = "Name"
+    case source = "Update Source"
+    case installedVersion = "Installed Version"
+    case availableVersion = "Available Version"
+    case installDate = "Install Date"
+    case recentlyUpdated = "Recently Updated"
+    case warningSeverity = "Warning Severity"
+    var id: Self { self }
+}
+
+enum HomebrewSortOrder: String, CaseIterable, Identifiable {
+    case recommended = "Recommended"
+    case name = "Name"
+    case installedVersion = "Installed Version"
+    case availableVersion = "Available Version"
+    case kind = "Package Type"
+    var id: Self { self }
+}
+
+enum UpdateListFilter: String, CaseIterable, Identifiable {
+    case all = "All Updates"
+    case applications = "Applications"
+    case homebrew = "Homebrew"
+    case macOS = "macOS"
+    case developer = "Developer"
+    case models = "AI Models"
+    case warnings = "Warnings"
+    var id: Self { self }
+}
+
+enum UpdateSortOrder: String, CaseIterable, Identifiable {
+    case recommended = "Recommended"
+    case name = "Name"
+    case source = "Source"
+    case installedVersion = "Installed Version"
+    case availableVersion = "Available Version"
+    case installDate = "Install Date"
+    case recentlyUpdated = "Recently Updated"
     var id: Self { self }
 }
 
@@ -88,6 +140,14 @@ final class UpkeepStore: ObservableObject {
     @Published var localModels: [LocalLLMModel] = []
     @Published var selection: SidebarDestination = .updates
     @Published var homebrewFilter: HomebrewFilter = .all
+    @Published var appListFilter: AppListFilter = .all
+    @Published var appSortOrder: AppSortOrder = .recommended
+    @Published var appSortAscending = true
+    @Published var homebrewSortOrder: HomebrewSortOrder = .recommended
+    @Published var homebrewSortAscending = true
+    @Published var updateListFilter: UpdateListFilter = .all
+    @Published var updateSortOrder: UpdateSortOrder = .recommended
+    @Published var updateSortAscending = true
     @Published var selectedPackageID: String?
     @Published var selectedDeveloperPackageID: String?
     @Published var selectedDeveloperVersion = ""
@@ -159,6 +219,7 @@ final class UpkeepStore: ObservableObject {
             case .requested: !package.isDependency
             case .dependencies: package.isDependency
             case .casks: package.kind == .cask
+            case .unmapped: package.kind == .cask && matchingApp(for: package) == nil
             }
         }
         return matching(scoped, name: { $0.displayName })
@@ -878,6 +939,10 @@ final class UpkeepStore: ObservableObject {
         let packageName = normalize(package.displayName)
         let token = normalize(package.token)
         return apps.first { normalize($0.name) == packageName || normalize($0.name) == token }
+    }
+
+    func isUnmapped(_ package: HomebrewPackage) -> Bool {
+        package.kind == .cask && matchingApp(for: package) == nil
     }
 
     func homebrewPackage(for app: InstalledApp) -> HomebrewPackage? {

@@ -51,6 +51,16 @@ private struct UpkeepRelease: Identifiable {
     let changes: [String]
 
     static let all = [
+        UpkeepRelease(version: "0.22.0", date: "22 July 2026", changes: [
+            "Groups compact Sort, Filter, and Density controls with consistent spacing at the far-left edge of each list toolbar.",
+            "Keeps batch update actions on the far right and moves search into the sidebar.",
+            "Searches apps, packages, models, macOS, warnings, and history in one global results workspace.",
+            "Sorts apps by Default, A–Z, Z–A, install date, recent updates, source, or version.",
+            "Filters app lists by available updates, source warnings, or unmapped apps and surfaces issues inline.",
+            "Adds an Unmapped Homebrew filter for casks without a matching application bundle.",
+            "Adds persisted Comfortable and Compact list densities in list controls and Settings.",
+            "Provides a complete warnings-only view for inspecting every update-source failure."
+        ]),
         UpkeepRelease(version: "0.21.0", date: "22 July 2026", changes: [
             "Distinguishes TestFlight builds from production Mac App Store installations and opens the correct updater.",
             "Detects Setapp editions and Microsoft AutoUpdate registrations without misclassifying other Microsoft apps.",

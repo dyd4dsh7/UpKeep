@@ -76,6 +76,15 @@ struct SettingsView: View {
                 Text("The Upkeep icon remains available for quick scans, Settings, and opening the main window.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section("Appearance") {
+                Picker("List density", selection: $settings.listDensity) {
+                    ForEach(ListDensity.allCases) { density in
+                        Label(density.title, systemImage: density.systemImage).tag(density)
+                    }
+                }
+                Text("Compact rows fit more apps and packages on screen without hiding status information.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
     }

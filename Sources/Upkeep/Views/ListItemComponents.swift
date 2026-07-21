@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct StandardItemRow<Icon: View, Content: View, Accessories: View>: View {
+    @EnvironmentObject private var settings: AppSettings
     private let icon: Icon
     private let content: Content
     private let accessories: Accessories
@@ -16,9 +17,11 @@ struct StandardItemRow<Icon: View, Content: View, Accessories: View>: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: settings.listDensity == .compact ? 9 : 12) {
             icon
-                .frame(width: 36, height: 36)
+                .scaleEffect(settings.listDensity == .compact ? 0.78 : 1)
+                .frame(width: settings.listDensity == .compact ? 30 : 36,
+                       height: settings.listDensity == .compact ? 30 : 36)
 
             content
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -30,12 +33,14 @@ struct StandardItemRow<Icon: View, Content: View, Accessories: View>: View {
             .fixedSize(horizontal: true, vertical: false)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 8)
+        .padding(.vertical, settings.listDensity == .compact ? 3 : 8)
         .listRowSeparator(.hidden)
+        .animation(.snappy(duration: 0.18), value: settings.listDensity)
     }
 }
 
 struct ItemIdentityView: View {
+    @EnvironmentObject private var settings: AppSettings
     let title: String
     let detail: String
     var isRunning = false
@@ -44,7 +49,7 @@ struct ItemIdentityView: View {
     var prereleaseIsInstalled = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: settings.listDensity == .compact ? 1 : 3) {
             HStack(spacing: 7) {
                 Text(title).font(.body.weight(.semibold)).lineLimit(1)
                 if isRunning { RunningIndicator() }
@@ -58,9 +63,60 @@ struct ItemIdentityView: View {
                 }
             }
             Text(detail)
-                .font(.callout)
+                .font(settings.listDensity == .compact ? .caption : .callout)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+        }
+    }
+}
+
+struct ListDensityButton: View {
+    @EnvironmentObject private var settings: AppSettings
+
+    var body: some View {
+        Button {
+            withAnimation(.snappy(duration: 0.18)) {
+                settings.listDensity = settings.listDensity == .comfortable ? .compact : .comfortable
+            }
+        } label: {
+            ListControlLabel(
+                systemImage: "arrow.up.and.down.text.horizontal",
+                isActive: settings.listDensity == .compact
+            )
+        }
+        .buttonStyle(.plain)
+        .frame(width: 30, height: 26)
+        .fixedSize()
+        .help(settings.listDensity == .compact ? "Use comfortable rows" : "Use compact rows")
+        .accessibilityLabel(settings.listDensity == .compact ? "Use comfortable rows" : "Use compact rows")
+    }
+}
+
+struct ListControlLabel: View {
+    let systemImage: String
+    var isActive = false
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.system(size: 15, weight: .medium))
+            .symbolRenderingMode(.hierarchical)
+            .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
+            .frame(width: 30, height: 26)
+            .contentShape(Rectangle())
+    }
+}
+
+struct MenuSelectionLabel: View {
+    let title: String
+    let isSelected: Bool
+
+    var body: some View {
+        HStack {
+            Text(title)
+            if isSelected {
+                Spacer()
+                Image(systemName: "checkmark")
+            }
         }
     }
 }
