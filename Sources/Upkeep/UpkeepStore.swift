@@ -11,6 +11,44 @@ enum HomebrewFilter: String, CaseIterable, Identifiable {
     var id: Self { self }
 }
 
+struct RunningAppConfirmation: Identifiable {
+    enum Action {
+        case update(AvailableUpdate)
+        case package(HomebrewPackage)
+        case adopt(AdoptableApp)
+        case updateAdoptable(AdoptableApp)
+        case allPackages
+    }
+
+    let id = UUID()
+    let apps: [InstalledApp]
+    let action: Action
+
+    var title: String { apps.count == 1 ? "Quit \(apps[0].name) and Continue?" : "Quit Running Apps and Continue?" }
+    var message: String {
+        let names = apps.map(\.name).formatted()
+        return "\(names) \(apps.count == 1 ? "is" : "are") currently running. Upkeep must quit \(apps.count == 1 ? "it" : "them") before Homebrew changes the application files."
+    }
+    var buttonTitle: String {
+        switch action {
+        case .adopt: "Quit and Adopt"
+        case .allPackages: "Quit Apps and Update"
+        default: "Quit and Update"
+        }
+    }
+}
+
+private enum RunningAppUpdateError: LocalizedError {
+    case couldNotQuit([String])
+
+    var errorDescription: String? {
+        switch self {
+        case let .couldNotQuit(names):
+            return "Could not quit \(names.formatted()). Quit \(names.count == 1 ? "the app" : "these apps") manually, then try the update again."
+        }
+    }
+}
+
 @MainActor
 final class UpkeepStore: ObservableObject {
     let settings: AppSettings
@@ -40,7 +78,11 @@ final class UpkeepStore: ObservableObject {
     @Published var scanWarnings: [ScanWarning] = []
     @Published var workingIDs = Set<String>()
     @Published var pendingRevert: UpdateRecord?
+    @Published var pendingRunningAppConfirmation: RunningAppConfirmation?
+    @Published private(set) var runningBundleIdentifiers = Set<String>()
+    @Published private(set) var runningApplicationPaths = Set<String>()
     private var periodicTask: Task<Void, Never>?
+    private var runningAppTask: Task<Void, Never>?
     private var didStart = false
     private let startedAt = Date()
     private var versionCache: [String: [String]] = [:]
@@ -161,6 +203,14 @@ final class UpkeepStore: ObservableObject {
     func start() async {
         guard !didStart else { return }
         didStart = true
+        refreshRunningApplications()
+        runningAppTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                self.refreshRunningApplications()
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
         if settings.checkOnLaunch { await scan() }
         periodicTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -219,11 +269,17 @@ final class UpkeepStore: ObservableObject {
 
     func performUpdate(_ update: AvailableUpdate) async {
         guard !workingIDs.contains(update.id) else { return }
+        if update.homebrewToken != nil,
+           queueRunningAppConfirmation(for: [update.app], action: .update(update)) { return }
+        await performUpdateNow(update)
+    }
+
+    private func performUpdateNow(_ update: AvailableUpdate) async {
         if let token = update.homebrewToken {
             if let package = homebrewPackages.first(where: { $0.kind == .cask && $0.token == token }) {
-                await updatePackage(package)
+                await updatePackageNow(package)
             } else if let item = adoptableApps.first(where: { $0.caskToken == token && $0.app.id == update.app.id }) {
-                await updateAdoptableApp(item)
+                await updateAdoptableAppNow(item)
             } else {
                 let succeeded = await perform(id: update.id) { try await HomebrewClient().upgradeCask(token: token) }
                 if succeeded {
@@ -237,6 +293,13 @@ final class UpkeepStore: ObservableObject {
     }
 
     func updatePackage(_ package: HomebrewPackage) async {
+        if package.kind == .cask,
+           let app = matchingApp(for: package),
+           queueRunningAppConfirmation(for: [app], action: .package(package)) { return }
+        await updatePackageNow(package)
+    }
+
+    private func updatePackageNow(_ package: HomebrewPackage) async {
         let record = await recoveryRecord(for: package)
         if package.kind == .cask, matchingApp(for: package) != nil, record == nil { return }
         let succeeded = await perform(id: package.id) { try await HomebrewClient().upgrade(package) }
@@ -248,6 +311,14 @@ final class UpkeepStore: ObservableObject {
     }
 
     func updateAllPackages() async {
+        let runningApps = homebrewPackages
+            .filter { $0.isOutdated && !isExcluded($0) && $0.kind == .cask }
+            .compactMap(matchingApp(for:))
+        if queueRunningAppConfirmation(for: runningApps, action: .allPackages) { return }
+        await updateAllPackagesNow()
+    }
+
+    private func updateAllPackagesNow() async {
         guard !workingIDs.contains("homebrew-all") else { return }
         workingIDs.insert("homebrew-all")
         defer { workingIDs.remove("homebrew-all") }
@@ -280,11 +351,21 @@ final class UpkeepStore: ObservableObject {
     }
 
     func adopt(_ item: AdoptableApp) async {
+        if queueRunningAppConfirmation(for: [item.app], action: .adopt(item)) { return }
+        await adoptNow(item)
+    }
+
+    private func adoptNow(_ item: AdoptableApp) async {
         let succeeded = await perform(id: item.id) { try await HomebrewClient().adopt(item) }
         if succeeded { await scan() }
     }
 
     func updateAdoptableApp(_ item: AdoptableApp) async {
+        if queueRunningAppConfirmation(for: [item.app], action: .updateAdoptable(item)) { return }
+        await updateAdoptableAppNow(item)
+    }
+
+    private func updateAdoptableAppNow(_ item: AdoptableApp) async {
         let record: UpdateRecord
         do {
             record = try await UpdateHistoryStore.shared.prepareAppBackup(
@@ -299,6 +380,30 @@ final class UpkeepStore: ObservableObject {
             try? await UpdateHistoryStore.shared.add(record)
             await scan()
             reconcileHomebrewUpdate(token: item.caskToken, name: item.app.name)
+        }
+    }
+
+    func isRunning(_ app: InstalledApp) -> Bool {
+        if let bundleIdentifier = app.bundleIdentifier,
+           runningBundleIdentifiers.contains(bundleIdentifier) { return true }
+        return runningApplicationPaths.contains(canonicalPath(app.url))
+    }
+
+    func confirmRunningAppUpdate(_ confirmation: RunningAppConfirmation) async {
+        pendingRunningAppConfirmation = nil
+        do {
+            try await quitRunningApplications(for: confirmation.apps)
+        } catch {
+            errorMessage = error.localizedDescription
+            return
+        }
+
+        switch confirmation.action {
+        case let .update(update): await performUpdateNow(update)
+        case let .package(package): await updatePackageNow(package)
+        case let .adopt(item): await adoptNow(item)
+        case let .updateAdoptable(item): await updateAdoptableAppNow(item)
+        case .allPackages: await updateAllPackagesNow()
         }
     }
 
@@ -531,6 +636,49 @@ final class UpkeepStore: ObservableObject {
     private func homebrewPackage(for app: InstalledApp) -> HomebrewPackage? {
         let name = normalize(app.name)
         return homebrewPackages.first { $0.kind == .cask && (normalize($0.displayName) == name || normalize($0.token) == name) }
+    }
+
+    private func queueRunningAppConfirmation(for apps: [InstalledApp], action: RunningAppConfirmation.Action) -> Bool {
+        refreshRunningApplications()
+        let runningApps = Dictionary(uniqueKeysWithValues: apps.filter(isRunning).map { ($0.id, $0) })
+            .values
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        guard !runningApps.isEmpty else { return false }
+        pendingRunningAppConfirmation = RunningAppConfirmation(apps: runningApps, action: action)
+        return true
+    }
+
+    private func refreshRunningApplications() {
+        let runningApplications = NSWorkspace.shared.runningApplications.filter { !$0.isTerminated }
+        let identifiers = Set(runningApplications.compactMap(\.bundleIdentifier))
+        let paths = Set(runningApplications.compactMap(\.bundleURL).map(canonicalPath))
+        if identifiers != runningBundleIdentifiers { runningBundleIdentifiers = identifiers }
+        if paths != runningApplicationPaths { runningApplicationPaths = paths }
+    }
+
+    private func quitRunningApplications(for apps: [InstalledApp]) async throws {
+        refreshRunningApplications()
+        let identifiers = Set(apps.compactMap(\.bundleIdentifier))
+        let paths = Set(apps.map { canonicalPath($0.url) })
+        let targets = NSWorkspace.shared.runningApplications.filter { runningApplication in
+            if let identifier = runningApplication.bundleIdentifier, identifiers.contains(identifier) { return true }
+            if let url = runningApplication.bundleURL, paths.contains(canonicalPath(url)) { return true }
+            return false
+        }
+
+        for target in targets where !target.isTerminated { target.terminate() }
+
+        for _ in 0..<40 {
+            try await Task.sleep(for: .milliseconds(250))
+            refreshRunningApplications()
+            if apps.allSatisfy({ !isRunning($0) }) { return }
+        }
+
+        throw RunningAppUpdateError.couldNotQuit(apps.filter(isRunning).map(\.name))
+    }
+
+    private func canonicalPath(_ url: URL) -> String {
+        url.resolvingSymlinksInPath().standardizedFileURL.path
     }
 
     private func matching<T>(_ values: [T], name: (T) -> String) -> [T] {

@@ -16,7 +16,10 @@ struct AllAppsView: View {
                     AppIcon(url: app.url, size: 36)
                 } content: {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(app.name).fontWeight(.semibold).lineLimit(1)
+                        HStack(spacing: 7) {
+                            Text(app.name).fontWeight(.semibold).lineLimit(1)
+                            if store.isRunning(app) { RunningBadge() }
+                        }
                         Text(app.bundleIdentifier ?? app.url.path)
                             .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
@@ -98,7 +101,10 @@ struct AppDetailView: View {
             HStack(alignment: .top, spacing: 18) {
                 AppIcon(url: app.url, size: 72)
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(app.name).font(.largeTitle.bold())
+                    HStack(spacing: 10) {
+                        Text(app.name).font(.largeTitle.bold())
+                        if store.isRunning(app) { RunningBadge() }
+                    }
                     Text("Version \(app.installedVersion)" + buildText)
                         .font(.title3.monospacedDigit()).foregroundStyle(.secondary)
                     if let source = store.source(for: app) { SourceBadge(source: source) }
@@ -211,5 +217,16 @@ struct SourceBadge: View {
     }
     private var color: Color {
         switch source { case .appStore: .blue; case .sparkle: .purple; case .homebrew: .orange; case .github: .primary }
+    }
+}
+
+struct RunningBadge: View {
+    var body: some View {
+        Label("Running", systemImage: "circle.fill")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.green)
+            .labelStyle(.titleAndIcon)
+            .help("This app is currently running")
+            .accessibilityLabel("Running")
     }
 }

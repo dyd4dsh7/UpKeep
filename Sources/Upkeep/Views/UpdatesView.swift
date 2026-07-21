@@ -212,6 +212,7 @@ struct UpdateCard: View {
                         .fontWeight(.semibold)
                         .lineLimit(1)
                     SourceBadge(source: update.source)
+                    if store.isRunning(update.app) { RunningBadge() }
                 }
 
                 if let notes = update.releaseNotes, !notes.isEmpty {

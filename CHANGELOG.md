@@ -2,6 +2,13 @@
 
 All notable changes to Upkeep are documented here.
 
+## 0.12.0 — 2026-07-21
+
+- Added live Running indicators to installed apps, available updates, app details, and adoptable apps.
+- Added a confirmation step before Homebrew changes a running GUI app, with graceful app termination before the update begins.
+- Added batch-update preflight that identifies and quits all affected running apps together.
+- Stops the update with actionable guidance when an app does not quit cleanly.
+
 ## 0.11.3 — 2026-07-21
 
 - Distinguished genuine “up to date” results from App Store, Sparkle, GitHub, Homebrew, macOS, developer-package, and AI-model scan failures.

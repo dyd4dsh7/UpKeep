@@ -51,6 +51,12 @@ private struct UpkeepRelease: Identifiable {
     let changes: [String]
 
     static let all = [
+        UpkeepRelease(version: "0.12.0", date: "21 July 2026", changes: [
+            "Shows live Running indicators in app lists, update rows, app details, and the Adoptable workspace.",
+            "Asks before Homebrew changes a running GUI app and quits it gracefully before updating.",
+            "Preflights batch Homebrew updates and handles all affected running apps in one confirmation.",
+            "Stops safely with actionable guidance when an app does not quit cleanly."
+        ]),
         UpkeepRelease(version: "0.11.3", date: "21 July 2026", changes: [
             "Distinguishes genuine up-to-date results from update-source and package-manager scan failures.",
             "Preserves last-known updates only for the affected app or source when part of a scan fails.",

@@ -23,7 +23,10 @@ struct AdoptableView: View {
                         AppIcon(url: item.app.url, size: 36)
                     } content: {
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(item.app.name).fontWeight(.semibold).lineLimit(1)
+                            HStack(spacing: 7) {
+                                Text(item.app.name).fontWeight(.semibold).lineLimit(1)
+                                if store.isRunning(item.app) { RunningBadge() }
+                            }
                             Text("Homebrew cask · \(item.caskToken)")
                                 .font(.caption).foregroundStyle(.secondary)
                         }

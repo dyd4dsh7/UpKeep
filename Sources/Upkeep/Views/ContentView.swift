@@ -43,6 +43,16 @@ struct ContentView: View {
         .alert("The operation couldn’t be completed", isPresented: Binding(
             get: { store.errorMessage != nil }, set: { if !$0 { store.errorMessage = nil } }
         )) { Button("OK", role: .cancel) {} } message: { Text(store.errorMessage ?? "Unknown error") }
+        .alert(item: $store.pendingRunningAppConfirmation) { confirmation in
+            Alert(
+                title: Text(confirmation.title),
+                message: Text(confirmation.message),
+                primaryButton: .destructive(Text(confirmation.buttonTitle)) {
+                    Task { await store.confirmRunningAppUpdate(confirmation) }
+                },
+                secondaryButton: .cancel()
+            )
+        }
         .sheet(item: $store.selectedApp) { app in AppDetailView(app: app) }
     }
 
