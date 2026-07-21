@@ -32,6 +32,13 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
         self.githubRepository = githubRepository
         self.hasAppStoreReceipt = hasAppStoreReceipt
     }
+
+    var updateExclusionKey: String {
+        if let bundleIdentifier, !bundleIdentifier.isEmpty {
+            return "app|bundle|\(bundleIdentifier.lowercased())"
+        }
+        return "app|path|\(url.standardizedFileURL.path)"
+    }
 }
 
 enum UpdateSource: String, Codable, CaseIterable, Identifiable, Sendable {

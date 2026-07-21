@@ -144,9 +144,7 @@ struct SettingsView: View {
                         } content: {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(exclusion.name).fontWeight(.semibold).lineLimit(1)
-                                Text(exclusion.mode == .ignored
-                                     ? "\(exclusion.category) · All future updates ignored"
-                                     : "\(exclusion.category) · Version \(exclusion.version ?? "") skipped")
+                                Text(exclusionDescription(exclusion))
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                         } accessories: {
@@ -156,6 +154,18 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    private func exclusionDescription(_ exclusion: UpdateExclusion) -> String {
+        let behavior = exclusion.mode == .ignored
+            ? "All updates ignored"
+            : "Version \(exclusion.version ?? "") skipped"
+        guard let expiresAt = exclusion.expiresAt else {
+            return exclusion.mode == .ignored
+                ? "\(exclusion.category) · All future updates ignored"
+                : "\(exclusion.category) · \(behavior)"
+        }
+        return "\(exclusion.category) · \(behavior) until \(expiresAt.formatted(date: .abbreviated, time: .shortened))"
     }
 
     private var developer: some View {

@@ -163,6 +163,32 @@ struct MoreMenuIcon: View {
     }
 }
 
+struct UpdateExclusionOptions: View {
+    let skipTitle: String
+    let ignoreTitle: String
+    let skip: () -> Void
+    let ignore: () -> Void
+    let skipFor: (UpdateExclusionDuration) -> Void
+    let ignoreFor: (UpdateExclusionDuration) -> Void
+
+    var body: some View {
+        Menu("Skip") {
+            Button(skipTitle, action: skip)
+            Divider()
+            ForEach(UpdateExclusionDuration.allCases) { duration in
+                Button("For \(duration.title)") { skipFor(duration) }
+            }
+        }
+        Menu("Ignore") {
+            Button(ignoreTitle, action: ignore)
+            Divider()
+            ForEach(UpdateExclusionDuration.allCases) { duration in
+                Button("For \(duration.title)") { ignoreFor(duration) }
+            }
+        }
+    }
+}
+
 struct RunningIndicator: View {
     var body: some View {
         Circle()

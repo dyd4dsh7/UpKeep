@@ -194,6 +194,9 @@ final class UpkeepStore: ObservableObject {
         let previousCount = totalUpdateCount
         let report = await UpdateScanner().scan(settings: settings.scanSettings)
         apps = report.apps
+        for app in apps {
+            settings.migrateExclusion(from: legacyExclusionKey(for: app), to: exclusionKey(for: app))
+        }
         updates = mergedUpdates(from: report)
         switch report.homebrewInventoryStatus {
         case .disabled:
@@ -556,36 +559,36 @@ final class UpkeepStore: ObservableObject {
         settings.ignoredExclusion(for: exclusionKey(for: app))
     }
 
-    func skip(_ update: AvailableUpdate) {
-        exclude(.skipped, key: exclusionKey(for: update.app), name: update.app.name, category: "App", version: update.availableVersion)
+    func skip(_ update: AvailableUpdate, duration: UpdateExclusionDuration? = nil) {
+        exclude(.skipped, key: exclusionKey(for: update.app), name: update.app.name, category: "App", version: update.availableVersion, duration: duration)
     }
 
-    func ignore(_ app: InstalledApp) {
-        exclude(.ignored, key: exclusionKey(for: app), name: app.name, category: "App", version: nil)
+    func ignore(_ app: InstalledApp, duration: UpdateExclusionDuration? = nil) {
+        exclude(.ignored, key: exclusionKey(for: app), name: app.name, category: "App", version: nil, duration: duration)
     }
 
-    func skip(_ package: HomebrewPackage) {
-        exclude(.skipped, key: exclusionKey(for: package), name: package.displayName, category: "Homebrew", version: package.currentVersion)
+    func skip(_ package: HomebrewPackage, duration: UpdateExclusionDuration? = nil) {
+        exclude(.skipped, key: exclusionKey(for: package), name: package.displayName, category: "Homebrew", version: package.currentVersion, duration: duration)
     }
 
-    func ignore(_ package: HomebrewPackage) {
-        exclude(.ignored, key: exclusionKey(for: package), name: package.displayName, category: "Homebrew", version: nil)
+    func ignore(_ package: HomebrewPackage, duration: UpdateExclusionDuration? = nil) {
+        exclude(.ignored, key: exclusionKey(for: package), name: package.displayName, category: "Homebrew", version: nil, duration: duration)
     }
 
-    func skip(_ package: DeveloperPackage) {
-        exclude(.skipped, key: exclusionKey(for: package), name: package.name, category: package.manager.rawValue, version: package.latestVersion)
+    func skip(_ package: DeveloperPackage, duration: UpdateExclusionDuration? = nil) {
+        exclude(.skipped, key: exclusionKey(for: package), name: package.name, category: package.manager.rawValue, version: package.latestVersion, duration: duration)
     }
 
-    func ignore(_ package: DeveloperPackage) {
-        exclude(.ignored, key: exclusionKey(for: package), name: package.name, category: package.manager.rawValue, version: nil)
+    func ignore(_ package: DeveloperPackage, duration: UpdateExclusionDuration? = nil) {
+        exclude(.ignored, key: exclusionKey(for: package), name: package.name, category: package.manager.rawValue, version: nil, duration: duration)
     }
 
-    func skip(_ model: LocalLLMModel) {
-        exclude(.skipped, key: exclusionKey(for: model), name: model.name, category: model.runtime.rawValue, version: model.latestRevision)
+    func skip(_ model: LocalLLMModel, duration: UpdateExclusionDuration? = nil) {
+        exclude(.skipped, key: exclusionKey(for: model), name: model.name, category: model.runtime.rawValue, version: model.latestRevision, duration: duration)
     }
 
-    func ignore(_ model: LocalLLMModel) {
-        exclude(.ignored, key: exclusionKey(for: model), name: model.name, category: model.runtime.rawValue, version: nil)
+    func ignore(_ model: LocalLLMModel, duration: UpdateExclusionDuration? = nil) {
+        exclude(.ignored, key: exclusionKey(for: model), name: model.name, category: model.runtime.rawValue, version: nil, duration: duration)
     }
 
     func restore(_ exclusion: UpdateExclusion) {
@@ -643,13 +646,14 @@ final class UpkeepStore: ObservableObject {
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "upkeep-updates", content: content, trigger: nil))
     }
 
-    private func exclude(_ mode: UpdateExclusionMode, key: String, name: String, category: String, version: String?) {
-        if mode == .skipped, let version { settings.skip(key: key, name: name, category: category, version: version) }
-        else { settings.ignore(key: key, name: name, category: category) }
+    private func exclude(_ mode: UpdateExclusionMode, key: String, name: String, category: String, version: String?, duration: UpdateExclusionDuration?) {
+        if mode == .skipped, let version { settings.skip(key: key, name: name, category: category, version: version, duration: duration) }
+        else { settings.ignore(key: key, name: name, category: category, duration: duration) }
         objectWillChange.send()
     }
 
-    private func exclusionKey(for app: InstalledApp) -> String { "app|\(app.id)" }
+    private func exclusionKey(for app: InstalledApp) -> String { app.updateExclusionKey }
+    private func legacyExclusionKey(for app: InstalledApp) -> String { "app|\(app.id)" }
     private func exclusionKey(for package: HomebrewPackage) -> String { "homebrew|\(package.id)" }
     private func exclusionKey(for package: DeveloperPackage) -> String { "developer|\(package.id)" }
     private func exclusionKey(for model: LocalLLMModel) -> String { "model|\(model.id)" }

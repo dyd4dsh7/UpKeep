@@ -51,6 +51,12 @@ private struct UpkeepRelease: Identifiable {
     let changes: [String]
 
     static let all = [
+        UpkeepRelease(version: "0.19.0", date: "22 July 2026", changes: [
+            "Adds one-to-six-day, one-week, and one-, three-, and six-month time frames for both Skip and Ignore actions.",
+            "Keeps timed skips version-specific while timed ignores suppress every version until expiry.",
+            "Automatically restores expired updates and shows temporary exclusion deadlines in Settings.",
+            "Keeps application exclusions intact when apps move and migrates existing path-based exclusions."
+        ]),
         UpkeepRelease(version: "0.18.0", date: "22 July 2026", changes: [
             "Adds precise daily update checks with a user-selected time and visible next-check date.",
             "Replaces periodic polling with an efficient scheduler that responds immediately to preference changes.",

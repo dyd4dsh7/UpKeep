@@ -61,6 +61,50 @@ enum UpdateExclusionMode: String, Codable, Sendable {
     case ignored = "Ignored"
 }
 
+enum UpdateExclusionDuration: String, CaseIterable, Identifiable, Codable, Sendable {
+    case oneDay
+    case twoDays
+    case threeDays
+    case fourDays
+    case fiveDays
+    case sixDays
+    case oneWeek
+    case oneMonth
+    case threeMonths
+    case sixMonths
+
+    var id: Self { self }
+    var title: String {
+        switch self {
+        case .oneDay: "1 Day"
+        case .twoDays: "2 Days"
+        case .threeDays: "3 Days"
+        case .fourDays: "4 Days"
+        case .fiveDays: "5 Days"
+        case .sixDays: "6 Days"
+        case .oneWeek: "1 Week"
+        case .oneMonth: "1 Month"
+        case .threeMonths: "3 Months"
+        case .sixMonths: "6 Months"
+        }
+    }
+
+    func expirationDate(from date: Date, calendar: Calendar = .current) -> Date {
+        switch self {
+        case .oneDay: calendar.date(byAdding: .day, value: 1, to: date) ?? date.addingTimeInterval(86_400)
+        case .twoDays: calendar.date(byAdding: .day, value: 2, to: date) ?? date.addingTimeInterval(172_800)
+        case .threeDays: calendar.date(byAdding: .day, value: 3, to: date) ?? date.addingTimeInterval(259_200)
+        case .fourDays: calendar.date(byAdding: .day, value: 4, to: date) ?? date.addingTimeInterval(345_600)
+        case .fiveDays: calendar.date(byAdding: .day, value: 5, to: date) ?? date.addingTimeInterval(432_000)
+        case .sixDays: calendar.date(byAdding: .day, value: 6, to: date) ?? date.addingTimeInterval(518_400)
+        case .oneWeek: calendar.date(byAdding: .day, value: 7, to: date) ?? date.addingTimeInterval(604_800)
+        case .oneMonth: calendar.date(byAdding: .month, value: 1, to: date) ?? date.addingTimeInterval(2_592_000)
+        case .threeMonths: calendar.date(byAdding: .month, value: 3, to: date) ?? date.addingTimeInterval(7_776_000)
+        case .sixMonths: calendar.date(byAdding: .month, value: 6, to: date) ?? date.addingTimeInterval(15_552_000)
+        }
+    }
+}
+
 struct UpdateExclusion: Codable, Hashable, Identifiable, Sendable {
     var id: String { "\(key)|\(mode.rawValue)|\(version ?? "")" }
     let key: String
@@ -68,6 +112,10 @@ struct UpdateExclusion: Codable, Hashable, Identifiable, Sendable {
     let category: String
     let version: String?
     let mode: UpdateExclusionMode
+    let expiresAt: Date?
+
+    var isTemporary: Bool { expiresAt != nil }
+    func isActive(at date: Date = Date()) -> Bool { expiresAt.map { $0 > date } ?? true }
 }
 
 struct ScanSettings: Sendable {
@@ -83,7 +131,7 @@ struct ScanSettings: Sendable {
 
 @MainActor
 final class AppSettings: ObservableObject {
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
 
     @Published var checkOnLaunch: Bool { didSet { save(checkOnLaunch, "checkOnLaunch") } }
     @Published var refreshInterval: RefreshInterval { didSet { save(refreshInterval.rawValue, "refreshInterval") } }
@@ -104,8 +152,10 @@ final class AppSettings: ObservableObject {
     @Published private(set) var updateExclusions: [UpdateExclusion]
     @Published var selectedSection: SettingsSection = .general
     @Published var confirmingPrereleaseUpdates = false
+    private var exclusionExpiryTask: Task<Void, Never>?
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         defaults.register(defaults: [
             "checkOnLaunch": true,
             "refreshInterval": RefreshInterval.everySixHours.rawValue,
@@ -146,7 +196,9 @@ final class AppSettings: ObservableObject {
         enabledDeveloperManagers = Set(DeveloperPackageManager.allCases.filter { !disabled.contains($0.rawValue) })
         updateExclusions = (defaults.data(forKey: "updateExclusions")
             .flatMap { try? JSONDecoder().decode([UpdateExclusion].self, from: $0) } ?? [])
+            .filter { $0.isActive() }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        saveExclusions()
     }
 
     func isManagerEnabled(_ manager: DeveloperPackageManager) -> Bool {
@@ -163,32 +215,47 @@ final class AppSettings: ObservableObject {
 
     func isExcluded(key: String, version: String) -> Bool {
         updateExclusions.contains {
-            $0.key == key && ($0.mode == .ignored || ($0.mode == .skipped && $0.version == version))
+            $0.key == key && $0.isActive() && ($0.mode == .ignored || ($0.mode == .skipped && $0.version == version))
         }
     }
 
     func exclusion(for key: String, version: String) -> UpdateExclusion? {
         updateExclusions.first {
-            $0.key == key && ($0.mode == .ignored || ($0.mode == .skipped && $0.version == version))
+            $0.key == key && $0.isActive() && ($0.mode == .ignored || ($0.mode == .skipped && $0.version == version))
         }
     }
 
     func ignoredExclusion(for key: String) -> UpdateExclusion? {
-        updateExclusions.first { $0.key == key && $0.mode == .ignored }
+        updateExclusions.first { $0.key == key && $0.mode == .ignored && $0.isActive() }
     }
 
-    func skip(key: String, name: String, category: String, version: String) {
+    func skip(
+        key: String,
+        name: String,
+        category: String,
+        version: String,
+        duration: UpdateExclusionDuration? = nil,
+        now: Date = Date()
+    ) {
         updateExclusions.removeAll { $0.key == key }
         updateExclusions.append(UpdateExclusion(
-            key: key, name: name, category: category, version: version, mode: .skipped
+            key: key, name: name, category: category, version: version, mode: .skipped,
+            expiresAt: duration?.expirationDate(from: now)
         ))
         saveExclusions()
     }
 
-    func ignore(key: String, name: String, category: String) {
+    func ignore(
+        key: String,
+        name: String,
+        category: String,
+        duration: UpdateExclusionDuration? = nil,
+        now: Date = Date()
+    ) {
         updateExclusions.removeAll { $0.key == key }
         updateExclusions.append(UpdateExclusion(
-            key: key, name: name, category: category, version: nil, mode: .ignored
+            key: key, name: name, category: category, version: nil, mode: .ignored,
+            expiresAt: duration?.expirationDate(from: now)
         ))
         saveExclusions()
     }
@@ -208,6 +275,27 @@ final class AppSettings: ObservableObject {
         saveExclusions()
     }
 
+    func migrateExclusion(from legacyKey: String, to key: String) {
+        guard legacyKey != key,
+              let legacy = updateExclusions.first(where: { $0.key == legacyKey })
+        else { return }
+
+        if updateExclusions.contains(where: { $0.key == key }) {
+            updateExclusions.removeAll { $0.key == legacyKey }
+        } else {
+            updateExclusions.removeAll { $0.key == legacyKey }
+            updateExclusions.append(UpdateExclusion(
+                key: key,
+                name: legacy.name,
+                category: legacy.category,
+                version: legacy.version,
+                mode: legacy.mode,
+                expiresAt: legacy.expiresAt
+            ))
+        }
+        saveExclusions()
+    }
+
     var scanSettings: ScanSettings {
         ScanSettings(
             checkAppStore: checkAppStore, checkSparkle: checkSparkle,
@@ -221,7 +309,24 @@ final class AppSettings: ObservableObject {
     private func save(_ value: Any, _ key: String) { defaults.set(value, forKey: key) }
 
     private func saveExclusions() {
+        updateExclusions.removeAll { !$0.isActive() }
         updateExclusions.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         if let data = try? JSONEncoder().encode(updateExclusions) { defaults.set(data, forKey: "updateExclusions") }
+        scheduleExclusionExpiry()
+    }
+
+    private func scheduleExclusionExpiry() {
+        exclusionExpiryTask?.cancel()
+        guard let expiration = updateExclusions.compactMap(\.expiresAt).min() else {
+            exclusionExpiryTask = nil
+            return
+        }
+        exclusionExpiryTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(max(0, expiration.timeIntervalSinceNow))) }
+            catch { return }
+            guard !Task.isCancelled, let self else { return }
+            self.updateExclusions.removeAll { !$0.isActive() }
+            self.saveExclusions()
+        }
     }
 }

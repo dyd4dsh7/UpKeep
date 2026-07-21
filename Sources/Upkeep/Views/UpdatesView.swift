@@ -219,12 +219,24 @@ private struct DeveloperUpdateCard: View {
                 .buttonStyle(.bordered).controlSize(.small)
                 .disabled(store.workingIDs.contains(package.id))
                 .frame(width: 120)
+            exclusionMenu(
+                skipTitle: "Skip Version \(package.latestVersion)",
+                ignoreTitle: "Ignore Indefinitely",
+                skip: { store.skip(package) },
+                ignore: { store.ignore(package) },
+                skipFor: { store.skip(package, duration: $0) },
+                ignoreFor: { store.ignore(package, duration: $0) }
+            )
         }
         .tag(UpdateInspectorSelection.developer(package.id).listID)
         .contentShape(Rectangle())
         .contextMenu {
-            Button("Skip Version \(package.latestVersion)") { store.skip(package) }
-            Button("Ignore \(package.name)") { store.ignore(package) }
+            exclusionOptions(
+                skipTitle: "Skip Version \(package.latestVersion)",
+                skip: { store.skip(package) }, ignore: { store.ignore(package) },
+                skipFor: { store.skip(package, duration: $0) },
+                ignoreFor: { store.ignore(package, duration: $0) }
+            )
         }
     }
 }
@@ -279,9 +291,25 @@ struct UpdateCard: View {
             .controlSize(.small)
             .disabled(store.workingIDs.contains(update.id))
             .frame(width: 120)
+            exclusionMenu(
+                skipTitle: "Skip Version \(update.availableVersion)",
+                ignoreTitle: "Ignore Indefinitely",
+                skip: { store.skip(update) },
+                ignore: { store.ignore(update.app) },
+                skipFor: { store.skip(update, duration: $0) },
+                ignoreFor: { store.ignore(update.app, duration: $0) }
+            )
         }
         .tag("app:\(update.app.id)")
         .contentShape(Rectangle())
+        .contextMenu {
+            exclusionOptions(
+                skipTitle: "Skip Version \(update.availableVersion)",
+                skip: { store.skip(update) }, ignore: { store.ignore(update.app) },
+                skipFor: { store.skip(update, duration: $0) },
+                ignoreFor: { store.ignore(update.app, duration: $0) }
+            )
+        }
     }
 
     private var actionTitle: String {
@@ -314,12 +342,24 @@ private struct HomebrewUpdateCard: View {
                 .buttonStyle(.bordered).controlSize(.small)
                 .disabled(store.workingIDs.contains(package.id))
                 .frame(width: 120)
+            exclusionMenu(
+                skipTitle: "Skip Version \(package.currentVersion)",
+                ignoreTitle: "Ignore Indefinitely",
+                skip: { store.skip(package) },
+                ignore: { store.ignore(package) },
+                skipFor: { store.skip(package, duration: $0) },
+                ignoreFor: { store.ignore(package, duration: $0) }
+            )
         }
         .tag(UpdateInspectorSelection.homebrew(package.id).listID)
         .contentShape(Rectangle())
         .contextMenu {
-            Button("Skip Version \(package.currentVersion)") { store.skip(package) }
-            Button("Ignore \(package.displayName)") { store.ignore(package) }
+            exclusionOptions(
+                skipTitle: "Skip Version \(package.currentVersion)",
+                skip: { store.skip(package) }, ignore: { store.ignore(package) },
+                skipFor: { store.skip(package, duration: $0) },
+                ignoreFor: { store.ignore(package, duration: $0) }
+            )
         }
     }
 }
@@ -343,12 +383,70 @@ private struct LocalModelUpdateCard: View {
                 .buttonStyle(.bordered).controlSize(.small)
                 .disabled(store.workingIDs.contains(model.id))
                 .frame(width: 120)
+            exclusionMenu(
+                skipTitle: "Skip This Revision",
+                ignoreTitle: "Ignore Indefinitely",
+                skip: { store.skip(model) },
+                ignore: { store.ignore(model) },
+                skipFor: { store.skip(model, duration: $0) },
+                ignoreFor: { store.ignore(model, duration: $0) }
+            )
         }
         .tag(UpdateInspectorSelection.model(model.id).listID)
         .contentShape(Rectangle())
         .contextMenu {
-            Button("Skip This Revision") { store.skip(model) }
-            Button("Ignore \(model.name)") { store.ignore(model) }
+            exclusionOptions(
+                skipTitle: "Skip This Revision",
+                skip: { store.skip(model) }, ignore: { store.ignore(model) },
+                skipFor: { store.skip(model, duration: $0) },
+                ignoreFor: { store.ignore(model, duration: $0) }
+            )
         }
     }
+}
+
+@MainActor
+private func exclusionMenu(
+    skipTitle: String,
+    ignoreTitle: String,
+    skip: @escaping () -> Void,
+    ignore: @escaping () -> Void,
+    skipFor: @escaping (UpdateExclusionDuration) -> Void,
+    ignoreFor: @escaping (UpdateExclusionDuration) -> Void
+) -> some View {
+    Menu {
+        UpdateExclusionOptions(
+            skipTitle: skipTitle,
+            ignoreTitle: ignoreTitle,
+            skip: skip,
+            ignore: ignore,
+            skipFor: skipFor,
+            ignoreFor: ignoreFor
+        )
+    } label: {
+        Image(systemName: "ellipsis.circle")
+    }
+    .menuStyle(.borderlessButton)
+    .menuIndicator(.hidden)
+    .fixedSize()
+    .help("Update options")
+    .accessibilityLabel("Update options")
+}
+
+@MainActor
+private func exclusionOptions(
+    skipTitle: String,
+    skip: @escaping () -> Void,
+    ignore: @escaping () -> Void,
+    skipFor: @escaping (UpdateExclusionDuration) -> Void,
+    ignoreFor: @escaping (UpdateExclusionDuration) -> Void
+) -> some View {
+    UpdateExclusionOptions(
+        skipTitle: skipTitle,
+        ignoreTitle: "Ignore Indefinitely",
+        skip: skip,
+        ignore: ignore,
+        skipFor: skipFor,
+        ignoreFor: ignoreFor
+    )
 }

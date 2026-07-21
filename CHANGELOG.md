@@ -2,6 +2,13 @@
 
 All notable changes to Upkeep are documented here.
 
+## 0.19.0 — 2026-07-22
+
+- Added one-to-six-day, one-week, and one-, three-, and six-month time frames for both Skip and Ignore actions.
+- Timed skips remain version-specific, while timed ignores suppress every version until they expire.
+- Automatically restores expired updates and shows temporary exclusion deadlines in Settings.
+- Made application exclusions survive app moves and migrated existing path-based exclusions.
+
 ## 0.18.0 — 2026-07-22
 
 - Added precise daily update checks with a user-selected time and a visible next-check date.
