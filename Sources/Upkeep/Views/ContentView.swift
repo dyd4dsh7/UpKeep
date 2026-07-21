@@ -20,11 +20,11 @@ struct ContentView: View {
             AppBrand.applyApplicationIcon(for: colorScheme)
             MenuBarController.shared.configure(store: store, settings: settings)
             await store.start()
-            AppBrand.applyDockBadge(updateCount: store.totalUpdateCount)
+            refreshDockBadge()
             refreshMenuBar()
         }
-        .onChange(of: store.totalUpdateCount, initial: true) { _, count in
-            AppBrand.applyDockBadge(updateCount: count)
+        .onChange(of: store.totalUpdateCount, initial: true) { _, _ in
+            refreshDockBadge()
             refreshMenuBar()
         }
         .onChange(of: settings.showMenuBarItem) { _, _ in
@@ -33,17 +33,20 @@ struct ContentView: View {
         .onChange(of: settings.showMenuBarCount) { _, _ in
             refreshMenuBar()
         }
+        .onChange(of: settings.showDockBadge) { _, _ in
+            refreshDockBadge()
+        }
         .onChange(of: store.selection) { _, destination in
             store.selectedApp = nil
             store.updateInspectorSelection = nil
         }
         .onChange(of: colorScheme) { _, newColorScheme in
             AppBrand.applyApplicationIcon(for: newColorScheme)
-            AppBrand.applyDockBadge(updateCount: store.totalUpdateCount)
+            refreshDockBadge()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             AppBrand.applyApplicationIcon(for: colorScheme)
-            AppBrand.applyDockBadge(updateCount: store.totalUpdateCount)
+            refreshDockBadge()
         }
         .alert("The operation couldn’t be completed", isPresented: Binding(
             get: { store.errorMessage != nil }, set: { if !$0 { store.errorMessage = nil } }
@@ -57,6 +60,10 @@ struct ContentView: View {
             showCount: settings.showMenuBarCount,
             isVisible: settings.showMenuBarItem
         )
+    }
+
+    private func refreshDockBadge() {
+        AppBrand.applyDockBadge(updateCount: settings.showDockBadge ? store.totalUpdateCount : 0)
     }
 
     @ViewBuilder private var detail: some View {

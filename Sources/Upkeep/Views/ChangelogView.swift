@@ -51,6 +51,16 @@ private struct UpkeepRelease: Identifiable {
     let changes: [String]
 
     static let all = [
+        UpkeepRelease(version: "0.18.0", date: "22 July 2026", changes: [
+            "Adds precise daily update checks with a user-selected time and visible next-check date.",
+            "Replaces periodic polling with an efficient scheduler that responds immediately to preference changes.",
+            "Adds a persistent option to hide the available-update count from the Dock icon."
+        ]),
+        UpkeepRelease(version: "0.17.0", date: "22 July 2026", changes: [
+            "Retains every App Store, Homebrew, Sparkle, and GitHub source that reports an available update.",
+            "Uses a deterministic preferred-source policy while keeping alternate versions and actions available in app details.",
+            "Preserves last-known candidates for individual sources when a later scan partially fails."
+        ]),
         UpkeepRelease(version: "0.16.0", date: "21 July 2026", changes: [
             "Adds opt-in prerelease updates for apps, packages, and macOS, with a warning before enabling unstable releases.",
             "Labels Alpha, Beta, RC, Preview, Nightly, Dev, and other prereleases throughout update and inventory lists.",

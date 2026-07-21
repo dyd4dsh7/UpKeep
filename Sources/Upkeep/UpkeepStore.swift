@@ -89,6 +89,7 @@ final class UpkeepStore: ObservableObject {
     @Published var searchText = ""
     @Published var isScanning = false
     @Published var lastChecked: Date?
+    @Published private(set) var nextScheduledCheck: Date?
     @Published var errorMessage: String?
     @Published var scanWarnings: [ScanWarning] = []
     @Published var scanWarningsHidden = false
@@ -226,6 +227,7 @@ final class UpkeepStore: ObservableObject {
         }
         isScanning = false
         notifyIfNeeded(previousCount: previousCount)
+        if didStart { scheduleNextRefresh() }
     }
 
     func start() async {
@@ -240,13 +242,26 @@ final class UpkeepStore: ObservableObject {
             }
         }
         if settings.checkOnLaunch { await scan() }
+        scheduleNextRefresh()
+    }
+
+    func scheduleNextRefresh() {
+        periodicTask?.cancel()
+        let nextDate = settings.refreshInterval.nextDate(
+            after: lastChecked ?? startedAt,
+            dailyTimeMinutes: settings.dailyRefreshTimeMinutes
+        )
+        nextScheduledCheck = nextDate
+        guard let nextDate else {
+            periodicTask = nil
+            return
+        }
         periodicTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(300))
-                guard let self, self.settings.refreshInterval != .never else { continue }
-                let elapsed = Date().timeIntervalSince(self.lastChecked ?? self.startedAt)
-                if elapsed >= Double(self.settings.refreshInterval.rawValue) { await self.scan() }
-            }
+            let delay = max(0, nextDate.timeIntervalSinceNow)
+            do { try await Task.sleep(for: .seconds(delay)) }
+            catch { return }
+            guard !Task.isCancelled, let self else { return }
+            await self.scan()
         }
     }
 

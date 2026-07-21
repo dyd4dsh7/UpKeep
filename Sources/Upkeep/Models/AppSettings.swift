@@ -15,6 +15,35 @@ enum RefreshInterval: Int, CaseIterable, Identifiable, Sendable {
         case .daily: "Daily"
         }
     }
+
+    func nextDate(
+        after lastCheck: Date,
+        now: Date = Date(),
+        dailyTimeMinutes: Int,
+        calendar: Calendar = .current
+    ) -> Date? {
+        switch self {
+        case .never:
+            return nil
+        case .hourly, .everySixHours:
+            let interval = TimeInterval(rawValue)
+            let elapsed = max(0, now.timeIntervalSince(lastCheck))
+            let intervalsElapsed = floor(elapsed / interval) + 1
+            return lastCheck.addingTimeInterval(intervalsElapsed * interval)
+        case .daily:
+            let clampedMinutes = min(max(dailyTimeMinutes, 0), (24 * 60) - 1)
+            var components = DateComponents()
+            components.hour = clampedMinutes / 60
+            components.minute = clampedMinutes % 60
+            return calendar.nextDate(
+                after: now,
+                matching: components,
+                matchingPolicy: .nextTime,
+                repeatedTimePolicy: .first,
+                direction: .forward
+            )
+        }
+    }
 }
 
 enum SettingsSection: String, CaseIterable, Identifiable {
@@ -58,8 +87,10 @@ final class AppSettings: ObservableObject {
 
     @Published var checkOnLaunch: Bool { didSet { save(checkOnLaunch, "checkOnLaunch") } }
     @Published var refreshInterval: RefreshInterval { didSet { save(refreshInterval.rawValue, "refreshInterval") } }
+    @Published var dailyRefreshTimeMinutes: Int { didSet { save(dailyRefreshTimeMinutes, "dailyRefreshTimeMinutes") } }
     @Published var showMenuBarItem: Bool { didSet { save(showMenuBarItem, "showMenuBarItem") } }
     @Published var showMenuBarCount: Bool { didSet { save(showMenuBarCount, "showMenuBarCount") } }
+    @Published var showDockBadge: Bool { didSet { save(showDockBadge, "showDockBadge") } }
     @Published var notificationsEnabled: Bool { didSet { save(notificationsEnabled, "notificationsEnabled") } }
     @Published var showCurrentDeveloperPackages: Bool { didSet { save(showCurrentDeveloperPackages, "showCurrentDeveloperPackages") } }
     @Published var checkAppStore: Bool { didSet { save(checkAppStore, "checkAppStore") } }
@@ -78,8 +109,10 @@ final class AppSettings: ObservableObject {
         defaults.register(defaults: [
             "checkOnLaunch": true,
             "refreshInterval": RefreshInterval.everySixHours.rawValue,
+            "dailyRefreshTimeMinutes": 9 * 60,
             "showMenuBarItem": true,
             "showMenuBarCount": true,
+            "showDockBadge": true,
             "notificationsEnabled": false,
             "showCurrentDeveloperPackages": true,
             "checkAppStore": true,
@@ -96,8 +129,10 @@ final class AppSettings: ObservableObject {
         }
         checkOnLaunch = defaults.bool(forKey: "checkOnLaunch")
         refreshInterval = RefreshInterval(rawValue: defaults.integer(forKey: "refreshInterval")) ?? .everySixHours
+        dailyRefreshTimeMinutes = defaults.integer(forKey: "dailyRefreshTimeMinutes")
         showMenuBarItem = defaults.bool(forKey: "showMenuBarItem")
         showMenuBarCount = defaults.bool(forKey: "showMenuBarCount")
+        showDockBadge = defaults.bool(forKey: "showDockBadge")
         notificationsEnabled = defaults.bool(forKey: "notificationsEnabled")
         showCurrentDeveloperPackages = defaults.bool(forKey: "showCurrentDeveloperPackages")
         checkAppStore = defaults.bool(forKey: "checkAppStore")

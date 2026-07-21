@@ -2,6 +2,12 @@
 
 All notable changes to Upkeep are documented here.
 
+## 0.18.0 — 2026-07-22
+
+- Added precise daily update checks with a user-selected time and a visible next-check date.
+- Replaced periodic polling with an efficient single-run scheduler that immediately follows preference changes.
+- Added a persistent option to hide the available-update count from the Dock icon.
+
 ## 0.17.0 — 2026-07-22
 
 - Retained every App Store, Homebrew, Sparkle, and GitHub source that reports an available update instead of stopping at the first match.

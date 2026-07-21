@@ -48,6 +48,21 @@ struct SettingsView: View {
                 Picker("Background check", selection: $settings.refreshInterval) {
                     ForEach(RefreshInterval.allCases) { Text($0.title).tag($0) }
                 }
+                .onChange(of: settings.refreshInterval) { _, _ in store.scheduleNextRefresh() }
+                if settings.refreshInterval == .daily {
+                    DatePicker(
+                        "Check at",
+                        selection: dailyRefreshTime,
+                        displayedComponents: .hourAndMinute
+                    )
+                    .onChange(of: settings.dailyRefreshTimeMinutes) { _, _ in store.scheduleNextRefresh() }
+                }
+                if let nextCheck = store.nextScheduledCheck, settings.refreshInterval != .never {
+                    LabeledContent("Next check") {
+                        Text(nextCheck, format: .dateTime.weekday(.abbreviated).hour().minute())
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Toggle("Notify me when the available count changes", isOn: $settings.notificationsEnabled)
                     .onChange(of: settings.notificationsEnabled) { _, enabled in
                         if enabled { Task { _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) } }
@@ -57,6 +72,7 @@ struct SettingsView: View {
                 Toggle("Show Upkeep in the menu bar", isOn: $settings.showMenuBarItem)
                 Toggle("Show the available update count", isOn: $settings.showMenuBarCount)
                     .disabled(!settings.showMenuBarItem)
+                Toggle("Show the available update count on the Dock icon", isOn: $settings.showDockBadge)
                 Text("The Upkeep icon remains available for quick scans, Settings, and opening the main window.")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -184,6 +200,24 @@ struct SettingsView: View {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
         return "Version \(version) (\(build))"
+    }
+
+    private var dailyRefreshTime: Binding<Date> {
+        Binding(
+            get: {
+                let minutes = settings.dailyRefreshTimeMinutes
+                return Calendar.current.date(
+                    bySettingHour: minutes / 60,
+                    minute: minutes % 60,
+                    second: 0,
+                    of: Date()
+                ) ?? Date()
+            },
+            set: { date in
+                let components = Calendar.current.dateComponents([.hour, .minute], from: date)
+                settings.dailyRefreshTimeMinutes = (components.hour ?? 9) * 60 + (components.minute ?? 0)
+            }
+        )
     }
 
     private func icon(for section: SettingsSection) -> String {
