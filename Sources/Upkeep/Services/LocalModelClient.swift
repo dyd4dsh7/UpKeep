@@ -2,14 +2,29 @@ import CryptoKit
 import Foundation
 
 struct LocalModelClient: Sendable {
-    func scan() async -> [LocalLLMModel] {
+    struct Report: Sendable {
+        let models: [LocalLLMModel]
+        let warnings: [String]
+        let failedModelIDs: Set<String>
+        let failedRuntimes: Set<LocalModelRuntime>
+
+        static let empty = Report(models: [], warnings: [], failedModelIDs: [], failedRuntimes: [])
+    }
+
+    func scan() async -> Report {
         async let ollama = scanOllama()
         async let lmStudio = scanLMStudio()
-        let models = await ollama + lmStudio
-        return models.sorted {
+        let results = await [ollama, lmStudio]
+        let models = results.flatMap(\.models).sorted {
             if $0.runtime != $1.runtime { return $0.runtime.rawValue < $1.runtime.rawValue }
             return $0.name.localizedStandardCompare($1.name) == .orderedAscending
         }
+        return Report(
+            models: models,
+            warnings: results.compactMap(\.warning),
+            failedModelIDs: Set(results.flatMap(\.failedModelIDs)),
+            failedRuntimes: Set(results.filter(\.runtimeFailed).map(\.runtime))
+        )
     }
 
     func update(_ model: LocalLLMModel) async throws {
@@ -23,7 +38,7 @@ struct LocalModelClient: Sendable {
         }
     }
 
-    private func scanOllama() async -> [LocalLLMModel] {
+    private func scanOllama() async -> ModelRuntimeScanResult {
         let executable = executable(named: "ollama", extra: [
             "/Applications/Ollama.app/Contents/Resources/ollama",
             FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/ollama").path
@@ -33,30 +48,43 @@ struct LocalModelClient: Sendable {
             let output = await capture(URL(fileURLWithPath: executable), ["list"])
             if output.status == 0 {
                 rows = parseOllamaList(String(decoding: output.data, as: UTF8.self))
+            } else {
+                return ModelRuntimeScanResult(
+                    runtime: .ollama, models: [], failedModelIDs: [], runtimeFailed: true,
+                    warning: "Ollama inventory failed: \(commandMessage(output))"
+                )
             }
         }
-        return await withTaskGroup(of: LocalLLMModel.self) { group in
+        let results = await withTaskGroup(of: (LocalLLMModel, Bool).self) { group in
             for row in rows {
                 group.addTask {
                     let remote = await ollamaManifest(for: row.name)
                     let latest = remote?.digest ?? row.digest
                     let outdated = remote.map { !digest($0.digest, matches: row.digest) } ?? false
-                    return LocalLLMModel(
+                    return (LocalLLMModel(
                         id: "ollama:\(row.name)", name: row.name, variant: ollamaTag(row.name),
                         runtime: .ollama, installedRevision: shortDigest(row.digest),
                         latestRevision: shortDigest(latest), sizeBytes: row.sizeBytes,
                         modifiedAt: row.modifiedAt, homepage: ollamaHomepage(row.name),
                         executablePath: executable, updateReference: row.name, isOutdated: outdated
-                    )
+                    ), remote == nil)
                 }
             }
-            var models: [LocalLLMModel] = []
+            var models: [(LocalLLMModel, Bool)] = []
             for await model in group { models.append(model) }
             return models
         }
+        let failedIDs = results.filter { $0.1 }.map { $0.0.id }
+        return ModelRuntimeScanResult(
+            runtime: .ollama,
+            models: results.map { $0.0 },
+            failedModelIDs: failedIDs,
+            runtimeFailed: false,
+            warning: failedIDs.isEmpty ? nil : "Ollama registry checks failed for \(failedIDs.count) model\(failedIDs.count == 1 ? "" : "s")."
+        )
     }
 
-    private func scanLMStudio() async -> [LocalLLMModel] {
+    private func scanLMStudio() async -> ModelRuntimeScanResult {
         let executable = executable(named: "lms", extra: [
             FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".lmstudio/bin/lms").path
         ])
@@ -69,7 +97,7 @@ struct LocalModelClient: Sendable {
                 return ["gguf", "safetensors", "bin"].contains(ext) && !$0.lastPathComponent.hasPrefix(".")
             }.map { (root, $0) }
         }
-        return await withTaskGroup(of: LocalLLMModel?.self) { group in
+        let results = await withTaskGroup(of: (LocalLLMModel, Bool)?.self) { group in
             for entry in files {
                 group.addTask {
                     let root = entry.root, file = entry.file
@@ -87,7 +115,7 @@ struct LocalModelClient: Sendable {
                     } ?? false
                     let variant = file.deletingPathExtension().lastPathComponent
                     let quantization = lmStudioQuantization(variant)
-                    return LocalLLMModel(
+                    return (LocalLLMModel(
                         id: "lmstudio:\(relative)", name: repositoryID, variant: variant,
                         runtime: .lmStudio, installedRevision: revisionDate(modified),
                         latestRevision: revisionDate(remoteModified ?? modified),
@@ -96,14 +124,35 @@ struct LocalModelClient: Sendable {
                         executablePath: executable,
                         updateReference: quantization.map { "\(repositoryID)@\($0)" } ?? repositoryID,
                         isOutdated: isOutdated
-                    )
+                    ), remoteModified == nil)
                 }
             }
-            var models: [LocalLLMModel] = []
+            var models: [(LocalLLMModel, Bool)] = []
             for await model in group { if let model { models.append(model) } }
             return models
         }
+        let failedIDs = results.filter { $0.1 }.map { $0.0.id }
+        return ModelRuntimeScanResult(
+            runtime: .lmStudio,
+            models: results.map { $0.0 },
+            failedModelIDs: failedIDs,
+            runtimeFailed: false,
+            warning: failedIDs.isEmpty ? nil : "Hugging Face checks failed for \(failedIDs.count) model file\(failedIDs.count == 1 ? "" : "s")."
+        )
     }
+}
+
+private struct ModelRuntimeScanResult: Sendable {
+    let runtime: LocalModelRuntime
+    let models: [LocalLLMModel]
+    let failedModelIDs: [String]
+    let runtimeFailed: Bool
+    let warning: String?
+}
+
+private func commandMessage(_ result: (data: Data, status: Int32)) -> String {
+    let output = String(data: result.data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+    return output?.isEmpty == false ? output! : "command exited with status \(result.status)"
 }
 
 private func ollamaModelRoots() -> [URL] {

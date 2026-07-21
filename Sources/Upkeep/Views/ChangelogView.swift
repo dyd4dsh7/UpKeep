@@ -51,6 +51,14 @@ private struct UpkeepRelease: Identifiable {
     let changes: [String]
 
     static let all = [
+        UpkeepRelease(version: "0.11.3", date: "21 July 2026", changes: [
+            "Distinguishes genuine up-to-date results from update-source and package-manager scan failures.",
+            "Preserves last-known updates only for the affected app or source when part of a scan fails.",
+            "Shows compact, actionable warnings for network, HTTP, timeout, malformed-data, and command failures.",
+            "Retries Homebrew lock contention and verifies inventory after update commands complete.",
+            "Refined the app icon with rounded, appearance-aware artwork and added developer details to About.",
+            "Restored test compatibility with standalone Apple Command Line Tools and added reliability coverage."
+        ]),
         UpkeepRelease(version: "0.11.2", date: "21 July 2026", changes: [
             "Removed the requirement for Ollama or LM Studio to be running during model update checks.",
             "Reads Ollama’s manifest store directly and compares exact content digests with its registry.",

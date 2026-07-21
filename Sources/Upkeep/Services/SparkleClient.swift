@@ -1,19 +1,21 @@
 import Foundation
 
 struct SparkleClient: Sendable {
-    func update(for app: InstalledApp) async -> AvailableUpdate? {
+    func update(for app: InstalledApp) async throws -> AvailableUpdate? {
         guard let feedURL = app.sparkleFeedURL else { return nil }
         do {
             var request = URLRequest(url: feedURL)
             request.timeoutInterval = 15
             request.setValue("Upkeep/1.0", forHTTPHeaderField: "User-Agent")
             let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else { return nil }
+            guard let http = response as? HTTPURLResponse else { throw UpdateSourceError.invalidResponse }
+            guard 200..<300 ~= http.statusCode else { throw UpdateSourceError.httpStatus(http.statusCode) }
 
             let parser = SparkleFeedParser(data: data, baseURL: feedURL)
-            guard let item = parser.parse(),
-                  VersionComparator.isNewer(item.version, than: app.installedVersion)
-            else { return nil }
+            guard let item = parser.parse() else {
+                throw UpdateSourceError.malformedData("No valid release entries were found.")
+            }
+            guard VersionComparator.isNewer(item.version, than: app.installedVersion) else { return nil }
 
             return AvailableUpdate(
                 app: app,
@@ -23,9 +25,7 @@ struct SparkleClient: Sendable {
                 actionURL: item.downloadURL ?? feedURL,
                 homebrewToken: nil
             )
-        } catch {
-            return nil
-        }
+        } catch { throw UpdateSourceError(error) }
     }
 }
 

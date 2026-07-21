@@ -1,12 +1,13 @@
 import Foundation
 
 struct HomebrewClient: Sendable {
-    func inventory() async -> [HomebrewPackage] {
+    func inventory() async throws -> [HomebrewPackage] {
         guard let brew = Self.brewURL else { return [] }
-        return await Task.detached(priority: .utility) {
-            guard let data = try? run(brew, ["info", "--json=v2", "--installed"]),
-                  let response = try? JSONDecoder().decode(InfoResponse.self, from: data)
-            else { return [] }
+        return try await Task.detached(priority: .utility) {
+            let data = try await runWithRetry(brew, ["info", "--json=v2", "--installed"])
+            let response: InfoResponse
+            do { response = try JSONDecoder().decode(InfoResponse.self, from: data) }
+            catch { throw BrewError.failed("Homebrew inventory could not be read: \(error.localizedDescription)") }
 
             let formulae = response.formulae.compactMap { formula -> HomebrewPackage? in
                 guard let installed = formula.installed.last else { return nil }
@@ -44,15 +45,18 @@ struct HomebrewClient: Sendable {
         }.value
     }
 
-    func adoptableApps(from apps: [InstalledApp], excluding packages: [HomebrewPackage]) async -> [AdoptableApp] {
+    func adoptableApps(from apps: [InstalledApp], excluding packages: [HomebrewPackage]) async throws -> [AdoptableApp] {
         guard Self.brewURL != nil, let catalogURL = URL(string: "https://formulae.brew.sh/api/cask.json") else { return [] }
         do {
             var request = URLRequest(url: catalogURL)
             request.timeoutInterval = 30
             request.setValue("Upkeep/0.2", forHTTPHeaderField: "User-Agent")
             let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else { return [] }
-            let catalog = try JSONDecoder().decode([CatalogCask].self, from: data)
+            guard let http = response as? HTTPURLResponse else { throw UpdateSourceError.invalidResponse }
+            guard 200..<300 ~= http.statusCode else { throw UpdateSourceError.httpStatus(http.statusCode) }
+            let catalog: [CatalogCask]
+            do { catalog = try JSONDecoder().decode([CatalogCask].self, from: data) }
+            catch { throw UpdateSourceError.malformedData(error.localizedDescription) }
             let installedTokens = Set(packages.filter { $0.kind == .cask }.map(\.token))
             var matches: [AdoptableApp] = []
             for app in apps {
@@ -64,9 +68,7 @@ struct HomebrewClient: Sendable {
                 matches.append(AdoptableApp(app: app, caskToken: cask.token, caskVersion: cask.version))
             }
             return matches.sorted { $0.app.name.localizedStandardCompare($1.app.name) == .orderedAscending }
-        } catch {
-            return []
-        }
+        } catch { throw UpdateSourceError(error) }
     }
 
     func upgrade(_ package: HomebrewPackage) async throws {
@@ -93,7 +95,7 @@ struct HomebrewClient: Sendable {
     private func execute(_ arguments: [String]) async throws {
         guard let brew = Self.brewURL else { throw BrewError.notInstalled }
         try await Task.detached(priority: .userInitiated) {
-            _ = try run(brew, arguments)
+            _ = try await runWithRetry(brew, arguments)
         }.value
     }
 
@@ -112,7 +114,30 @@ struct HomebrewClient: Sendable {
             case let .failed(message): message
             }
         }
+
+        static func isConcurrentCommandFailure(_ message: String) -> Bool {
+            let value = message.lowercased()
+            return value.contains("another active homebrew")
+                || value.contains("already locked")
+                || value.contains("could not acquire a lock")
+                || value.contains("lock is held")
+        }
     }
+}
+
+private func runWithRetry(_ executable: URL, _ arguments: [String]) async throws -> Data {
+    let delays: [UInt64] = [1, 2, 4]
+    for attempt in 0...delays.count {
+        do { return try run(executable, arguments) }
+        catch let error as HomebrewClient.BrewError {
+            guard case let .failed(message) = error,
+                  HomebrewClient.BrewError.isConcurrentCommandFailure(message),
+                  attempt < delays.count
+            else { throw error }
+            try await Task.sleep(nanoseconds: delays[attempt] * 1_000_000_000)
+        }
+    }
+    throw HomebrewClient.BrewError.failed("Homebrew did not become available after retrying.")
 }
 
 private func run(_ executable: URL, _ arguments: [String]) throws -> Data {

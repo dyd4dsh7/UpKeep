@@ -7,13 +7,24 @@ struct MacOSUpdateClient: Sendable {
         let currentVersion: String
         let currentBuild: String
         let isRunningBeta: Bool
-        static let empty = Report(updates: [], currentVersion: "", currentBuild: "", isRunningBeta: false)
+        let updatesSucceeded: Bool
+        let installersSucceeded: Bool
+        let warnings: [String]
+        static let empty = Report(
+            updates: [], currentVersion: "", currentBuild: "", isRunningBeta: false,
+            updatesSucceeded: true, installersSucceeded: true, warnings: []
+        )
     }
 
     func scan() async -> Report {
         await Task.detached(priority: .utility) {
-            let updatesOutput = (try? runCommand(URL(fileURLWithPath: "/usr/sbin/softwareupdate"), ["--list", "--product-types", "macOS"])) ?? Data()
-            let installersOutput = (try? runCommand(URL(fileURLWithPath: "/usr/sbin/softwareupdate"), ["--list-full-installers"])) ?? Data()
+            var warnings: [String] = []
+            let updatesResult = commandResult(URL(fileURLWithPath: "/usr/sbin/softwareupdate"), ["--list", "--product-types", "macOS"])
+            let installersResult = commandResult(URL(fileURLWithPath: "/usr/sbin/softwareupdate"), ["--list-full-installers"])
+            if let error = updatesResult.error { warnings.append("Available updates: \(error.localizedDescription)") }
+            if let error = installersResult.error { warnings.append("Full installers: \(error.localizedDescription)") }
+            let updatesOutput = updatesResult.data ?? Data()
+            let installersOutput = installersResult.data ?? Data()
             let updates = parseUpdates(String(data: updatesOutput, encoding: .utf8) ?? "")
             let installers = parseInstallers(String(data: installersOutput, encoding: .utf8) ?? "")
             let version = ProcessInfo.processInfo.operatingSystemVersionString
@@ -25,7 +36,10 @@ struct MacOSUpdateClient: Sendable {
                 },
                 currentVersion: version,
                 currentBuild: build,
-                isRunningBeta: !extra.isEmpty || version.localizedCaseInsensitiveContains("beta")
+                isRunningBeta: !extra.isEmpty || version.localizedCaseInsensitiveContains("beta"),
+                updatesSucceeded: updatesResult.error == nil,
+                installersSucceeded: installersResult.error == nil,
+                warnings: warnings
             )
         }.value
     }
@@ -105,5 +119,22 @@ private func runCommand(_ executable: URL, _ arguments: [String]) throws -> Data
     try process.run()
     let data = output.fileHandleForReading.readDataToEndOfFile()
     process.waitUntilExit()
+    guard process.terminationStatus == 0 else {
+        let message = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        throw MacOSUpdateError.commandFailed(message?.isEmpty == false ? message! : "Command exited with status \(process.terminationStatus).")
+    }
     return data
+}
+
+private func commandResult(_ executable: URL, _ arguments: [String]) -> (data: Data?, error: Error?) {
+    do { return (try runCommand(executable, arguments), nil) }
+    catch { return (nil, error) }
+}
+
+private enum MacOSUpdateError: LocalizedError {
+    case commandFailed(String)
+    var errorDescription: String? {
+        if case let .commandFailed(message) = self { return message }
+        return nil
+    }
 }

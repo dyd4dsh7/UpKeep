@@ -54,13 +54,65 @@ struct ScanReport: Sendable {
     let apps: [InstalledApp]
     let updates: [AvailableUpdate]
     let checkedAt: Date
-    let warnings: [String]
+    let warnings: [ScanWarning]
+    let failedAppIDs: Set<String>
+    let homebrewInventoryStatus: ScanStatus
+    let homebrewCatalogStatus: ScanStatus
+    let macOSUpdatesStatus: ScanStatus
+    let macOSInstallersStatus: ScanStatus
+    let failedDeveloperManagers: Set<DeveloperPackageManager>
+    let localModelsStatus: ScanStatus
+    let failedLocalModelIDs: Set<String>
+    let failedLocalModelRuntimes: Set<LocalModelRuntime>
     let homebrewPackages: [HomebrewPackage]
     let adoptableApps: [AdoptableApp]
     let macOSUpdates: [MacOSUpdate]
     let developerPackages: [DeveloperPackage]
     let installedDeveloperManagers: [DeveloperPackageManager]
     let localModels: [LocalLLMModel]
+}
+
+enum ScanStatus: Equatable, Sendable {
+    case disabled
+    case succeeded
+    case failed
+}
+
+enum ScanWarningSource: String, Codable, Sendable {
+    case appStore = "App Store"
+    case sparkle = "Sparkle"
+    case github = "GitHub"
+    case homebrew = "Homebrew"
+    case macOS = "macOS"
+    case developerPackages = "Developer Packages"
+    case localModels = "AI Models"
+}
+
+struct ScanWarning: Identifiable, Hashable, Codable, Sendable {
+    let source: ScanWarningSource
+    let itemNames: [String]
+    let affectedItemCount: Int
+    let message: String
+
+    init(source: ScanWarningSource, itemNames: [String] = [], affectedItemCount: Int? = nil, message: String) {
+        self.source = source
+        let uniqueNames = Array(Set(itemNames)).sorted()
+        self.itemNames = uniqueNames.prefix(20).map { $0 }
+        self.affectedItemCount = max(affectedItemCount ?? uniqueNames.count, uniqueNames.count)
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.message = trimmed.count > 600 ? String(trimmed.prefix(600)) + "…" : trimmed
+    }
+
+    var id: String { "\(source.rawValue)|\(message)" }
+    var title: String {
+        affectedItemCount == 0 ? source.rawValue : "\(source.rawValue) · \(affectedItemCount) item\(affectedItemCount == 1 ? "" : "s")"
+    }
+    var detail: String {
+        guard affectedItemCount > 0, !itemNames.isEmpty else { return message }
+        let shown = itemNames.prefix(3).joined(separator: ", ")
+        let remainder = affectedItemCount - min(itemNames.count, 3)
+        return message + " Affected: " + shown + (remainder > 0 ? " and \(remainder) more." : ".")
+    }
 }
 
 enum SidebarDestination: String, CaseIterable, Identifiable {

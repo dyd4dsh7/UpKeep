@@ -12,6 +12,10 @@ struct UpdatesView: View {
                 systemImage: "arrow.down.circle.fill"
             )
 
+            if !store.scanWarnings.isEmpty {
+                ScanWarningsBanner(warnings: store.scanWarnings)
+            }
+
             if store.isScanning && store.apps.isEmpty {
                 scanningState
             } else if store.filteredUpdates.isEmpty && filteredPackages.isEmpty && systemUpdates.isEmpty && filteredDeveloperPackages.isEmpty && filteredModels.isEmpty {
@@ -70,6 +74,7 @@ struct UpdatesView: View {
     private var subtitle: String {
         if store.isScanning { return "Looking for new versions…" }
         let total = store.totalUpdateCount
+        if total == 0, !store.scanWarnings.isEmpty { return "Scan completed with warnings" }
         if total == 0 { return "No updates found" }
         return "\(total) updates available across apps and packages"
     }
@@ -87,10 +92,12 @@ struct UpdatesView: View {
 
     private var emptyState: some View {
         ContentUnavailableView {
-            Label(store.searchText.isEmpty ? "No updates found" : "No matching updates", systemImage: "checkmark.seal.fill")
+            Label(emptyTitle, systemImage: store.scanWarnings.isEmpty ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
         } description: {
             Text(store.searchText.isEmpty
-                 ? "Supported update sources reported no newer versions for your apps."
+                 ? (store.scanWarnings.isEmpty
+                    ? "Supported update sources reported no newer versions for your apps."
+                    : "Some update sources could not be checked. Last-known results were preserved where possible.")
                  : "Try a different search term.")
         } actions: {
             if store.searchText.isEmpty {
@@ -99,6 +106,43 @@ struct UpdatesView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var emptyTitle: String {
+        if !store.searchText.isEmpty { return "No matching updates" }
+        return store.scanWarnings.isEmpty ? "No updates found" : "Scan incomplete"
+    }
+}
+
+private struct ScanWarningsBanner: View {
+    let warnings: [ScanWarning]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(
+                "\(warnings.count) update source \(warnings.count == 1 ? "warning" : "warnings")",
+                systemImage: "exclamationmark.triangle.fill"
+            )
+            .font(.callout.weight(.medium))
+            .foregroundStyle(.orange)
+
+            ForEach(warnings.prefix(3)) { warning in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(warning.title).font(.caption.weight(.semibold))
+                    Text(warning.detail).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                }
+            }
+            if warnings.count > 3 {
+                Text("And \(warnings.count - 3) more. Refresh after checking the affected sources.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
+        .background(Color.orange.opacity(0.08))
+        .overlay(alignment: .bottom) { Divider() }
     }
 }
 

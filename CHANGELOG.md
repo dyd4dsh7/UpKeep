@@ -2,6 +2,15 @@
 
 All notable changes to Upkeep are documented here.
 
+## 0.11.3 — 2026-07-21
+
+- Distinguished genuine “up to date” results from App Store, Sparkle, GitHub, Homebrew, macOS, developer-package, and AI-model scan failures.
+- Preserved last-known updates only for the app or source that failed, while keeping disabled-source behavior unchanged.
+- Added compact in-app scan warnings with actionable network, HTTP, timeout, malformed-data, and command failure messages.
+- Added Homebrew lock-contention retries, post-update reconciliation, and separate inventory and cask-catalog health tracking.
+- Refined the app icon with rounded, appearance-aware artwork and added developer details to About.
+- Restored test-suite compatibility with standalone Apple Command Line Tools and added reliability regression coverage.
+
 ## 0.11.2 — 2026-07-21
 
 - Removed the requirement for Ollama or LM Studio to be running during model update checks.

@@ -1,7 +1,7 @@
 import Foundation
 
 struct AppStoreClient: Sendable {
-    func update(for app: InstalledApp) async -> AvailableUpdate? {
+    func update(for app: InstalledApp) async throws -> AvailableUpdate? {
         guard app.hasAppStoreReceipt, let bundleID = app.bundleIdentifier else { return nil }
         var components = URLComponents(string: "https://itunes.apple.com/lookup")
         components?.queryItems = [
@@ -11,9 +11,15 @@ struct AppStoreClient: Sendable {
         guard let url = components?.url else { return nil }
 
         do {
-            let (data, response) = try await URLSession.shared.data(from: url)
-            guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else { return nil }
-            let lookup = try JSONDecoder().decode(LookupResponse.self, from: data)
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 15
+            request.setValue("Upkeep/1.0", forHTTPHeaderField: "User-Agent")
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { throw UpdateSourceError.invalidResponse }
+            guard 200..<300 ~= http.statusCode else { throw UpdateSourceError.httpStatus(http.statusCode) }
+            let lookup: LookupResponse
+            do { lookup = try JSONDecoder().decode(LookupResponse.self, from: data) }
+            catch { throw UpdateSourceError.malformedData(error.localizedDescription) }
             guard let result = lookup.results.first,
                   VersionComparator.isNewer(result.version, than: app.installedVersion)
             else { return nil }
@@ -26,9 +32,7 @@ struct AppStoreClient: Sendable {
                 actionURL: result.trackViewUrl.flatMap(URL.init(string:)),
                 homebrewToken: nil
             )
-        } catch {
-            return nil
-        }
+        } catch { throw UpdateSourceError(error) }
     }
 
     private struct LookupResponse: Decodable {

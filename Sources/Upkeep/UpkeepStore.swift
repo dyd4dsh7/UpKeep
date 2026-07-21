@@ -37,6 +37,7 @@ final class UpkeepStore: ObservableObject {
     @Published var isScanning = false
     @Published var lastChecked: Date?
     @Published var errorMessage: String?
+    @Published var scanWarnings: [ScanWarning] = []
     @Published var workingIDs = Set<String>()
     @Published var pendingRevert: UpdateRecord?
     private var periodicTask: Task<Void, Never>?
@@ -123,14 +124,24 @@ final class UpkeepStore: ObservableObject {
         let previousCount = totalUpdateCount
         let report = await UpdateScanner().scan(settings: settings.scanSettings)
         apps = report.apps
-        updates = report.updates
-        homebrewPackages = report.homebrewPackages
-        adoptableApps = report.adoptableApps
-        macOSUpdates = report.macOSUpdates
+        updates = mergedUpdates(from: report)
+        switch report.homebrewInventoryStatus {
+        case .disabled:
+            homebrewPackages = []
+            adoptableApps = []
+        case .failed:
+            break
+        case .succeeded:
+            homebrewPackages = report.homebrewPackages
+            if report.homebrewCatalogStatus == .succeeded { adoptableApps = report.adoptableApps }
+            else if report.homebrewCatalogStatus == .disabled { adoptableApps = [] }
+        }
+        macOSUpdates = mergedMacOSUpdates(from: report)
         updateHistory = await UpdateHistoryStore.shared.records()
-        developerPackages = report.developerPackages
+        developerPackages = mergedDeveloperPackages(from: report)
         installedDeveloperManagers = report.installedDeveloperManagers
-        localModels = report.localModels
+        localModels = mergedLocalModels(from: report)
+        scanWarnings = report.warnings
         if developerManagerFilter != "all", !installedDeveloperManagers.contains(where: { $0.rawValue == developerManagerFilter }) {
             developerManagerFilter = "all"
         }
@@ -168,14 +179,18 @@ final class UpkeepStore: ObservableObject {
         defer { workingIDs.remove(identifier) }
         let managers = manager.map { Set([$0]) } ?? settings.enabledDeveloperManagers
         let report = await DeveloperPackageClient().scan(enabledManagers: managers)
+        let warnings = report.warnings.map { ScanWarning(source: .developerPackages, message: $0) }
+        scanWarnings = (scanWarnings.filter { $0.source != .developerPackages } + warnings)
         if let manager {
+            guard !report.failedManagers.contains(manager) else { return }
             developerPackages.removeAll { $0.manager == manager }
             developerPackages.append(contentsOf: report.packages)
             developerPackages.sort { $0.manager.rawValue == $1.manager.rawValue ? $0.name.localizedStandardCompare($1.name) == .orderedAscending : $0.manager.rawValue < $1.manager.rawValue }
             if !installedDeveloperManagers.contains(manager), report.installedManagers.contains(manager) { installedDeveloperManagers.append(manager) }
             versionCache = versionCache.filter { !$0.key.hasPrefix("\(manager.rawValue):") }
         } else {
-            developerPackages = report.packages
+            let retained = developerPackages.filter { report.failedManagers.contains($0.manager) }
+            developerPackages = (report.packages.filter { !report.failedManagers.contains($0.manager) } + retained).sorted(by: developerPackageOrder)
             installedDeveloperManagers = report.installedManagers
             versionCache.removeAll()
         }
@@ -211,7 +226,10 @@ final class UpkeepStore: ObservableObject {
                 await updateAdoptableApp(item)
             } else {
                 let succeeded = await perform(id: update.id) { try await HomebrewClient().upgradeCask(token: token) }
-                if succeeded { await scan() }
+                if succeeded {
+                    await scan()
+                    reconcileHomebrewUpdate(token: token, name: update.app.name)
+                }
             }
         } else if let actionURL = update.actionURL {
             NSWorkspace.shared.open(actionURL)
@@ -225,6 +243,7 @@ final class UpkeepStore: ObservableObject {
         if succeeded {
             if let record { try? await UpdateHistoryStore.shared.add(record) }
             await scan()
+            reconcileHomebrewUpdate(token: package.token, name: package.displayName)
         }
     }
 
@@ -232,18 +251,32 @@ final class UpkeepStore: ObservableObject {
         guard !workingIDs.contains("homebrew-all") else { return }
         workingIDs.insert("homebrew-all")
         defer { workingIDs.remove("homebrew-all") }
-        for package in homebrewPackages where package.isOutdated && !isExcluded(package) {
+        var failureMessage: String?
+        let attempted = homebrewPackages.filter { $0.isOutdated && !isExcluded($0) }
+        for package in attempted {
             let record = await recoveryRecord(for: package)
             if package.kind == .cask, matchingApp(for: package) != nil, record == nil { break }
             do {
                 try await HomebrewClient().upgrade(package)
                 if let record { try? await UpdateHistoryStore.shared.add(record) }
             } catch {
-                errorMessage = error.localizedDescription
+                failureMessage = error.localizedDescription
                 break
             }
         }
         await scan()
+        if let failureMessage {
+            errorMessage = failureMessage
+        } else if scanWarnings.contains(where: { $0.source == .homebrew }) {
+            errorMessage = "Homebrew finished, but Upkeep could not verify the result because Homebrew data did not refresh completely."
+        } else {
+            let remaining = attempted.filter { attemptedPackage in
+                homebrewPackages.contains { $0.token == attemptedPackage.token && $0.kind == attemptedPackage.kind && $0.isOutdated }
+            }
+            if !remaining.isEmpty {
+                errorMessage = "Homebrew finished, but \(remaining.map(\.displayName).joined(separator: ", ")) still report available updates."
+            }
+        }
     }
 
     func adopt(_ item: AdoptableApp) async {
@@ -265,6 +298,7 @@ final class UpkeepStore: ObservableObject {
         if succeeded {
             try? await UpdateHistoryStore.shared.add(record)
             await scan()
+            reconcileHomebrewUpdate(token: item.caskToken, name: item.app.name)
         }
     }
 
@@ -298,7 +332,14 @@ final class UpkeepStore: ObservableObject {
         guard !workingIDs.contains(identifier) else { return }
         workingIDs.insert(identifier)
         defer { workingIDs.remove(identifier) }
-        localModels = await LocalModelClient().scan()
+        let report = await LocalModelClient().scan()
+        var merged = Dictionary(uniqueKeysWithValues: report.models.map { ($0.id, $0) })
+        for previous in localModels where report.failedModelIDs.contains(previous.id) || report.failedRuntimes.contains(previous.runtime) {
+            merged[previous.id] = previous
+        }
+        localModels = merged.values.sorted(by: localModelOrder)
+        scanWarnings = scanWarnings.filter { $0.source != .localModels }
+            + report.warnings.map { ScanWarning(source: .localModels, message: $0) }
         if selectedLocalModelID == nil || !localModels.contains(where: { $0.id == selectedLocalModelID }) {
             selectedLocalModelID = localModels.first?.id
         }
@@ -497,4 +538,76 @@ final class UpkeepStore: ObservableObject {
     }
 
     private func normalize(_ value: String) -> String { value.lowercased().filter(\.isLetter) }
+
+    private func mergedUpdates(from report: ScanReport) -> [AvailableUpdate] {
+        var merged = Dictionary(uniqueKeysWithValues: report.updates.map { ($0.id, $0) })
+
+        for previous in updates where report.failedAppIDs.contains(previous.app.id) && merged[previous.id] == nil {
+            merged[previous.id] = previous
+        }
+
+        if report.homebrewInventoryStatus == .failed {
+            for previous in updates where previous.source == .homebrew && merged[previous.id] == nil {
+                merged[previous.id] = previous
+            }
+        } else if report.homebrewCatalogStatus == .failed {
+            let priorAdoptableTokens = Set(adoptableApps.map(\.caskToken))
+            for previous in updates where previous.source == .homebrew && merged[previous.id] == nil {
+                guard let token = previous.homebrewToken, priorAdoptableTokens.contains(token) else { continue }
+                merged[previous.id] = previous
+            }
+        }
+
+        return merged.values.sorted { $0.app.name.localizedStandardCompare($1.app.name) == .orderedAscending }
+    }
+
+    private func mergedMacOSUpdates(from report: ScanReport) -> [MacOSUpdate] {
+        let currentUpdates = report.macOSUpdates.filter { !$0.isFullInstaller }
+        let currentInstallers = report.macOSUpdates.filter(\.isFullInstaller)
+        let updatesPart: [MacOSUpdate] = report.macOSUpdatesStatus == .failed
+            ? macOSUpdates.filter { !$0.isFullInstaller }
+            : currentUpdates
+        let installersPart: [MacOSUpdate] = report.macOSInstallersStatus == .failed
+            ? macOSUpdates.filter(\.isFullInstaller)
+            : currentInstallers
+        return updatesPart + installersPart
+    }
+
+    private func mergedDeveloperPackages(from report: ScanReport) -> [DeveloperPackage] {
+        let retained = developerPackages.filter { report.failedDeveloperManagers.contains($0.manager) }
+        let fresh = report.developerPackages.filter { !report.failedDeveloperManagers.contains($0.manager) }
+        return (fresh + retained).sorted(by: developerPackageOrder)
+    }
+
+    private func mergedLocalModels(from report: ScanReport) -> [LocalLLMModel] {
+        guard report.localModelsStatus != .disabled else { return [] }
+        var merged = Dictionary(uniqueKeysWithValues: report.localModels.map { ($0.id, $0) })
+        for previous in localModels where report.failedLocalModelIDs.contains(previous.id)
+            || report.failedLocalModelRuntimes.contains(previous.runtime) {
+            merged[previous.id] = previous
+        }
+        return merged.values.sorted(by: localModelOrder)
+    }
+
+    private func developerPackageOrder(_ lhs: DeveloperPackage, _ rhs: DeveloperPackage) -> Bool {
+        if lhs.manager != rhs.manager { return lhs.manager.rawValue < rhs.manager.rawValue }
+        return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+    }
+
+    private func localModelOrder(_ lhs: LocalLLMModel, _ rhs: LocalLLMModel) -> Bool {
+        if lhs.runtime != rhs.runtime { return lhs.runtime.rawValue < rhs.runtime.rawValue }
+        return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+    }
+
+    private func reconcileHomebrewUpdate(token: String, name: String) {
+        if let package = homebrewPackages.first(where: { $0.token == token }) {
+            if package.isOutdated {
+                errorMessage = "Homebrew completed the command, but \(name) still reports \(package.currentVersion) as available."
+            }
+            return
+        }
+        if scanWarnings.contains(where: { $0.source == .homebrew }) {
+            errorMessage = "Homebrew completed the update for \(name), but Upkeep could not fully refresh Homebrew data. Check the scan warning and refresh again."
+        }
+    }
 }

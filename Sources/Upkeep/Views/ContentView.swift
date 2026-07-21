@@ -77,18 +77,14 @@ struct ContentView: View {
         ToolbarItemGroup(placement: .primaryAction) {
             Button { store.selection = .updates } label: {
                 Label(
-                    store.totalUpdateCount > 0 ? "\(store.totalUpdateCount) Updates" : "Up to Date",
-                    systemImage: store.totalUpdateCount > 0 ? "arrow.down.circle.fill" : "checkmark.circle.fill"
+                    statusTitle,
+                    systemImage: statusIcon
                 )
             }
             .labelStyle(.titleAndIcon)
-            .foregroundStyle(store.totalUpdateCount > 0 ? Color.accentColor : Color.green)
-            .help(store.totalUpdateCount > 0
-                  ? "Open \(store.totalUpdateCount) available updates"
-                  : "All supported apps and packages are up to date")
-            .accessibilityLabel(store.totalUpdateCount > 0
-                                ? "\(store.totalUpdateCount) updates available"
-                                : "Up to date")
+            .foregroundStyle(statusColor)
+            .help(statusHelp)
+            .accessibilityLabel(statusTitle)
             Button { Task { await store.scan() } } label: {
                 if store.isScanning { ProgressView().controlSize(.small) }
                 else { Image(systemName: "arrow.clockwise") }
@@ -101,6 +97,28 @@ struct ContentView: View {
                 .accessibilityLabel("Settings")
                 .help("Open Upkeep settings")
         }
+    }
+
+    private var statusTitle: String {
+        if store.totalUpdateCount > 0 { return "\(store.totalUpdateCount) Updates" }
+        return store.scanWarnings.isEmpty ? "Up to Date" : "Scan Warnings"
+    }
+
+    private var statusIcon: String {
+        if store.totalUpdateCount > 0 { return "arrow.down.circle.fill" }
+        return store.scanWarnings.isEmpty ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+    }
+
+    private var statusColor: Color {
+        if store.totalUpdateCount > 0 { return .accentColor }
+        return store.scanWarnings.isEmpty ? .green : .orange
+    }
+
+    private var statusHelp: String {
+        if store.totalUpdateCount > 0 { return "Open \(store.totalUpdateCount) available updates" }
+        return store.scanWarnings.isEmpty
+            ? "All supported apps and packages are up to date"
+            : "Some update sources could not be checked"
     }
 }
 

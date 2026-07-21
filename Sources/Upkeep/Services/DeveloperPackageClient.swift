@@ -4,6 +4,8 @@ struct DeveloperPackageClient: Sendable {
     struct Report: Sendable {
         let packages: [DeveloperPackage]
         let installedManagers: [DeveloperPackageManager]
+        let warnings: [String]
+        let failedManagers: Set<DeveloperPackageManager>
     }
 
     func scan(enabledManagers: Set<DeveloperPackageManager> = Set(DeveloperPackageManager.allCases)) async -> Report {
@@ -14,7 +16,7 @@ struct DeveloperPackageClient: Sendable {
         if enabledManagers.contains(.rubyGems), let gem = executable(named: "gem", extra: ["/usr/bin/gem"]) { tools.append((.rubyGems, gem)) }
         if enabledManagers.contains(.cargo), let cargo = executable(named: "cargo", extra: [FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".cargo/bin/cargo").path]) { tools.append((.cargo, cargo)) }
 
-        let packages = await withTaskGroup(of: [DeveloperPackage].self) { group in
+        let results = await withTaskGroup(of: ManagerScanResult.self) { group in
             for (manager, path) in tools {
                 group.addTask {
                     switch manager {
@@ -26,14 +28,20 @@ struct DeveloperPackageClient: Sendable {
                     }
                 }
             }
-            var values: [DeveloperPackage] = []
-            for await result in group { values.append(contentsOf: result) }
-            return values.sorted {
+            var values: [ManagerScanResult] = []
+            for await result in group { values.append(result) }
+            return values
+        }
+        let packages = results.flatMap(\.packages).sorted {
                 if $0.manager != $1.manager { return $0.manager.rawValue < $1.manager.rawValue }
                 return $0.name.localizedStandardCompare($1.name) == .orderedAscending
-            }
         }
-        return Report(packages: packages, installedManagers: tools.map(\.0))
+        return Report(
+            packages: packages,
+            installedManagers: tools.map(\.0),
+            warnings: results.compactMap(\.warning),
+            failedManagers: Set(results.filter { $0.warning != nil }.map(\.manager))
+        )
     }
 
     func availableVersions(for package: DeveloperPackage, includePrereleases: Bool) async -> [String] {
@@ -105,47 +113,79 @@ struct DeveloperPackageClient: Sendable {
     }
 }
 
-private func scanNPM(_ path: String) -> [DeveloperPackage] {
-    let installedData = capture(URL(fileURLWithPath: path), ["ls", "-g", "--depth=0", "--json"]).data
-    guard let installed = try? JSONDecoder().decode(NPMList.self, from: installedData).dependencies else { return [] }
-    let outdatedData = capture(URL(fileURLWithPath: path), ["outdated", "-g", "--json"]).data
-    let outdated = (try? JSONDecoder().decode([String: NPMOutdated].self, from: outdatedData)) ?? [:]
-    return installed.map { name, entry in
-        DeveloperPackage(name: name, currentVersion: entry.version, latestVersion: outdated[name]?.latest ?? entry.version, manager: .npm, executablePath: path)
-    }
+private struct ManagerScanResult: Sendable {
+    let manager: DeveloperPackageManager
+    let packages: [DeveloperPackage]
+    let warning: String?
 }
 
-private func scanPNPM(_ path: String) -> [DeveloperPackage] {
-    let installedData = capture(URL(fileURLWithPath: path), ["list", "-g", "--depth=0", "--json"]).data
-    let roots = (try? JSONDecoder().decode([PNPMRoot].self, from: installedData)) ?? []
+private func scanNPM(_ path: String) -> ManagerScanResult {
+    let installedResult = capture(URL(fileURLWithPath: path), ["ls", "-g", "--depth=0", "--json"])
+    guard let installed = try? JSONDecoder().decode(NPMList.self, from: installedResult.data).dependencies else {
+        return failedManagerScan(.npm, command: "inventory", result: installedResult)
+    }
+    let outdatedResult = capture(URL(fileURLWithPath: path), ["outdated", "-g", "--json"])
+    let outdated = try? JSONDecoder().decode([String: NPMOutdated].self, from: outdatedResult.data)
+    let packages = installed.map { name, entry in
+        DeveloperPackage(name: name, currentVersion: entry.version, latestVersion: outdated?[name]?.latest ?? entry.version, manager: .npm, executablePath: path)
+    }
+    return ManagerScanResult(
+        manager: .npm,
+        packages: packages,
+        warning: outdated == nil && (outdatedResult.status != 0 || !outdatedResult.data.isEmpty)
+            ? commandWarning(.npm, command: "outdated check", result: outdatedResult) : nil
+    )
+}
+
+private func scanPNPM(_ path: String) -> ManagerScanResult {
+    let installedResult = capture(URL(fileURLWithPath: path), ["list", "-g", "--depth=0", "--json"])
+    guard let roots = try? JSONDecoder().decode([PNPMRoot].self, from: installedResult.data) else {
+        return failedManagerScan(.pnpm, command: "inventory", result: installedResult)
+    }
     let installed = roots.reduce(into: [String: PNPMEntry]()) { values, root in
         values.merge(root.dependencies ?? [:]) { current, _ in current }
         values.merge(root.devDependencies ?? [:]) { current, _ in current }
     }
-    let outdatedData = capture(URL(fileURLWithPath: path), ["outdated", "-g", "--format", "json"]).data
-    let outdated = (try? JSONDecoder().decode([String: NPMOutdated].self, from: outdatedData)) ?? [:]
-    return installed.map { name, entry in
-        DeveloperPackage(name: name, currentVersion: entry.version, latestVersion: outdated[name]?.latest ?? entry.version, manager: .pnpm, executablePath: path)
+    let outdatedResult = capture(URL(fileURLWithPath: path), ["outdated", "-g", "--format", "json"])
+    let outdated = try? JSONDecoder().decode([String: NPMOutdated].self, from: outdatedResult.data)
+    let packages = installed.map { name, entry in
+        DeveloperPackage(name: name, currentVersion: entry.version, latestVersion: outdated?[name]?.latest ?? entry.version, manager: .pnpm, executablePath: path)
     }
+    return ManagerScanResult(
+        manager: .pnpm,
+        packages: packages,
+        warning: outdated == nil && (outdatedResult.status != 0 || !outdatedResult.data.isEmpty)
+            ? commandWarning(.pnpm, command: "outdated check", result: outdatedResult) : nil
+    )
 }
 
-private func scanPython(_ path: String) -> [DeveloperPackage] {
-    let installedData = capture(URL(fileURLWithPath: path), ["-m", "pip", "list", "--format=json", "--disable-pip-version-check"]).data
-    guard let installed = try? JSONDecoder().decode([PipInstalled].self, from: installedData) else { return [] }
-    let outdatedData = capture(URL(fileURLWithPath: path), ["-m", "pip", "list", "--outdated", "--format=json", "--disable-pip-version-check"]).data
-    let outdatedValues = (try? JSONDecoder().decode([PipOutdated].self, from: outdatedData)) ?? []
-    let outdated = Dictionary(uniqueKeysWithValues: outdatedValues.map { ($0.name.lowercased(), $0.latestVersion) })
-    return installed.map {
+private func scanPython(_ path: String) -> ManagerScanResult {
+    let installedResult = capture(URL(fileURLWithPath: path), ["-m", "pip", "list", "--format=json", "--disable-pip-version-check"])
+    guard let installed = try? JSONDecoder().decode([PipInstalled].self, from: installedResult.data) else {
+        return failedManagerScan(.python, command: "inventory", result: installedResult)
+    }
+    let outdatedResult = capture(URL(fileURLWithPath: path), ["-m", "pip", "list", "--outdated", "--format=json", "--disable-pip-version-check"])
+    let outdatedValues = try? JSONDecoder().decode([PipOutdated].self, from: outdatedResult.data)
+    let outdated = Dictionary(uniqueKeysWithValues: (outdatedValues ?? []).map { ($0.name.lowercased(), $0.latestVersion) })
+    let packages = installed.map {
         DeveloperPackage(name: $0.name, currentVersion: $0.version, latestVersion: outdated[$0.name.lowercased()] ?? $0.version, manager: .python, executablePath: path)
     }
+    return ManagerScanResult(
+        manager: .python,
+        packages: packages,
+        warning: outdatedValues == nil ? commandWarning(.python, command: "outdated check", result: outdatedResult) : nil
+    )
 }
 
-private func scanGems(_ path: String) -> [DeveloperPackage] {
-    let installedOutput = String(data: capture(URL(fileURLWithPath: path), ["list", "--local"]).data, encoding: .utf8) ?? ""
-    let outdatedOutput = String(data: capture(URL(fileURLWithPath: path), ["outdated"]).data, encoding: .utf8) ?? ""
+private func scanGems(_ path: String) -> ManagerScanResult {
+    let installedResult = capture(URL(fileURLWithPath: path), ["list", "--local"])
+    guard installedResult.status == 0 else { return failedManagerScan(.rubyGems, command: "inventory", result: installedResult) }
+    let installedOutput = String(data: installedResult.data, encoding: .utf8) ?? ""
+    let outdatedResult = capture(URL(fileURLWithPath: path), ["outdated"])
+    let outdatedOutput = String(data: outdatedResult.data, encoding: .utf8) ?? ""
     let outdated = parseGemOutdated(outdatedOutput)
     let regex = try? NSRegularExpression(pattern: #"^(.+?)\s+\((?:default:\s*)?([^,\)]+)"#, options: .anchorsMatchLines)
-    return installedOutput.split(separator: "\n").compactMap { line in
+    let packages = installedOutput.split(separator: "\n").compactMap { line -> DeveloperPackage? in
         let value = String(line)
         guard let match = regex?.firstMatch(in: value, range: NSRange(value.startIndex..., in: value)),
               let nameRange = Range(match.range(at: 1), in: value), let versionRange = Range(match.range(at: 2), in: value)
@@ -153,6 +193,11 @@ private func scanGems(_ path: String) -> [DeveloperPackage] {
         let name = String(value[nameRange]); let version = String(value[versionRange])
         return DeveloperPackage(name: name, currentVersion: version, latestVersion: outdated[name] ?? version, manager: .rubyGems, executablePath: path)
     }
+    return ManagerScanResult(
+        manager: .rubyGems,
+        packages: packages,
+        warning: outdatedResult.status == 0 ? nil : commandWarning(.rubyGems, command: "outdated check", result: outdatedResult)
+    )
 }
 
 private func parseGemOutdated(_ output: String) -> [String: String] {
@@ -166,27 +211,53 @@ private func parseGemOutdated(_ output: String) -> [String: String] {
     }
 }
 
-private func scanCargo(_ path: String) async -> [DeveloperPackage] {
-    let output = String(data: capture(URL(fileURLWithPath: path), ["install", "--list"]).data, encoding: .utf8) ?? ""
+private func scanCargo(_ path: String) async -> ManagerScanResult {
+    let installedResult = capture(URL(fileURLWithPath: path), ["install", "--list"])
+    guard installedResult.status == 0 else { return failedManagerScan(.cargo, command: "inventory", result: installedResult) }
+    let output = String(data: installedResult.data, encoding: .utf8) ?? ""
     let installed = output.split(separator: "\n").compactMap { line -> (String, String)? in
         guard !line.hasPrefix(" "), let colon = line.firstIndex(of: ":") else { return nil }
         let prefix = line[..<colon].split(separator: " "); guard prefix.count >= 2 else { return nil }
         return (String(prefix[0]), String(prefix[1]).trimmingCharacters(in: CharacterSet(charactersIn: "v")))
     }
-    return await withTaskGroup(of: DeveloperPackage.self) { group in
+    let results = await withTaskGroup(of: (DeveloperPackage, Bool).self) { group in
         for (name, current) in installed {
             group.addTask {
                 guard let url = URL(string: "https://crates.io/api/v1/crates/\(name)"),
                       let data = await registryData(from: url),
                       let response = try? JSONDecoder().decode(CrateResponse.self, from: data)
-                else { return DeveloperPackage(name: name, currentVersion: current, latestVersion: current, manager: .cargo, executablePath: path) }
-                return DeveloperPackage(name: name, currentVersion: current, latestVersion: response.crate.maxVersion, manager: .cargo, executablePath: path)
+                else { return (DeveloperPackage(name: name, currentVersion: current, latestVersion: current, manager: .cargo, executablePath: path), true) }
+                return (DeveloperPackage(name: name, currentVersion: current, latestVersion: response.crate.maxVersion, manager: .cargo, executablePath: path), false)
             }
         }
-        var values: [DeveloperPackage] = []
+        var values: [(DeveloperPackage, Bool)] = []
         for await value in group { values.append(value) }
         return values
     }
+    let failureCount = results.count { $0.1 }
+    return ManagerScanResult(
+        manager: .cargo,
+        packages: results.map { $0.0 },
+        warning: failureCount == 0 ? nil : "Cargo: registry checks failed for \(failureCount) package\(failureCount == 1 ? "" : "s")."
+    )
+}
+
+private func failedManagerScan(
+    _ manager: DeveloperPackageManager,
+    command: String,
+    result: (data: Data, status: Int32)
+) -> ManagerScanResult {
+    ManagerScanResult(manager: manager, packages: [], warning: commandWarning(manager, command: command, result: result))
+}
+
+private func commandWarning(
+    _ manager: DeveloperPackageManager,
+    command: String,
+    result: (data: Data, status: Int32)
+) -> String {
+    let output = String(data: result.data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let detail = output?.isEmpty == false ? output! : "command exited with status \(result.status)"
+    return "\(manager.rawValue) \(command) failed: \(detail)"
 }
 
 private func executable(named name: String, extra: [String]) -> String? {
