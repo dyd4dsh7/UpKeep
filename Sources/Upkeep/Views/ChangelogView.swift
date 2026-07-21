@@ -51,6 +51,16 @@ private struct UpkeepRelease: Identifiable {
     let changes: [String]
 
     static let all = [
+        UpkeepRelease(version: "0.21.0", date: "22 July 2026", changes: [
+            "Distinguishes TestFlight builds from production Mac App Store installations and opens the correct updater.",
+            "Detects Setapp editions and Microsoft AutoUpdate registrations without misclassifying other Microsoft apps.",
+            "Prevents externally managed editions from receiving incompatible source checks or Homebrew adoption actions.",
+            "Recognizes Sparkle package installers and opens the app's built-in updater while retaining the developer download.",
+            "Shows update-management badges, explanations, and manager shortcuts in app details.",
+            "Adds TestFlight, Setapp, and Microsoft AutoUpdate categories with live counts to the sidebar.",
+            "Adds source-aware empty states with refresh and clear-search actions to app categories.",
+            "Unifies sidebar, page-header, empty-state, and update-action icons around destination-specific SF Symbols."
+        ]),
         UpkeepRelease(version: "0.20.0", date: "22 July 2026", changes: [
             "Adds a unified review sheet for selecting app, Homebrew, developer-package, and AI-model updates.",
             "Runs selected updates one at a time, continues after failures, and shows a result for every action.",

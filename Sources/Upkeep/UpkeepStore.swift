@@ -168,11 +168,14 @@ final class UpkeepStore: ObservableObject {
         apps.filter { app in
             switch destination {
             case .allApps: true
-            case .appStore: app.hasAppStoreReceipt
+            case .appStore: app.updateManagement == .appStore
+            case .testFlight: app.updateManagement == .testFlight
+            case .setapp: app.updateManagement == .setapp
+            case .microsoftAutoUpdate: app.updateManagement == .microsoftAutoUpdate
             case .sparkle: app.sparkleFeedURL != nil
             case .homebrewApps: homebrewPackage(for: app) != nil
             case .github: app.githubRepository != nil
-            case .noSource: sources(for: app).isEmpty
+            case .noSource: sources(for: app).isEmpty && !app.updateManagement.isExternallyManaged
             default: false
             }
         }
@@ -187,7 +190,7 @@ final class UpkeepStore: ObservableObject {
         if let update = updates.first(where: { $0.app.id == app.id }) {
             detected.formUnion(update.candidates.map(\.source))
         }
-        if app.hasAppStoreReceipt { detected.insert(.appStore) }
+        if app.updateManagement == .appStore { detected.insert(.appStore) }
         if homebrewPackage(for: app) != nil { detected.insert(.homebrew) }
         if app.sparkleFeedURL != nil { detected.insert(.sparkle) }
         if app.githubRepository != nil { detected.insert(.github) }
@@ -368,6 +371,8 @@ final class UpkeepStore: ObservableObject {
                     reconcileHomebrewUpdate(token: token, name: update.app.name)
                 }
             }
+        } else if update.requiresInAppInstallation {
+            NSWorkspace.shared.open(update.app.url)
         } else if let actionURL = update.actionURL {
             NSWorkspace.shared.open(actionURL)
         }
@@ -468,6 +473,34 @@ final class UpkeepStore: ObservableObject {
         if let bundleIdentifier = app.bundleIdentifier,
            runningBundleIdentifiers.contains(bundleIdentifier) { return true }
         return runningApplicationPaths.contains(canonicalPath(app.url))
+    }
+
+    func openUpdateManager(for app: InstalledApp) {
+        let fileManager = FileManager.default
+        let target: URL?
+        switch app.updateManagement {
+        case .testFlight:
+            let installed = URL(fileURLWithPath: "/Applications/TestFlight.app")
+            target = fileManager.fileExists(atPath: installed.path)
+                ? installed
+                : URL(string: "macappstore://apps.apple.com/app/testflight/id899247664")
+        case .setapp:
+            let installed = URL(fileURLWithPath: "/Applications/Setapp.app")
+            target = fileManager.fileExists(atPath: installed.path)
+                ? installed
+                : URL(string: "https://setapp.com/apps")
+        case .microsoftAutoUpdate:
+            let installed = URL(fileURLWithPath: "/Library/Application Support/Microsoft/MAU2.0/Microsoft AutoUpdate.app")
+            target = fileManager.fileExists(atPath: installed.path) ? installed : app.url
+        case .appStore:
+            target = URL(string: "macappstore://showUpdatesPage")
+        case .direct:
+            target = app.url
+        }
+        guard let target, NSWorkspace.shared.open(target) else {
+            errorMessage = "Could not open (app.updateManagement.rawValue)."
+            return
+        }
     }
 
     func confirmRunningAppUpdate(_ confirmation: RunningAppConfirmation) async {
@@ -588,13 +621,16 @@ final class UpkeepStore: ObservableObject {
             switch item {
             case let .application(update):
                 guard let token = update.homebrewToken else {
-                    guard let url = update.actionURL, NSWorkspace.shared.open(url) else {
+                    let target = update.requiresInAppInstallation ? update.app.url : update.actionURL
+                    guard let target, NSWorkspace.shared.open(target) else {
                         throw BatchUpdateError.couldNotOpen(update.source.rawValue)
                     }
                     return BatchUpdateResult(
                         item: item,
                         outcome: .opened,
-                        detail: "Opened \(update.source.rawValue). Complete the update there."
+                        detail: update.requiresInAppInstallation
+                            ? "Opened \(update.app.name). Complete the update with its built-in updater."
+                            : "Opened \(update.source.rawValue). Complete the update there."
                     )
                 }
                 if let package = homebrewPackages.first(where: { $0.kind == .cask && $0.token == token }) {

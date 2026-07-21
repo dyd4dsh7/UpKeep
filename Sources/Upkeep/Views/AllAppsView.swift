@@ -6,45 +6,95 @@ struct AllAppsView: View {
     let apps: [InstalledApp]
     let title: String
     let subtitle: String
+    let systemImage: String
 
     var body: some View {
         VStack(spacing: 0) {
-            HeaderView(title: title, subtitle: subtitle, systemImage: "square.grid.2x2.fill")
+            HeaderView(title: title, subtitle: subtitle, systemImage: systemImage)
 
-            List(selection: selectedAppID) {
-                ForEach(sortedApps) { app in
-                StandardItemRow {
-                    AppIcon(url: app.url, size: 36)
-                } content: {
-                    ItemIdentityView(
-                        title: app.name,
-                        detail: sourceSummary(for: app),
-                        isRunning: store.isRunning(app),
-                        prereleaseChannel: update(for: app)?.prereleaseChannel ?? app.prereleaseChannel,
-                        prereleaseIsInstalled: update(for: app)?.prereleaseIsInstalled ?? (app.prereleaseChannel != nil)
-                    )
-                } accessories: {
-                    versions(for: app)
-                }
-                .tag(app.id)
-                .contentShape(Rectangle())
-                .contextMenu {
-                    Button("View Details") { store.selectedApp = app }
-                    Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([app.url]) }
-                    Divider()
-                    if let exclusion = activeExclusion(for: app) {
-                        Button("Restore Updates") { store.restore(exclusion) }
-                    } else {
-                        if let update = store.updates.first(where: { $0.app.id == app.id }) {
-                            Button("Skip Version \(update.availableVersion)") { store.skip(update) }
+            if apps.isEmpty {
+                emptyState
+            } else {
+                List(selection: selectedAppID) {
+                    ForEach(sortedApps) { app in
+                    StandardItemRow {
+                        AppIcon(url: app.url, size: 36)
+                    } content: {
+                        ItemIdentityView(
+                            title: app.name,
+                            detail: sourceSummary(for: app),
+                            isRunning: store.isRunning(app),
+                            prereleaseChannel: update(for: app)?.prereleaseChannel ?? app.prereleaseChannel,
+                            prereleaseIsInstalled: update(for: app)?.prereleaseIsInstalled ?? (app.prereleaseChannel != nil)
+                        )
+                    } accessories: {
+                        versions(for: app)
+                    }
+                    .tag(app.id)
+                    .contentShape(Rectangle())
+                    .contextMenu {
+                        Button("View Details") { store.selectedApp = app }
+                        Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([app.url]) }
+                        Divider()
+                        if let exclusion = activeExclusion(for: app) {
+                            Button("Restore Updates") { store.restore(exclusion) }
+                        } else {
+                            if let update = store.updates.first(where: { $0.app.id == app.id }) {
+                                Button("Skip Version \(update.availableVersion)") { store.skip(update) }
+                            }
+                            Button("Ignore \(app.name)") { store.ignore(app) }
                         }
-                        Button("Ignore \(app.name)") { store.ignore(app) }
+                    }
                     }
                 }
-                }
+                .listStyle(.inset)
             }
-            .listStyle(.inset)
         }
+    }
+
+    private var emptyState: some View {
+        ContentUnavailableView {
+            Label(emptyTitle, systemImage: emptySystemImage)
+        } description: {
+            Text(emptyDescription)
+        } actions: {
+            if store.searchText.isEmpty {
+                Button("Check Again") { Task { await store.scan() } }
+                    .buttonStyle(.borderedProminent)
+            } else {
+                Button("Clear Search") { store.searchText = "" }
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var emptyTitle: String {
+        if !store.searchText.isEmpty { return "No Matching Apps" }
+        return switch title {
+        case "Setapp": "No Setapp Apps"
+        case "TestFlight": "No TestFlight Apps"
+        case "Microsoft AutoUpdate": "No Microsoft Apps"
+        case "No Source": "Every App Has a Source"
+        default: "No \(title) Apps"
+        }
+    }
+
+    private var emptyDescription: String {
+        if !store.searchText.isEmpty {
+            return "No apps in \(title) match “\(store.searchText)”."
+        }
+        return switch title {
+        case "Setapp": "No installed apps managed by Setapp were detected."
+        case "TestFlight": "No installed TestFlight beta apps were detected."
+        case "Microsoft AutoUpdate": "No installed apps managed by Microsoft AutoUpdate were detected."
+        case "No Source": "Every installed app has a supported update source or update manager."
+        default: "No installed apps associated with \(title) were detected."
+        }
+    }
+
+    private var emptySystemImage: String {
+        title == "No Source" ? "checkmark.seal" : systemImage
     }
 
     private var sortedApps: [InstalledApp] {
@@ -80,7 +130,9 @@ struct AllAppsView: View {
 
     private func sourceSummary(for app: InstalledApp) -> String {
         let sources = store.sources(for: app)
-        guard let first = sources.first else { return "No update source" }
+        guard let first = sources.first else {
+            return app.updateManagement.isExternallyManaged ? app.updateManagement.rawValue : "No update source"
+        }
         return sources.count == 1 ? first.rawValue : "\(first.rawValue) + \(sources.count - 1) more"
     }
 
@@ -162,6 +214,9 @@ struct AppDetailView: View {
                 }
                 HStack(spacing: 8) {
                     ForEach(store.sources(for: app)) { source in SourceBadge(source: source) }
+                    if app.updateManagement.isExternallyManaged {
+                        ManagementBadge(management: app.updateManagement)
+                    }
                     if let channel = update?.prereleaseChannel ?? app.prereleaseChannel {
                         PrereleaseBadge(
                             channel: channel,
@@ -220,6 +275,10 @@ struct AppDetailView: View {
                                     Text("Using this source will move the app under Homebrew management.")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
+                                } else if candidate.requiresInAppInstallation {
+                                    Text("This update uses a package installer and must be started from the app.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                 }
                             }
                             Spacer()
@@ -251,7 +310,9 @@ struct AppDetailView: View {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(statusTitle).font(.title3.weight(.semibold))
                     if let update {
-                        Text("Available through \(update.source.rawValue)")
+                        Text(update.requiresInAppInstallation
+                             ? "Open \(app.name) to complete this Sparkle installer update."
+                             : "Available through \(update.source.rawValue)")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     } else {
@@ -344,6 +405,7 @@ struct AppDetailView: View {
                     detailLabel("Update sources")
                     Text(sourceNames)
                 }
+                GridRow { detailLabel("Update management"); Text(app.updateManagement.rawValue) }
                 GridRow { detailLabel("App Store receipt"); Text(app.hasAppStoreReceipt ? "Present" : "Not found") }
                 if let feed = app.sparkleFeedURL { GridRow { detailLabel("Sparkle feed"); Link(feed.host() ?? feed.absoluteString, destination: feed) } }
                 if let repository = app.githubRepository,
@@ -373,12 +435,19 @@ struct AppDetailView: View {
                     if store.workingIDs.contains(update.id) {
                         ProgressView().controlSize(.small).frame(maxWidth: .infinity)
                     } else {
-                        Label(primaryActionTitle, systemImage: "arrow.down.circle.fill")
+                        Label(primaryActionTitle, systemImage: update.actionSystemImage)
                             .frame(maxWidth: .infinity)
                     }
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(store.workingIDs.contains(update.id))
+            }
+            if app.updateManagement.isExternallyManaged {
+                Button { store.openUpdateManager(for: app) } label: {
+                    Label(app.updateManagement.actionTitle, systemImage: app.updateManagement.systemImage)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
             }
             Button { NSWorkspace.shared.open(app.url) } label: {
                 Label("Open App", systemImage: "arrow.up.forward.app")
@@ -392,7 +461,7 @@ struct AppDetailView: View {
             .buttonStyle(.bordered)
             if let sourceURL {
                 Button { NSWorkspace.shared.open(sourceURL) } label: {
-                    Label(sourceActionTitle, systemImage: "arrow.up.right.square")
+                    Label(sourceActionTitle, systemImage: sourceActionSystemImage)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
@@ -417,28 +486,18 @@ struct AppDetailView: View {
     }
 
     private var primaryActionTitle: String {
-        guard let update else { return "Update" }
-        if updateAdoptsWithHomebrew { return "Update & Adopt" }
-        return switch update.source {
-        case .homebrew: "Update"
-        case .appStore: "Open App Store"
-        case .sparkle: "Download"
-        case .github: "View Release"
-        }
+        update?.actionTitle ?? "Update"
     }
 
     private func candidateActionTitle(_ candidate: UpdateCandidate) -> String {
-        if candidate.requiresHomebrewAdoption { return "Update & Adopt" }
-        return switch candidate.source {
-        case .homebrew: "Update"
-        case .appStore: "Open App Store"
-        case .sparkle: "Download"
-        case .github: "View Release"
-        }
+        candidate.actionTitle
     }
 
     private var statusTitle: String {
         if let exclusion { return exclusion.mode == .ignored ? "Updates ignored" : "Version skipped" }
+        if update == nil, app.updateManagement.isExternallyManaged {
+            return "Managed by \(app.updateManagement.rawValue)"
+        }
         return update == nil ? "Up to date" : "Update available"
     }
 
@@ -448,17 +507,20 @@ struct AppDetailView: View {
                 ? "Upkeep will not show updates for this app until you restore them."
                 : "This version is skipped. A later release will appear automatically."
         }
+        if app.updateManagement.isExternallyManaged { return app.updateManagement.updateExplanation }
         if store.source(for: app) == nil { return "No supported update source was detected for this app." }
         return "No newer version was reported by the configured update source."
     }
 
     private var statusIcon: String {
         if let exclusion { return exclusion.mode == .ignored ? "eye.slash.circle.fill" : "forward.end.circle.fill" }
+        if update == nil, app.updateManagement.isExternallyManaged { return "gearshape.2.fill" }
         return update == nil ? "checkmark.circle.fill" : "arrow.down.circle.fill"
     }
 
     private var statusColor: Color {
         if exclusion != nil { return .orange }
+        if update == nil, app.updateManagement.isExternallyManaged { return .blue }
         return update == nil ? .green : .accentColor
     }
 
@@ -490,10 +552,20 @@ struct AppDetailView: View {
         }
     }
 
+    private var sourceActionSystemImage: String {
+        switch update?.source ?? store.source(for: app) {
+        case .appStore: "storefront"
+        case .homebrew: "shippingbox"
+        case .github: "arrow.up.right.square"
+        case .sparkle: update?.requiresInAppInstallation == true ? "arrow.down.circle" : "wand.and.stars"
+        case nil: "arrow.up.right.square"
+        }
+    }
+
     private var buildText: String { app.buildVersion.map { " (build \($0))" } ?? "" }
     private var sourceNames: String {
         let names = store.sources(for: app).map(\.rawValue).joined(separator: ", ")
-        return names.isEmpty ? "No source" : names
+        return names.isEmpty ? (app.updateManagement.isExternallyManaged ? app.updateManagement.rawValue : "No source") : names
     }
     private func detailLabel(_ text: String) -> some View { Text(text).foregroundStyle(.secondary) }
 }
@@ -505,11 +577,15 @@ struct HeaderView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .font(.title2.weight(.medium))
-                .foregroundStyle(.tint)
-                .symbolRenderingMode(.hierarchical)
-                .frame(width: 32, height: 32)
+            ZStack {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.13))
+                Image(systemName: systemImage)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.tint)
+                    .symbolRenderingMode(.hierarchical)
+            }
+            .frame(width: 38, height: 38)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.title2.weight(.semibold))
                 Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
@@ -538,6 +614,19 @@ struct SourceBadge: View {
     }
     private var color: Color {
         switch source { case .appStore: .blue; case .sparkle: .purple; case .homebrew: .orange; case .github: .primary }
+    }
+}
+
+struct ManagementBadge: View {
+    let management: AppUpdateManagement
+    var body: some View {
+        Text(management.rawValue)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .foregroundStyle(.teal)
+            .background(Color.teal.opacity(0.1), in: Capsule())
+            .help(management.updateExplanation)
     }
 }
 

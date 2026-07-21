@@ -1,3 +1,4 @@
+import CoreServices
 import Foundation
 
 enum AppDiscovery {
@@ -9,6 +10,7 @@ enum AppDiscovery {
 
     private static func discoverSynchronously() -> [InstalledApp] {
         let fileManager = FileManager.default
+        let microsoftRegisteredPaths = microsoftAutoUpdateRegisteredPaths()
         let roots = [
             URL(fileURLWithPath: "/Applications", isDirectory: true),
             fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Applications", isDirectory: true)
@@ -26,7 +28,7 @@ enum AppDiscovery {
 
             for case let url as URL in enumerator where url.pathExtension.lowercased() == "app" {
                 guard seenPaths.insert(url.standardizedFileURL.path).inserted,
-                      let app = app(at: url)
+                      let app = app(at: url, microsoftRegisteredPaths: microsoftRegisteredPaths)
                 else { continue }
                 discovered.append(app)
             }
@@ -37,7 +39,7 @@ enum AppDiscovery {
         }
     }
 
-    private static func app(at url: URL) -> InstalledApp? {
+    private static func app(at url: URL, microsoftRegisteredPaths: Set<String>) -> InstalledApp? {
         guard let bundle = Bundle(url: url) else { return nil }
         let info = bundle.infoDictionary ?? [:]
         let name = (info["CFBundleDisplayName"] as? String)
@@ -51,6 +53,19 @@ enum AppDiscovery {
         let repository = githubRepository(from: info, feedURL: feed)
             ?? electronGitHubRepository(at: url)
         let receiptURL = url.appendingPathComponent("Contents/_MASReceipt/receipt")
+        let hasReceipt = FileManager.default.fileExists(atPath: receiptURL.path)
+        let contentsURL = url.appendingPathComponent("Contents", isDirectory: true)
+        let management = updateManagement(
+            bundleIdentifier: bundle.bundleIdentifier,
+            appPath: url.standardizedFileURL.path,
+            hasReceipt: hasReceipt,
+            receiptType: hasReceipt ? appStoreReceiptType(at: url) : nil,
+            hasEmbeddedProvisioningProfile: FileManager.default.fileExists(
+                atPath: contentsURL.appendingPathComponent("embedded.provisionprofile").path
+            ),
+            hasSetappFramework: containsSetappFramework(in: contentsURL),
+            microsoftRegisteredPaths: microsoftRegisteredPaths
+        )
 
         return InstalledApp(
             name: name,
@@ -60,9 +75,67 @@ enum AppDiscovery {
             url: url,
             sparkleFeedURL: feed,
             githubRepository: repository,
-            hasAppStoreReceipt: FileManager.default.fileExists(atPath: receiptURL.path)
+            hasAppStoreReceipt: hasReceipt,
+            updateManagement: management
         )
     }
+
+    static func updateManagement(
+        bundleIdentifier: String?,
+        appPath: String,
+        hasReceipt: Bool,
+        receiptType: String?,
+        hasEmbeddedProvisioningProfile: Bool,
+        hasSetappFramework: Bool,
+        microsoftRegisteredPaths: Set<String>
+    ) -> AppUpdateManagement {
+        let identifier = bundleIdentifier?.lowercased() ?? ""
+        if identifier.contains("-setapp") || hasSetappFramework { return .setapp }
+
+        if hasReceipt {
+            let normalizedReceiptType = receiptType?.lowercased() ?? ""
+            if normalizedReceiptType.contains("sandbox")
+                || (receiptType == nil && hasEmbeddedProvisioningProfile) {
+                return .testFlight
+            }
+            return .appStore
+        }
+
+        let standardizedPath = URL(fileURLWithPath: appPath).standardizedFileURL.path
+        if microsoftRegisteredPaths.contains(standardizedPath) || microsoftAutoUpdateBundleIdentifiers.contains(identifier) {
+            return .microsoftAutoUpdate
+        }
+        return .direct
+    }
+
+    private static func appStoreReceiptType(at url: URL) -> String? {
+        guard let item = MDItemCreate(kCFAllocatorDefault, url.path as CFString) else { return nil }
+        return MDItemCopyAttribute(item, "kMDItemAppStoreReceiptType" as CFString) as? String
+    }
+
+    private static func containsSetappFramework(in contentsURL: URL) -> Bool {
+        let candidates = [
+            contentsURL.appendingPathComponent("Frameworks/Setapp.framework"),
+            contentsURL.appendingPathComponent("Frameworks/Setapp.xcframework"),
+            contentsURL.appendingPathComponent("Resources/SetappFramework-Resources.bundle"),
+            contentsURL.appendingPathComponent("Resources/setappPublicKey.pem")
+        ]
+        return candidates.contains { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    private static func microsoftAutoUpdateRegisteredPaths() -> Set<String> {
+        guard let applications = UserDefaults(suiteName: "com.microsoft.autoupdate2")?
+            .dictionary(forKey: "Applications") else { return [] }
+        return Set(applications.keys.map { URL(fileURLWithPath: $0).standardizedFileURL.path })
+    }
+
+    private static let microsoftAutoUpdateBundleIdentifiers: Set<String> = [
+        "com.microsoft.companyportal", "com.microsoft.defender", "com.microsoft.excel",
+        "com.microsoft.m365copilot", "com.microsoft.onedrive", "com.microsoft.onenote.mac",
+        "com.microsoft.outlook", "com.microsoft.powerpoint", "com.microsoft.quickassist",
+        "com.microsoft.rdc.macos", "com.microsoft.remotehelp", "com.microsoft.skypeforbusiness",
+        "com.microsoft.teams", "com.microsoft.teams2", "com.microsoft.word"
+    ]
 
     private static func githubRepository(from info: [String: Any], feedURL: URL?) -> String? {
         let keys = ["GitHubRepository", "GithubRepository", "GitHubURL", "GithubURL", "RepositoryURL"]

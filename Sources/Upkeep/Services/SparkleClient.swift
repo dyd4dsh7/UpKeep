@@ -25,10 +25,16 @@ struct SparkleClient: Sendable {
                 releaseNotes: item.releaseNotes,
                 actionURL: item.downloadURL ?? feedURL,
                 homebrewToken: nil,
-                sourcePrereleaseChannel: item.prereleaseChannel
+                sourcePrereleaseChannel: item.prereleaseChannel,
+                requiresInAppInstallation: item.installationType == .package
             )
         } catch { throw UpdateSourceError(error) }
     }
+}
+
+enum SparkleInstallationType: String, Equatable, Sendable {
+    case application
+    case package
 }
 
 struct SparkleFeedItem: Equatable {
@@ -38,6 +44,7 @@ struct SparkleFeedItem: Equatable {
     let sourcePrereleaseChannel: PrereleaseChannel?
     let releaseNotes: String?
     let downloadURL: URL?
+    let installationType: SparkleInstallationType
 
     var prereleaseChannel: PrereleaseChannel? {
         sourcePrereleaseChannel ?? VersionComparator.prereleaseChannel(for: version)
@@ -66,6 +73,7 @@ final class SparkleFeedParser: NSObject, XMLParserDelegate {
     private var sourcePrereleaseChannel: PrereleaseChannel?
     private var releaseNotes: String?
     private var downloadURL: URL?
+    private var installationType: SparkleInstallationType = .application
     private(set) var hasParsedItems = false
 
     init(data: Data, baseURL: URL) {
@@ -108,6 +116,7 @@ final class SparkleFeedParser: NSObject, XMLParserDelegate {
             sourcePrereleaseChannel = nil
             releaseNotes = nil
             downloadURL = nil
+            installationType = .application
         }
         guard inItem, elementName == "enclosure" else { return }
         let shortVersion = attributeDict["sparkle:shortVersionString"]
@@ -120,6 +129,13 @@ final class SparkleFeedParser: NSObject, XMLParserDelegate {
         hasMarketingVersion = shortVersion != nil
         if let urlString = attributeDict["url"] {
             downloadURL = URL(string: urlString, relativeTo: baseURL)?.absoluteURL
+        }
+        let declaredInstallationType = attributeDict["sparkle:installationType"]
+            ?? attributeDict["installationType"]
+        let extensionName = downloadURL?.pathExtension.lowercased()
+        if declaredInstallationType?.lowercased().contains("package") == true
+            || extensionName == "pkg" || extensionName == "mpkg" {
+            installationType = .package
         }
     }
 
@@ -158,7 +174,8 @@ final class SparkleFeedParser: NSObject, XMLParserDelegate {
                     hasMarketingVersion: hasMarketingVersion,
                     sourcePrereleaseChannel: sourcePrereleaseChannel,
                     releaseNotes: releaseNotes,
-                    downloadURL: downloadURL
+                    downloadURL: downloadURL,
+                    installationType: installationType
                 ))
                 hasParsedItems = true
             }

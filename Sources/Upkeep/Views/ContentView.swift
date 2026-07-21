@@ -69,18 +69,25 @@ struct ContentView: View {
     @ViewBuilder private var detail: some View {
         switch store.selection {
         case .updates: UpdatesView()
-        case .allApps: AllAppsView(apps: store.filteredApps, title: "All Apps", subtitle: "\(store.apps.count) applications scanned")
+        case .allApps: AllAppsView(
+            apps: store.filteredApps,
+            title: "All Apps",
+            subtitle: "\(store.apps.count) applications scanned",
+            systemImage: SidebarDestination.allApps.headerSystemImage
+        )
         case .adoptable: AdoptableView()
         case .homebrewPackages: HomebrewView()
         case .macOSUpdates: MacOSUpdatesView()
         case .history: UpdateHistoryView()
         case .developerPackages: DeveloperPackagesView()
         case .localModels: LocalModelsView()
-        case .appStore, .sparkle, .homebrewApps, .github, .noSource:
+        case .appStore, .testFlight, .setapp, .microsoftAutoUpdate,
+             .sparkle, .homebrewApps, .github, .noSource:
             AllAppsView(
                 apps: store.apps(for: store.selection).filter { store.searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(store.searchText) },
                 title: store.selection.rawValue,
-                subtitle: "\(store.count(for: store.selection)) apps"
+                subtitle: "\(store.count(for: store.selection)) apps",
+                systemImage: store.selection.headerSystemImage
             )
         }
     }
@@ -187,37 +194,40 @@ private struct Sidebar: View {
     var body: some View {
         List(selection: $store.selection) {
             Section("Updates") {
-                item(.updates, icon: "arrow.down.circle")
+                item(.updates)
             }
             Section("Installed") {
-                item(.allApps, icon: "square.grid.2x2")
-                item(.adoptable, icon: "arrow.down.app")
+                item(.allApps)
+                item(.adoptable)
             }
             Section("Sources") {
-                item(.appStore, icon: "bag")
-                item(.homebrewApps, icon: "shippingbox")
-                item(.sparkle, icon: "sparkles")
-                item(.github, icon: "chevron.left.forwardslash.chevron.right")
-                item(.noSource, icon: "questionmark.app")
+                item(.appStore)
+                item(.testFlight)
+                item(.setapp)
+                item(.microsoftAutoUpdate)
+                item(.homebrewApps)
+                item(.sparkle)
+                item(.github)
+                item(.noSource)
             }
             Section("Packages") {
-                item(.homebrewPackages, icon: "terminal")
+                item(.homebrewPackages)
                 if !store.installedDeveloperManagers.isEmpty {
-                    item(.developerPackages, icon: "chevron.left.forwardslash.chevron.right")
+                    item(.developerPackages)
                 }
                 if !store.localModels.isEmpty {
-                    item(.localModels, icon: "brain.head.profile")
+                    item(.localModels)
                 }
             }
             Section("System") {
-                item(.macOSUpdates, icon: "apple.logo")
-                item(.history, icon: "clock.arrow.circlepath")
+                item(.macOSUpdates)
+                item(.history)
             }
         }
         .listStyle(.sidebar)
     }
 
-    private func item(_ destination: SidebarDestination, icon: String) -> some View {
+    private func item(_ destination: SidebarDestination) -> some View {
         Label {
             HStack {
                 Text(destination == .homebrewApps ? "Homebrew" : destination.rawValue)
@@ -225,7 +235,11 @@ private struct Sidebar: View {
                 let count = store.count(for: destination)
                 if count > 0 { Text("\(count)").font(.caption).foregroundStyle(.secondary).monospacedDigit() }
             }
-        } icon: { Image(systemName: icon) }
+        } icon: {
+            Image(systemName: destination.systemImage)
+                .symbolRenderingMode(.hierarchical)
+                .frame(width: 18)
+        }
         .tag(destination)
     }
 }

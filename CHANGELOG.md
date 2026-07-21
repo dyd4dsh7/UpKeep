@@ -2,6 +2,17 @@
 
 All notable changes to Upkeep are documented here.
 
+## 0.21.0 — 2026-07-22
+
+- Distinguished TestFlight builds from Mac App Store releases and routed them back to TestFlight for updates.
+- Detected Setapp editions and Microsoft AutoUpdate registrations without misclassifying other Microsoft applications.
+- Prevented externally managed editions from receiving incompatible App Store, Sparkle, GitHub, or Homebrew-adoption actions.
+- Recognized Sparkle package installers and opened the app's built-in updater while retaining the developer download as a secondary action.
+- Added update-management badges, explanations, and manager shortcuts to app details.
+- Added dedicated TestFlight, Setapp, and Microsoft AutoUpdate categories with live counts to the sidebar.
+- Added source-aware empty states with refresh and clear-search actions to application categories.
+- Unified sidebar, page-header, empty-state, and update-action iconography with destination-specific SF Symbols.
+
 ## 0.20.0 — 2026-07-22
 
 - Added a unified review sheet for selecting application, Homebrew, developer-package, and local-model updates.

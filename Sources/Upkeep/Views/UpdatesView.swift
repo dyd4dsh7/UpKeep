@@ -258,7 +258,7 @@ private struct BatchUpdateSheet: View {
 
             if items.contains(where: \.opensExternalUpdater) {
                 Label(
-                    "App Store, Sparkle, and GitHub actions open their trusted updater or download page and may require you to finish manually.",
+                    "External update actions open the trusted updater, app, or download page and may require you to finish manually.",
                     systemImage: "arrow.up.right.square"
                 )
                 .font(.caption)
@@ -536,7 +536,9 @@ struct UpdateCard: View {
         } content: {
             ItemIdentityView(
                 title: update.app.name,
-                detail: update.source.rawValue,
+                detail: update.requiresInAppInstallation
+                    ? "\(update.source.rawValue) · Open app to install"
+                    : update.source.rawValue,
                 isRunning: store.isRunning(update.app),
                 prereleaseChannel: update.prereleaseChannel,
                 prereleaseIsInstalled: update.prereleaseIsInstalled
@@ -575,12 +577,7 @@ struct UpdateCard: View {
     }
 
     private var actionTitle: String {
-        switch update.source {
-        case .homebrew: "Update"
-        case .appStore: "Open App Store"
-        case .sparkle: "Download"
-        case .github: "View Release"
-        }
+        update.actionTitle
     }
 }
 

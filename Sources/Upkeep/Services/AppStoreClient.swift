@@ -2,7 +2,7 @@ import Foundation
 
 struct AppStoreClient: Sendable {
     func update(for app: InstalledApp) async throws -> AvailableUpdate? {
-        guard app.hasAppStoreReceipt, let bundleID = app.bundleIdentifier else { return nil }
+        guard app.updateManagement == .appStore, let bundleID = app.bundleIdentifier else { return nil }
         var components = URLComponents(string: "https://itunes.apple.com/lookup")
         components?.queryItems = [
             URLQueryItem(name: "bundleId", value: bundleID),

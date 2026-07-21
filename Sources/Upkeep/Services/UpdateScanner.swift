@@ -69,7 +69,10 @@ struct UpdateScanner: Sendable {
             homebrewCatalogStatus = .failed
         } else {
             do {
-                adoptable = try await HomebrewClient().adoptableApps(from: apps, excluding: packages).filter {
+                adoptable = try await HomebrewClient().adoptableApps(
+                    from: apps.filter { !$0.updateManagement.isExternallyManaged },
+                    excluding: packages
+                ).filter {
                     settings.includePrereleaseUpdates || !VersionComparator.isPrerelease($0.caskVersion)
                 }
                 homebrewCatalogStatus = .succeeded
@@ -139,7 +142,10 @@ struct UpdateScanner: Sendable {
         var updates: [AvailableUpdate] = []
         var failedSources = Set<UpdateSource>()
         var warnings: [ScanWarning] = []
-        if settings.checkAppStore, app.hasAppStoreReceipt {
+        guard !app.updateManagement.isExternallyManaged else {
+            return AppCheckResult(appID: app.id, updates: [], failedSources: [], warnings: [])
+        }
+        if settings.checkAppStore, app.updateManagement == .appStore {
             do {
                 if let update = try await AppStoreClient().update(for: app) {
                     updates.append(update)

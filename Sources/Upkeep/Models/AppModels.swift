@@ -10,6 +10,7 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
     let sparkleFeedURL: URL?
     let githubRepository: String?
     let hasAppStoreReceipt: Bool
+    let updateManagement: AppUpdateManagement
     var prereleaseChannel: PrereleaseChannel? { VersionComparator.prereleaseChannel(for: installedVersion) }
 
     init(
@@ -20,7 +21,8 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
         url: URL,
         sparkleFeedURL: URL?,
         githubRepository: String?,
-        hasAppStoreReceipt: Bool
+        hasAppStoreReceipt: Bool,
+        updateManagement: AppUpdateManagement? = nil
     ) {
         self.id = bundleIdentifier.map { "\($0)|\(url.path)" } ?? url.path
         self.name = name
@@ -31,6 +33,7 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
         self.sparkleFeedURL = sparkleFeedURL
         self.githubRepository = githubRepository
         self.hasAppStoreReceipt = hasAppStoreReceipt
+        self.updateManagement = updateManagement ?? (hasAppStoreReceipt ? .appStore : .direct)
     }
 
     var updateExclusionKey: String {
@@ -38,6 +41,51 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
             return "app|bundle|\(bundleIdentifier.lowercased())"
         }
         return "app|path|\(url.standardizedFileURL.path)"
+    }
+}
+
+enum AppUpdateManagement: String, Codable, Hashable, Sendable {
+    case direct = "Developer"
+    case appStore = "App Store"
+    case testFlight = "TestFlight"
+    case setapp = "Setapp"
+    case microsoftAutoUpdate = "Microsoft AutoUpdate"
+
+    var isExternallyManaged: Bool {
+        switch self {
+        case .testFlight, .setapp, .microsoftAutoUpdate: true
+        case .direct, .appStore: false
+        }
+    }
+
+    var actionTitle: String {
+        switch self {
+        case .testFlight: "Open TestFlight"
+        case .setapp: "Open Setapp"
+        case .microsoftAutoUpdate: "Open Microsoft AutoUpdate"
+        case .appStore: "Open App Store"
+        case .direct: "Open App"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .testFlight: "paperplane.fill"
+        case .setapp: "square.stack.3d.up.fill"
+        case .microsoftAutoUpdate: "arrow.triangle.2.circlepath"
+        case .appStore: "storefront.fill"
+        case .direct: "arrow.up.forward.app"
+        }
+    }
+
+    var updateExplanation: String {
+        switch self {
+        case .testFlight: "This beta is updated through TestFlight, not the Mac App Store."
+        case .setapp: "This edition is managed and updated by Setapp."
+        case .microsoftAutoUpdate: "This installation is managed by Microsoft AutoUpdate."
+        case .appStore: "This app is updated through the Mac App Store."
+        case .direct: "This app is updated by its developer."
+        }
     }
 }
 
@@ -70,9 +118,41 @@ struct UpdateCandidate: Identifiable, Hashable, Sendable {
     let homebrewToken: String?
     let sourcePrereleaseChannel: PrereleaseChannel?
     let requiresHomebrewAdoption: Bool
+    let requiresInAppInstallation: Bool
+
+    init(
+        availableVersion: String,
+        source: UpdateSource,
+        releaseNotes: String?,
+        actionURL: URL?,
+        homebrewToken: String?,
+        sourcePrereleaseChannel: PrereleaseChannel?,
+        requiresHomebrewAdoption: Bool,
+        requiresInAppInstallation: Bool = false
+    ) {
+        self.availableVersion = availableVersion
+        self.source = source
+        self.releaseNotes = releaseNotes
+        self.actionURL = actionURL
+        self.homebrewToken = homebrewToken
+        self.sourcePrereleaseChannel = sourcePrereleaseChannel
+        self.requiresHomebrewAdoption = requiresHomebrewAdoption
+        self.requiresInAppInstallation = requiresInAppInstallation
+    }
 
     var availablePrereleaseChannel: PrereleaseChannel? {
         sourcePrereleaseChannel ?? VersionComparator.prereleaseChannel(for: availableVersion)
+    }
+
+    var actionTitle: String {
+        if requiresHomebrewAdoption { return "Update & Adopt" }
+        if requiresInAppInstallation { return "Open App" }
+        return switch source {
+        case .homebrew: "Update"
+        case .appStore: "Open App Store"
+        case .sparkle: "Download"
+        case .github: "View Release"
+        }
     }
 }
 
@@ -97,7 +177,8 @@ struct AvailableUpdate: Identifiable, Hashable, Sendable {
         actionURL: URL?,
         homebrewToken: String?,
         sourcePrereleaseChannel: PrereleaseChannel? = nil,
-        requiresHomebrewAdoption: Bool = false
+        requiresHomebrewAdoption: Bool = false,
+        requiresInAppInstallation: Bool = false
     ) {
         self.app = app
         self.candidates = [UpdateCandidate(
@@ -107,7 +188,8 @@ struct AvailableUpdate: Identifiable, Hashable, Sendable {
             actionURL: actionURL,
             homebrewToken: homebrewToken,
             sourcePrereleaseChannel: sourcePrereleaseChannel,
-            requiresHomebrewAdoption: requiresHomebrewAdoption
+            requiresHomebrewAdoption: requiresHomebrewAdoption,
+            requiresInAppInstallation: requiresInAppInstallation
         )]
     }
 
@@ -131,7 +213,8 @@ struct AvailableUpdate: Identifiable, Hashable, Sendable {
             actionURL: candidate.actionURL,
             homebrewToken: candidate.homebrewToken,
             sourcePrereleaseChannel: candidate.sourcePrereleaseChannel,
-            requiresHomebrewAdoption: candidate.requiresHomebrewAdoption
+            requiresHomebrewAdoption: candidate.requiresHomebrewAdoption,
+            requiresInAppInstallation: candidate.requiresInAppInstallation
         )
     }
 
@@ -168,6 +251,32 @@ struct AvailableUpdate: Identifiable, Hashable, Sendable {
         availablePrereleaseChannel ?? app.prereleaseChannel
     }
     var prereleaseIsInstalled: Bool { availablePrereleaseChannel == nil && app.prereleaseChannel != nil }
+    var requiresInAppInstallation: Bool { primaryCandidate.requiresInAppInstallation }
+
+    var actionTitle: String {
+        primaryCandidate.actionTitle
+    }
+
+    var actionDescription: String {
+        if requiresInAppInstallation { return "Open the app to run its built-in updater" }
+        return switch source {
+        case .homebrew: "Install with Homebrew"
+        case .appStore: "Open in the App Store"
+        case .sparkle: "Open the developer download"
+        case .github: "Open the GitHub release"
+        }
+    }
+
+
+    var actionSystemImage: String {
+        if requiresInAppInstallation { return "arrow.up.forward.app" }
+        return switch source {
+        case .homebrew: "shippingbox.and.arrow.backward.fill"
+        case .appStore: "storefront.fill"
+        case .sparkle: "arrow.down.circle.fill"
+        case .github: "arrow.up.right.square.fill"
+        }
+    }
 }
 
 enum BatchUpdateItem: Identifiable, Hashable, Sendable {
@@ -214,13 +323,7 @@ enum BatchUpdateItem: Identifiable, Hashable, Sendable {
 
     var actionDescription: String {
         switch self {
-        case let .application(update):
-            switch update.source {
-            case .homebrew: "Install with Homebrew"
-            case .appStore: "Open in the App Store"
-            case .sparkle: "Open the developer download"
-            case .github: "Open the GitHub release"
-            }
+        case let .application(update): update.actionDescription
         case let .homebrew(package): "Upgrade \(package.kind.rawValue.lowercased()) with Homebrew"
         case let .developer(package): "Install with \(package.manager.rawValue)"
         case let .model(model): "Pull with \(model.runtime.rawValue)"
@@ -330,6 +433,9 @@ enum SidebarDestination: String, CaseIterable, Identifiable {
     case allApps = "All Apps"
     case adoptable = "Adoptable"
     case appStore = "App Store"
+    case testFlight = "TestFlight"
+    case setapp = "Setapp"
+    case microsoftAutoUpdate = "Microsoft AutoUpdate"
     case sparkle = "Sparkle"
     case homebrewApps = "Homebrew Apps"
     case github = "GitHub"
@@ -341,6 +447,48 @@ enum SidebarDestination: String, CaseIterable, Identifiable {
     case localModels = "AI Models"
 
     var id: Self { self }
+
+    var systemImage: String {
+        switch self {
+        case .updates: "arrow.down.circle"
+        case .allApps: "square.grid.2x2"
+        case .adoptable: "arrow.down.app"
+        case .appStore: "storefront"
+        case .testFlight: "paperplane"
+        case .setapp: "square.stack.3d.up"
+        case .microsoftAutoUpdate: "arrow.triangle.2.circlepath"
+        case .sparkle: "wand.and.stars"
+        case .homebrewApps: "shippingbox"
+        case .github: "chevron.left.forwardslash.chevron.right"
+        case .noSource: "questionmark.app"
+        case .homebrewPackages: "terminal"
+        case .macOSUpdates: "apple.logo"
+        case .history: "clock.arrow.circlepath"
+        case .developerPackages: "curlybraces.square"
+        case .localModels: "brain.head.profile"
+        }
+    }
+
+    var headerSystemImage: String {
+        switch self {
+        case .updates: "arrow.down.circle.fill"
+        case .allApps: "square.grid.2x2.fill"
+        case .adoptable: "arrow.down.app.fill"
+        case .appStore: "storefront.fill"
+        case .testFlight: "paperplane.fill"
+        case .setapp: "square.stack.3d.up.fill"
+        case .microsoftAutoUpdate: "arrow.triangle.2.circlepath"
+        case .sparkle: "wand.and.stars.inverse"
+        case .homebrewApps: "shippingbox.fill"
+        case .github: "chevron.left.forwardslash.chevron.right"
+        case .noSource: "questionmark.app.fill"
+        case .homebrewPackages: "terminal.fill"
+        case .macOSUpdates: "apple.logo"
+        case .history: "clock.arrow.circlepath"
+        case .developerPackages: "curlybraces.square.fill"
+        case .localModels: "brain.head.profile.fill"
+        }
+    }
 }
 
 enum LocalModelRuntime: String, Codable, CaseIterable, Identifiable, Sendable {

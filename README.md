@@ -8,11 +8,13 @@ Individual app, package, and local-model releases can be skipped without hiding 
 
 ## Update sources
 
-- Mac App Store metadata for apps with App Store receipts
+- Mac App Store metadata for production App Store installations
 - Sparkle appcast feeds declared by applications
 - Homebrew casks, when Homebrew is installed
 - GitHub Releases discovered from app and Electron update metadata
 - Ollama registry manifests and LM Studio model repositories for locally installed AI models
+
+TestFlight, Setapp, and Microsoft AutoUpdate installations are identified separately and routed to their owning updater. Sparkle appcasts that declare a package installer open the app's built-in updater instead of presenting the package as a normal download action.
 
 ## Homebrew workspace
 

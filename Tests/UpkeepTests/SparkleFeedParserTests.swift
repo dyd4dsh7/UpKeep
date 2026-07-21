@@ -20,6 +20,41 @@ import Testing
     #expect(item.version == "3.0")
     #expect(item.buildVersion == nil)
     #expect(item.downloadURL?.absoluteString == "https://example.com/app-3.zip")
+    #expect(item.installationType == .application)
+}
+
+@Test func recognizesSparklePackageInstallers() throws {
+    let xml = """
+    <?xml version="1.0" encoding="utf-8"?>
+    <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+      <channel>
+        <item><enclosure url="https://example.com/app.pkg" sparkle:shortVersionString="3.0" /></item>
+      </channel>
+    </rss>
+    """
+    let parser = SparkleFeedParser(
+        data: try #require(xml.data(using: .utf8)),
+        baseURL: try #require(URL(string: "https://example.com/appcast.xml"))
+    )
+
+    #expect(parser.parse()?.installationType == .package)
+}
+
+@Test func recognizesArchivedSparklePackageInstallers() throws {
+    let xml = """
+    <?xml version="1.0" encoding="utf-8"?>
+    <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+      <channel>
+        <item><enclosure url="https://example.com/app.zip" sparkle:shortVersionString="3.0" sparkle:installationType="package" /></item>
+      </channel>
+    </rss>
+    """
+    let parser = SparkleFeedParser(
+        data: try #require(xml.data(using: .utf8)),
+        baseURL: try #require(URL(string: "https://example.com/appcast.xml"))
+    )
+
+    #expect(parser.parse()?.installationType == .package)
 }
 
 @Test func parsesMarketingAndBuildVersions() throws {
