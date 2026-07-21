@@ -7,6 +7,7 @@ struct MacOSUpdateClient: Sendable {
         let currentVersion: String
         let currentBuild: String
         let isRunningBeta: Bool
+        static let empty = Report(updates: [], currentVersion: "", currentBuild: "", isRunningBeta: false)
     }
 
     func scan() async -> Report {

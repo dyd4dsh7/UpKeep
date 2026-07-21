@@ -76,6 +76,7 @@ enum SidebarDestination: String, CaseIterable, Identifiable {
     case history = "History"
     case developerPackages = "Developer"
     case changelog = "Changelog"
+    case settings = "Settings"
 
     var id: Self { self }
 }

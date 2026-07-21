@@ -6,16 +6,18 @@ PROJECT_DIR=${SCRIPT_DIR:h}
 CONFIGURATION=${1:-release}
 OUTPUT_DIR=${PROJECT_DIR}/outputs
 STAGING_DIR=$(mktemp -d)
+BUILD_DIR=$(mktemp -d)
 APP_DIR=${STAGING_DIR}/Upkeep.app
 ARCHIVE_PATH=${OUTPUT_DIR}/Upkeep.zip
 
 cd "${PROJECT_DIR}"
-swift build -c "${CONFIGURATION}"
-BIN_DIR=$(swift build -c "${CONFIGURATION}" --show-bin-path)
+swift build -c "${CONFIGURATION}" --scratch-path "${BUILD_DIR}"
+BIN_DIR=$(swift build -c "${CONFIGURATION}" --scratch-path "${BUILD_DIR}" --show-bin-path)
 
 mkdir -p "${APP_DIR}/Contents/MacOS" "${APP_DIR}/Contents/Resources"
 cp "${BIN_DIR}/Upkeep" "${APP_DIR}/Contents/MacOS/Upkeep"
 cp "${PROJECT_DIR}/Support/Info.plist" "${APP_DIR}/Contents/Info.plist"
+cp "${PROJECT_DIR}/Support/AppIcon.icns" "${APP_DIR}/Contents/Resources/AppIcon.icns"
 if [[ -d "${BIN_DIR}/Upkeep_Upkeep.bundle" ]]; then
     ditto "${BIN_DIR}/Upkeep_Upkeep.bundle" "${APP_DIR}/Contents/Resources/Upkeep_Upkeep.bundle"
 fi

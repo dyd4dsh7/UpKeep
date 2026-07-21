@@ -6,13 +6,13 @@ struct DeveloperPackageClient: Sendable {
         let installedManagers: [DeveloperPackageManager]
     }
 
-    func scan() async -> Report {
+    func scan(enabledManagers: Set<DeveloperPackageManager> = Set(DeveloperPackageManager.allCases)) async -> Report {
         var tools: [(DeveloperPackageManager, String)] = []
-        if let npm = executable(named: "npm", extra: nvmExecutables(named: "npm")) { tools.append((.npm, npm)) }
-        if let pnpm = executable(named: "pnpm", extra: nvmExecutables(named: "pnpm")) { tools.append((.pnpm, pnpm)) }
-        if let python = executable(named: "python3", extra: ["/usr/bin/python3"]) { tools.append((.python, python)) }
-        if let gem = executable(named: "gem", extra: ["/usr/bin/gem"]) { tools.append((.rubyGems, gem)) }
-        if let cargo = executable(named: "cargo", extra: [FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".cargo/bin/cargo").path]) { tools.append((.cargo, cargo)) }
+        if enabledManagers.contains(.npm), let npm = executable(named: "npm", extra: nvmExecutables(named: "npm")) { tools.append((.npm, npm)) }
+        if enabledManagers.contains(.pnpm), let pnpm = executable(named: "pnpm", extra: nvmExecutables(named: "pnpm")) { tools.append((.pnpm, pnpm)) }
+        if enabledManagers.contains(.python), let python = executable(named: "python3", extra: ["/usr/bin/python3"]) { tools.append((.python, python)) }
+        if enabledManagers.contains(.rubyGems), let gem = executable(named: "gem", extra: ["/usr/bin/gem"]) { tools.append((.rubyGems, gem)) }
+        if enabledManagers.contains(.cargo), let cargo = executable(named: "cargo", extra: [FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".cargo/bin/cargo").path]) { tools.append((.cargo, cargo)) }
 
         let packages = await withTaskGroup(of: [DeveloperPackage].self) { group in
             for (manager, path) in tools {
@@ -34,6 +34,51 @@ struct DeveloperPackageClient: Sendable {
             }
         }
         return Report(packages: packages, installedManagers: tools.map(\.0))
+    }
+
+    func availableVersions(for package: DeveloperPackage, includePrereleases: Bool) async -> [String] {
+        let discovered: [String]
+        switch package.manager {
+        case .npm, .pnpm:
+            discovered = await Task.detached(priority: .utility) {
+                let result = capture(URL(fileURLWithPath: package.executablePath), ["view", package.name, "versions", "--json"])
+                guard result.status == 0 else { return [] }
+                if let values = try? JSONDecoder().decode([String].self, from: result.data) { return values }
+                if let value = try? JSONDecoder().decode(String.self, from: result.data) { return [value] }
+                return []
+            }.value
+        case .python:
+            discovered = await Task.detached(priority: .utility) {
+                let executable = URL(fileURLWithPath: package.executablePath)
+                let result = capture(executable, ["-m", "pip", "index", "versions", package.name, "--json", "--disable-pip-version-check"])
+                if result.status == 0,
+                   let object = try? JSONSerialization.jsonObject(with: result.data) as? [String: Any],
+                   let versions = object["versions"] as? [String] { return versions }
+                let fallback = capture(executable, ["-m", "pip", "index", "versions", package.name, "--disable-pip-version-check"])
+                let output = String(data: fallback.data, encoding: .utf8) ?? ""
+                guard let line = output.split(separator: "\n").first(where: { $0.localizedCaseInsensitiveContains("Available versions:") }),
+                      let colon = line.firstIndex(of: ":") else { return [] }
+                return line[line.index(after: colon)...].split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+            }.value
+        case .rubyGems:
+            discovered = await Task.detached(priority: .utility) {
+                let result = capture(URL(fileURLWithPath: package.executablePath), ["list", "--remote", "--all", "--exact", package.name])
+                let output = String(data: result.data, encoding: .utf8) ?? ""
+                guard let open = output.firstIndex(of: "("), let close = output[open...].firstIndex(of: ")") else { return [] }
+                return output[output.index(after: open)..<close].split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+            }.value
+        case .cargo:
+            guard let encoded = package.name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+                  let url = URL(string: "https://crates.io/api/v1/crates/\(encoded)"),
+                  let data = await registryData(from: url),
+                  let response = try? JSONDecoder().decode(CrateVersionsResponse.self, from: data)
+            else { discovered = [] ; break }
+            discovered = response.versions.filter { !$0.yanked }.map(\.num)
+        }
+
+        let allowed = includePrereleases ? discovered : discovered.filter { !isPrerelease($0) }
+        let unique = Set(allowed + [package.latestVersion, package.currentVersion])
+        return unique.sorted { VersionComparator.compare($0, $1) == .orderedDescending }
     }
 
     func install(_ package: DeveloperPackage, version: String) async throws {
@@ -132,7 +177,7 @@ private func scanCargo(_ path: String) async -> [DeveloperPackage] {
         for (name, current) in installed {
             group.addTask {
                 guard let url = URL(string: "https://crates.io/api/v1/crates/\(name)"),
-                      let (data, _) = try? await URLSession.shared.data(from: url),
+                      let data = await registryData(from: url),
                       let response = try? JSONDecoder().decode(CrateResponse.self, from: data)
                 else { return DeveloperPackage(name: name, currentVersion: current, latestVersion: current, manager: .cargo, executablePath: path) }
                 return DeveloperPackage(name: name, currentVersion: current, latestVersion: response.crate.maxVersion, manager: .cargo, executablePath: path)
@@ -181,4 +226,23 @@ private struct CrateResponse: Decodable {
         let maxVersion: String
         enum CodingKeys: String, CodingKey { case maxVersion = "max_version" }
     }
+}
+private struct CrateVersionsResponse: Decodable {
+    let versions: [Version]
+    struct Version: Decodable { let num: String; let yanked: Bool }
+}
+
+private func isPrerelease(_ version: String) -> Bool {
+    let value = version.lowercased()
+    return ["alpha", "beta", "-rc", ".rc", "-pre", ".dev", "snapshot"].contains { value.contains($0) }
+}
+
+private func registryData(from url: URL) async -> Data? {
+    var request = URLRequest(url: url)
+    request.timeoutInterval = 20
+    request.setValue("Upkeep/0.7 (+https://github.com/dyd4dsh7/UpKeep)", forHTTPHeaderField: "User-Agent")
+    guard let (data, response) = try? await URLSession.shared.data(for: request),
+          let http = response as? HTTPURLResponse,
+          200..<300 ~= http.statusCode else { return nil }
+    return data
 }

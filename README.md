@@ -2,6 +2,8 @@
 
 Upkeep is a native SwiftUI macOS application that scans installed apps and checks trusted update sources.
 
+The app includes a menu-bar status item with the live update count, native Settings for every source and supported developer manager, configurable launch/background checks, beta visibility, and notifications.
+
 ## Update sources
 
 - Mac App Store metadata for apps with App Store receipts
@@ -22,6 +24,8 @@ The macOS section reads Apple's Software Update catalog, lists compatible full i
 Upkeep inventories globally installed npm, pnpm, Python/pip, RubyGems, and Cargo packages when their package managers are available. Manager filters only appear for installed tools, and packages without updates remain visible with a Current status. It preserves the discovered executable path—such as an NVM Node installation—when applying an update. Apps not currently managed by Homebrew also contribute to the update count when Homebrew's official cask catalog has a newer version; Upkeep backs up the app before replacing it and enrolling it under Homebrew management.
 
 Package rows use bundled manager artwork and open detailed metadata when selected. npm, pnpm, pip, RubyGems, and Cargo packages can be installed at an explicit published version. Homebrew version selection follows its versioned-formula model; historical cask releases are only available when the cask itself exposes them.
+
+Developer package details load available releases from the package manager or registry into a version menu and select the latest release by default. The Developer toolbar can refresh all installed managers or only npm, pnpm, Python, RubyGems, or Cargo.
 
 ## Changelog
 

@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import UserNotifications
 
 enum HomebrewFilter: String, CaseIterable, Identifiable {
     case all = "All"
@@ -12,6 +13,7 @@ enum HomebrewFilter: String, CaseIterable, Identifiable {
 
 @MainActor
 final class UpkeepStore: ObservableObject {
+    let settings: AppSettings
     @Published var apps: [InstalledApp] = []
     @Published var updates: [AvailableUpdate] = []
     @Published var homebrewPackages: [HomebrewPackage] = []
@@ -26,6 +28,8 @@ final class UpkeepStore: ObservableObject {
     @Published var selectedPackageID: String?
     @Published var selectedDeveloperPackageID: String?
     @Published var selectedDeveloperVersion = ""
+    @Published var availableDeveloperVersions: [String] = []
+    @Published var isLoadingDeveloperVersions = false
     @Published var selectedApp: InstalledApp?
     @Published var searchText = ""
     @Published var isScanning = false
@@ -33,14 +37,26 @@ final class UpkeepStore: ObservableObject {
     @Published var errorMessage: String?
     @Published var workingIDs = Set<String>()
     @Published var pendingRevert: UpdateRecord?
+    private var periodicTask: Task<Void, Never>?
+    private var didStart = false
+    private let startedAt = Date()
+    private var versionCache: [String: [String]] = [:]
+
+    init(settings: AppSettings = AppSettings()) { self.settings = settings }
 
     var filteredUpdates: [AvailableUpdate] { matching(updates, name: { $0.app.name }) }
     var filteredApps: [InstalledApp] { matching(apps, name: \InstalledApp.name) }
     var filteredAdoptableApps: [AdoptableApp] { matching(adoptableApps, name: { $0.app.name }) }
     var outdatedPackageCount: Int { homebrewPackages.count(where: \.isOutdated) }
     var outdatedDeveloperPackageCount: Int { developerPackages.count(where: \.isOutdated) }
+    var totalUpdateCount: Int {
+        updates.count + outdatedPackageCount + macOSUpdates.count(where: { !$0.isFullInstaller }) + outdatedDeveloperPackageCount
+    }
     var filteredDeveloperPackages: [DeveloperPackage] {
-        matching(developerPackages.filter { developerManagerFilter == "all" || $0.manager.rawValue == developerManagerFilter }, name: { $0.name })
+        matching(developerPackages.filter {
+            (settings.showCurrentDeveloperPackages || $0.isOutdated) &&
+            (developerManagerFilter == "all" || $0.manager.rawValue == developerManagerFilter)
+        }, name: { $0.name })
     }
 
     var filteredHomebrewPackages: [HomebrewPackage] {
@@ -80,7 +96,7 @@ final class UpkeepStore: ObservableObject {
 
     func count(for destination: SidebarDestination) -> Int {
         switch destination {
-        case .updates: updates.count + outdatedPackageCount + macOSUpdates.count(where: { !$0.isFullInstaller }) + outdatedDeveloperPackageCount
+        case .updates: totalUpdateCount
         case .allApps: apps.count
         case .adoptable: adoptableApps.count
         case .homebrewPackages: homebrewPackages.count
@@ -88,6 +104,7 @@ final class UpkeepStore: ObservableObject {
         case .history: updateHistory.count
         case .developerPackages: developerPackages.count
         case .changelog: 0
+        case .settings: 0
         default: apps(for: destination).count
         }
     }
@@ -96,7 +113,8 @@ final class UpkeepStore: ObservableObject {
         guard !isScanning else { return }
         isScanning = true
         errorMessage = nil
-        let report = await UpdateScanner().scan()
+        let previousCount = totalUpdateCount
+        let report = await UpdateScanner().scan(settings: settings.scanSettings)
         apps = report.apps
         updates = report.updates
         homebrewPackages = report.homebrewPackages
@@ -115,6 +133,62 @@ final class UpkeepStore: ObservableObject {
             selectedDeveloperVersion = developerPackages.first?.latestVersion ?? ""
         }
         isScanning = false
+        notifyIfNeeded(previousCount: previousCount)
+    }
+
+    func start() async {
+        guard !didStart else { return }
+        didStart = true
+        if settings.checkOnLaunch { await scan() }
+        periodicTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(300))
+                guard let self, self.settings.refreshInterval != .never else { continue }
+                let elapsed = Date().timeIntervalSince(self.lastChecked ?? self.startedAt)
+                if elapsed >= Double(self.settings.refreshInterval.rawValue) { await self.scan() }
+            }
+        }
+    }
+
+    func scanDeveloperPackages(manager: DeveloperPackageManager?) async {
+        let identifier = "developer-scan-\(manager?.rawValue ?? "all")"
+        guard !workingIDs.contains(identifier) else { return }
+        workingIDs.insert(identifier)
+        defer { workingIDs.remove(identifier) }
+        let managers = manager.map { Set([$0]) } ?? settings.enabledDeveloperManagers
+        let report = await DeveloperPackageClient().scan(enabledManagers: managers)
+        if let manager {
+            developerPackages.removeAll { $0.manager == manager }
+            developerPackages.append(contentsOf: report.packages)
+            developerPackages.sort { $0.manager.rawValue == $1.manager.rawValue ? $0.name.localizedStandardCompare($1.name) == .orderedAscending : $0.manager.rawValue < $1.manager.rawValue }
+            if !installedDeveloperManagers.contains(manager), report.installedManagers.contains(manager) { installedDeveloperManagers.append(manager) }
+            versionCache = versionCache.filter { !$0.key.hasPrefix("\(manager.rawValue):") }
+        } else {
+            developerPackages = report.packages
+            installedDeveloperManagers = report.installedManagers
+            versionCache.removeAll()
+        }
+        lastChecked = Date()
+        if let package = selectedDeveloperPackage { await loadAvailableVersions(for: package, force: true) }
+    }
+
+    func loadAvailableVersions(for package: DeveloperPackage, force: Bool = false) async {
+        selectedDeveloperVersion = package.latestVersion
+        if !force, let cached = versionCache[package.id] {
+            availableDeveloperVersions = cached
+            return
+        }
+        isLoadingDeveloperVersions = true
+        availableDeveloperVersions = [package.latestVersion]
+        let versions = await DeveloperPackageClient().availableVersions(
+            for: package, includePrereleases: settings.includePrereleaseVersions
+        )
+        versionCache[package.id] = versions
+        if selectedDeveloperPackageID == package.id {
+            availableDeveloperVersions = versions
+            selectedDeveloperVersion = versions.first ?? package.latestVersion
+            isLoadingDeveloperVersions = false
+        }
     }
 
     func performUpdate(_ update: AvailableUpdate) async {
@@ -227,6 +301,25 @@ final class UpkeepStore: ObservableObject {
 
     func openMacOSRecoveryHelp() {
         if let url = URL(string: "https://support.apple.com/102551") { NSWorkspace.shared.open(url) }
+    }
+
+    func openMainWindow() {
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.windows.first(where: { $0.canBecomeMain })?.makeKeyAndOrderFront(nil)
+    }
+
+    var selectedDeveloperPackage: DeveloperPackage? {
+        guard let id = selectedDeveloperPackageID else { return nil }
+        return developerPackages.first { $0.id == id }
+    }
+
+    private func notifyIfNeeded(previousCount: Int) {
+        guard settings.notificationsEnabled, totalUpdateCount > 0, totalUpdateCount != previousCount else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Upkeep found updates"
+        content.body = "\(totalUpdateCount) update\(totalUpdateCount == 1 ? " is" : "s are") available."
+        content.sound = .default
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "upkeep-updates", content: content, trigger: nil))
     }
 
     private func perform(id: String, operation: () async throws -> Void) async -> Bool {

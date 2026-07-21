@@ -1,20 +1,21 @@
 import Foundation
 
 struct UpdateScanner: Sendable {
-    func scan() async -> ScanReport {
+    func scan(settings: ScanSettings) async -> ScanReport {
         async let installedApps = AppDiscovery.discover()
-        async let brewInventory = HomebrewClient().inventory()
-        async let macOSReport = MacOSUpdateClient().scan()
-        async let developerReport = DeveloperPackageClient().scan()
+        async let brewInventory = settings.checkHomebrew ? HomebrewClient().inventory() : []
+        async let macOSReport = settings.checkMacOS ? MacOSUpdateClient().scan() : MacOSUpdateClient.Report.empty
+        async let developerReport = DeveloperPackageClient().scan(enabledManagers: settings.enabledDeveloperManagers)
         let (apps, packages, systemReport, devReport) = await (installedApps, brewInventory, macOSReport, developerReport)
 
         var updates: [AvailableUpdate] = []
         await withTaskGroup(of: AvailableUpdate?.self) { group in
             for app in apps {
                 group.addTask {
-                    if let update = await AppStoreClient().update(for: app) { return update }
-                    if let update = await SparkleClient().update(for: app) { return update }
-                    return await GitHubClient().update(for: app)
+                    if settings.checkAppStore, let update = await AppStoreClient().update(for: app) { return update }
+                    if settings.checkSparkle, let update = await SparkleClient().update(for: app) { return update }
+                    if settings.checkGitHub { return await GitHubClient().update(for: app) }
+                    return nil
                 }
             }
             for await update in group {
@@ -38,7 +39,7 @@ struct UpdateScanner: Sendable {
             ))
         }
 
-        let adoptable = await HomebrewClient().adoptableApps(from: apps, excluding: packages)
+        let adoptable = settings.checkHomebrew ? await HomebrewClient().adoptableApps(from: apps, excluding: packages) : []
         for item in adoptable where caskIsNewer(item.caskVersion, than: item.app) {
             guard !updates.contains(where: { $0.app.id == item.app.id }) else { continue }
             updates.append(AvailableUpdate(
@@ -58,7 +59,7 @@ struct UpdateScanner: Sendable {
             warnings: [],
             homebrewPackages: packages,
             adoptableApps: adoptable,
-            macOSUpdates: systemReport.updates,
+            macOSUpdates: systemReport.updates.filter { settings.includeBetas || !$0.isBeta },
             developerPackages: devReport.packages,
             installedDeveloperManagers: devReport.installedManagers
         )

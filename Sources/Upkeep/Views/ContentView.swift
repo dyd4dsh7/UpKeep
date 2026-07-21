@@ -12,7 +12,10 @@ struct ContentView: View {
                 .searchable(text: $store.searchText, placement: .toolbar, prompt: "Search")
                 .toolbar { toolbar }
         }
-        .task { if store.lastChecked == nil { await store.scan() } }
+        .task {
+            AppBrand.applyApplicationIcon()
+            await store.start()
+        }
         .alert("The operation couldn’t be completed", isPresented: Binding(
             get: { store.errorMessage != nil }, set: { if !$0 { store.errorMessage = nil } }
         )) { Button("OK", role: .cancel) {} } message: { Text(store.errorMessage ?? "Unknown error") }
@@ -29,6 +32,7 @@ struct ContentView: View {
         case .history: UpdateHistoryView()
         case .developerPackages: DeveloperPackagesView()
         case .changelog: ChangelogView()
+        case .settings: SettingsView()
         case .appStore, .sparkle, .homebrewApps, .github, .noSource:
             AllAppsView(
                 apps: store.apps(for: store.selection).filter { store.searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(store.searchText) },
@@ -39,6 +43,10 @@ struct ContentView: View {
     }
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Button { store.selection = .settings } label: { Label("Settings", systemImage: "gearshape") }
+                .help("Open Upkeep settings")
+        }
         ToolbarItem(placement: .primaryAction) {
             Button { Task { await store.scan() } } label: {
                 if store.isScanning { ProgressView().controlSize(.small) }
@@ -81,6 +89,7 @@ private struct Sidebar: View {
                     item(.macOSUpdates, icon: "apple.logo")
                     item(.history, icon: "clock.arrow.circlepath")
                     item(.changelog, icon: "list.bullet.rectangle")
+                    item(.settings, icon: "gearshape")
                 }
             }
             .listStyle(.sidebar)
@@ -90,10 +99,7 @@ private struct Sidebar: View {
 
     private var brand: some View {
         HStack(spacing: 10) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 10).fill(.blue.gradient)
-                Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 18, weight: .semibold)).foregroundStyle(.white)
-            }.frame(width: 38, height: 38)
+            AppBrandIcon(size: 42)
             VStack(alignment: .leading, spacing: 1) {
                 Text("Upkeep").font(.headline)
                 Text("Every update. One place.").font(.caption).foregroundStyle(.secondary)

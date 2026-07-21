@@ -47,6 +47,13 @@ private struct UpkeepRelease: Identifiable {
     let changes: [String]
 
     static let all = [
+        UpkeepRelease(version: "0.7.0", date: "21 July 2026", changes: [
+            "Added a new original Upkeep app icon across the Dock, sidebar, app bundle, and menu bar.",
+            "Added a menu-bar status item with a live update count, tooltip, quick scan, Settings, and app controls.",
+            "Added persistent General, Sources, Developer, notification, beta, and refresh settings.",
+            "Replaced manual version entry with registry-backed version menus that default to the latest release.",
+            "Added all-manager and individual package-manager refresh controls in the Developer view."
+        ]),
         UpkeepRelease(version: "0.6.0", date: "21 July 2026", changes: [
             "Added bundled package-manager artwork for Homebrew, npm, pnpm, Python, RubyGems, and Cargo.",
             "Made installed apps and developer packages clickable with complete detail views.",

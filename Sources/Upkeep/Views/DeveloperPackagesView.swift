@@ -20,6 +20,16 @@ struct DeveloperPackagesView: View {
                 }
                 .pickerStyle(.segmented).frame(maxWidth: 560)
                 Spacer()
+                Menu {
+                    Button("Check All Managers") { Task { await store.scanDeveloperPackages(manager: nil) } }
+                    Divider()
+                    ForEach(store.installedDeveloperManagers) { manager in
+                        Button("Check \(manager.rawValue)") { Task { await store.scanDeveloperPackages(manager: manager) } }
+                    }
+                } label: { Label("Check Manager", systemImage: "arrow.clockwise") }
+                Button(refreshTitle) { Task { await store.scanDeveloperPackages(manager: selectedManagerFilter) } }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(store.workingIDs.contains(refreshIdentifier))
             }
             .padding(.horizontal, 20).padding(.vertical, 10).background(.bar)
             .overlay(alignment: .bottom) { Divider() }
@@ -45,7 +55,7 @@ struct DeveloperPackagesView: View {
         .listStyle(.inset)
         .onChange(of: store.selectedDeveloperPackageID) { _, identifier in
             if let identifier, let package = store.developerPackages.first(where: { $0.id == identifier }) {
-                store.selectedDeveloperVersion = package.latestVersion
+                Task { await store.loadAvailableVersions(for: package) }
             }
         }
     }
@@ -54,6 +64,13 @@ struct DeveloperPackagesView: View {
         guard let id = store.selectedDeveloperPackageID else { return store.filteredDeveloperPackages.first }
         return store.developerPackages.first { $0.id == id }
     }
+
+    private var selectedManagerFilter: DeveloperPackageManager? {
+        store.installedDeveloperManagers.first { $0.rawValue == store.developerManagerFilter }
+    }
+
+    private var refreshTitle: String { selectedManagerFilter.map { "Check \($0.rawValue)" } ?? "Check All" }
+    private var refreshIdentifier: String { "developer-scan-\(selectedManagerFilter?.rawValue ?? "all")" }
 }
 
 struct PackageManagerIcon: View {
@@ -154,22 +171,28 @@ private struct DeveloperPackageDetailContent: View {
 
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Install a Version").font(.title2.bold())
-                    Text("This manager supports installing an explicit published version. The package manager will verify that the version exists.")
+                    Text("Choose a published version from \(package.manager.rawValue). The newest available version is selected automatically.")
                         .font(.callout).foregroundStyle(.secondary)
                     HStack {
-                        TextField("Version", text: $store.selectedDeveloperVersion).textFieldStyle(.roundedBorder).frame(maxWidth: 220)
+                        Picker("Version", selection: $store.selectedDeveloperVersion) {
+                            ForEach(store.availableDeveloperVersions, id: \.self) { version in
+                                Text(version == package.latestVersion ? "\(version) — Latest" : version).tag(version)
+                            }
+                        }
+                        .frame(maxWidth: 260)
+                        .disabled(store.isLoadingDeveloperVersions)
+                        if store.isLoadingDeveloperVersions { ProgressView().controlSize(.small) }
                         Button("Install Version") {
                             Task { await store.installDeveloperPackage(package, version: store.selectedDeveloperVersion) }
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(store.selectedDeveloperVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.workingIDs.contains(package.id))
                     }
-                    if package.currentVersion != package.latestVersion {
-                        Button("Use latest (\(package.latestVersion))") { store.selectedDeveloperVersion = package.latestVersion }
-                            .buttonStyle(.link)
-                    }
                 }
             }.padding(26).frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .task(id: package.id + String(store.settings.includePrereleaseVersions)) {
+            await store.loadAvailableVersions(for: package, force: store.settings.includePrereleaseVersions)
         }
     }
 
