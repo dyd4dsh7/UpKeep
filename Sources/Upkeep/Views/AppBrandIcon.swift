@@ -2,16 +2,23 @@ import AppKit
 import SwiftUI
 
 enum AppBrand {
-    static let image: NSImage = {
-        if let url = Bundle.module.url(forResource: "AppIcon", withExtension: "png"),
+    private static let lightImage = loadImage(named: "AppIcon")
+    private static let darkImage = loadImage(named: "AppIconDark")
+
+    private static func loadImage(named name: String) -> NSImage {
+        if let url = Bundle.module.url(forResource: name, withExtension: "png"),
            let image = NSImage(contentsOf: url) { return image }
         return NSImage(systemSymbolName: "arrow.triangle.2.circlepath", accessibilityDescription: "Upkeep") ?? NSImage()
-    }()
+    }
 
-    @MainActor static func applyApplicationIcon() {
+    static func image(for colorScheme: ColorScheme) -> NSImage {
+        colorScheme == .dark ? darkImage : lightImage
+    }
+
+    @MainActor static func applyApplicationIcon(for colorScheme: ColorScheme) {
         let application = NSApplication.shared
         application.setActivationPolicy(.regular)
-        application.applicationIconImage = image
+        application.applicationIconImage = image(for: colorScheme)
         application.dockTile.display()
     }
 
@@ -25,9 +32,11 @@ enum AppBrand {
 }
 
 struct AppBrandIcon: View {
+    @Environment(\.colorScheme) private var colorScheme
     let size: CGFloat
+
     var body: some View {
-        Image(nsImage: AppBrand.image)
+        Image(nsImage: AppBrand.image(for: colorScheme))
             .resizable().scaledToFit().frame(width: size, height: size)
             .accessibilityLabel("Upkeep")
     }

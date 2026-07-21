@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct ContentView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var store: UpkeepStore
     @EnvironmentObject private var settings: AppSettings
 
@@ -15,7 +16,7 @@ struct ContentView: View {
         }
         .navigationTitle("Upkeep")
         .task {
-            AppBrand.applyApplicationIcon()
+            AppBrand.applyApplicationIcon(for: colorScheme)
             MenuBarController.shared.configure(store: store, settings: settings)
             await store.start()
             AppBrand.applyDockBadge(updateCount: store.totalUpdateCount)
@@ -31,8 +32,12 @@ struct ContentView: View {
         .onChange(of: settings.showMenuBarCount) { _, _ in
             refreshMenuBar()
         }
+        .onChange(of: colorScheme) { _, newColorScheme in
+            AppBrand.applyApplicationIcon(for: newColorScheme)
+            AppBrand.applyDockBadge(updateCount: store.totalUpdateCount)
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            AppBrand.applyApplicationIcon()
+            AppBrand.applyApplicationIcon(for: colorScheme)
             AppBrand.applyDockBadge(updateCount: store.totalUpdateCount)
         }
         .alert("The operation couldn’t be completed", isPresented: Binding(
