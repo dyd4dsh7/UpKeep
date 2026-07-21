@@ -2,6 +2,16 @@ import Foundation
 
 struct UpdateScanner: Sendable {
     func scan(settings: ScanSettings) async -> ScanReport {
+        let scanStartedAt = Date()
+        DiagnosticsStore.shared.recordBuffered(.info, category: .scan, "Update scan started", metadata: [
+            "App Store": settings.checkAppStore.description,
+            "Sparkle": settings.checkSparkle.description,
+            "Homebrew": settings.checkHomebrew.description,
+            "GitHub": settings.checkGitHub.description,
+            "macOS": settings.checkMacOS.description,
+            "AI models": settings.checkLocalModels.description,
+            "Prereleases": settings.includePrereleaseUpdates.description
+        ])
         async let installedApps = AppDiscovery.discover()
         async let brewInventory = scopedResult(enabled: settings.checkHomebrew) {
             try await HomebrewClient().inventory(includePrereleases: settings.includePrereleaseUpdates)
@@ -29,6 +39,15 @@ struct UpdateScanner: Sendable {
             homebrewInventoryStatus = .failed
             warnings.append(scanWarning(.homebrew, error: error))
         }
+        DiagnosticsStore.shared.recordBuffered(
+            homebrewInventoryStatus == .failed ? .error : .info,
+            category: .source,
+            "Homebrew inventory \(diagnosticDescription(homebrewInventoryStatus))",
+            metadata: ["Packages": "\(packages.count)"]
+        )
+        DiagnosticsStore.shared.recordBuffered(.info, category: .source, "Application discovery completed", metadata: [
+            "Applications": "\(apps.count)"
+        ])
 
         var updates: [AvailableUpdate] = []
         var failedAppSources: [String: Set<UpdateSource>] = [:]
@@ -98,6 +117,17 @@ struct UpdateScanner: Sendable {
             .values
             .compactMap(AvailableUpdate.merging)
 
+        for update in consolidatedUpdates {
+            for candidate in update.candidates {
+                DiagnosticsStore.shared.recordBuffered(.info, category: .comparison, "Newer version detected", metadata: [
+                    "Item": update.app.name,
+                    "Installed": update.app.installedVersion,
+                    "Available": candidate.availableVersion,
+                    "Source": candidate.source.rawValue
+                ])
+            }
+        }
+
         warnings.append(contentsOf: systemReport.warnings.map {
             ScanWarning(source: .macOS, message: $0)
         })
@@ -107,8 +137,45 @@ struct UpdateScanner: Sendable {
         warnings.append(contentsOf: modelReport.warnings.map {
             ScanWarning(source: .localModels, message: $0)
         })
+        DiagnosticsStore.shared.recordBuffered(
+            homebrewCatalogStatus == .failed ? .error : .info,
+            category: .source,
+            "Homebrew cask catalog \(diagnosticDescription(homebrewCatalogStatus))",
+            metadata: ["Adoptable applications": "\(adoptable.count)"]
+        )
+        DiagnosticsStore.shared.recordBuffered(
+            systemReport.warnings.isEmpty ? .info : .warning,
+            category: .source,
+            "macOS update sources completed",
+            metadata: [
+                "Updates status": diagnosticDescription(status(enabled: settings.checkMacOS, succeeded: systemReport.updatesSucceeded)),
+                "Installers status": diagnosticDescription(status(enabled: settings.checkMacOS, succeeded: systemReport.installersSucceeded)),
+                "Results": "\(systemReport.updates.count)",
+                "Warnings": "\(systemReport.warnings.count)"
+            ]
+        )
+        DiagnosticsStore.shared.recordBuffered(
+            devReport.warnings.isEmpty ? .info : .warning,
+            category: .source,
+            "Developer package sources completed",
+            metadata: [
+                "Managers": devReport.installedManagers.map(\.rawValue).sorted().joined(separator: ", "),
+                "Packages": "\(devReport.packages.count)",
+                "Failed managers": "\(devReport.failedManagers.count)"
+            ]
+        )
+        DiagnosticsStore.shared.recordBuffered(
+            modelReport.warnings.isEmpty ? .info : .warning,
+            category: .source,
+            "AI model sources completed",
+            metadata: [
+                "Models": "\(modelReport.models.count)",
+                "Failed models": "\(modelReport.failedModelIDs.count)",
+                "Failed runtimes": "\(modelReport.failedRuntimes.count)"
+            ]
+        )
 
-        return ScanReport(
+        let report = ScanReport(
             apps: apps,
             updates: consolidatedUpdates.sorted { $0.app.name.localizedStandardCompare($1.app.name) == .orderedAscending },
             checkedAt: Date(),
@@ -129,6 +196,21 @@ struct UpdateScanner: Sendable {
             installedDeveloperManagers: devReport.installedManagers,
             localModels: modelReport.models
         )
+        DiagnosticsStore.shared.record(
+            warnings.isEmpty ? .info : .warning,
+            category: .scan,
+            "Update scan completed",
+            metadata: [
+                "Duration": diagnosticDuration(since: scanStartedAt),
+                "Applications": "\(apps.count)",
+                "Application updates": "\(consolidatedUpdates.count)",
+                "Homebrew packages": "\(packages.count)",
+                "Developer packages": "\(devReport.packages.count)",
+                "AI models": "\(modelReport.models.count)",
+                "Warnings": "\(report.warnings.count)"
+            ]
+        )
+        return report
     }
 
     private struct AppCheckResult: Sendable {
@@ -146,37 +228,46 @@ struct UpdateScanner: Sendable {
             return AppCheckResult(appID: app.id, updates: [], failedSources: [], warnings: [])
         }
         if settings.checkAppStore, app.updateManagement == .appStore {
+            let startedAt = Date()
             do {
                 if let update = try await AppStoreClient().update(for: app) {
                     updates.append(update)
                 }
+                recordAppSourceCheck(app: app, source: .appStore, update: updates.last(where: { $0.source == .appStore }), startedAt: startedAt)
             } catch {
                 failedSources.insert(.appStore)
                 warnings.append(scanWarning(.appStore, error: error, itemName: app.name))
+                recordAppSourceFailure(app: app, source: .appStore, error: error, startedAt: startedAt)
             }
         }
         if settings.checkSparkle, app.sparkleFeedURL != nil {
+            let startedAt = Date()
             do {
                 if let update = try await SparkleClient().update(
                     for: app, includePrereleases: settings.includePrereleaseUpdates
                 ) {
                     updates.append(update)
                 }
+                recordAppSourceCheck(app: app, source: .sparkle, update: updates.last(where: { $0.source == .sparkle }), startedAt: startedAt)
             } catch {
                 failedSources.insert(.sparkle)
                 warnings.append(scanWarning(.sparkle, error: error, itemName: app.name))
+                recordAppSourceFailure(app: app, source: .sparkle, error: error, startedAt: startedAt)
             }
         }
         if settings.checkGitHub, app.githubRepository != nil {
+            let startedAt = Date()
             do {
                 if let update = try await GitHubClient().update(
                     for: app, includePrereleases: settings.includePrereleaseUpdates
                 ) {
                     updates.append(update)
                 }
+                recordAppSourceCheck(app: app, source: .github, update: updates.last(where: { $0.source == .github }), startedAt: startedAt)
             } catch {
                 failedSources.insert(.github)
                 warnings.append(scanWarning(.github, error: error, itemName: app.name))
+                recordAppSourceFailure(app: app, source: .github, error: error, startedAt: startedAt)
             }
         }
         return AppCheckResult(appID: app.id, updates: updates, failedSources: failedSources, warnings: warnings)
@@ -202,6 +293,48 @@ struct UpdateScanner: Sendable {
               let installedBuild = app.buildVersion
         else { return false }
         return VersionComparator.isNewer(parts[1], than: installedBuild)
+    }
+}
+
+private func recordAppSourceCheck(
+    app: InstalledApp,
+    source: UpdateSource,
+    update: AvailableUpdate?,
+    startedAt: Date
+) {
+    var metadata = [
+        "Item": app.name,
+        "Installed": app.installedVersion,
+        "Duration": diagnosticDuration(since: startedAt),
+        "Result": update == nil ? "Current" : "Update available"
+    ]
+    if let update { metadata["Available"] = update.availableVersion }
+    DiagnosticsStore.shared.recordBuffered(.info, category: .source, "\(source.rawValue) request completed", metadata: metadata)
+}
+
+private func recordAppSourceFailure(
+    app: InstalledApp,
+    source: UpdateSource,
+    error: Error,
+    startedAt: Date
+) {
+    DiagnosticsStore.shared.recordBuffered(.error, category: .source, "\(source.rawValue) request failed", metadata: [
+        "Item": app.name,
+        "Installed": app.installedVersion,
+        "Duration": diagnosticDuration(since: startedAt),
+        "Error": error.localizedDescription
+    ])
+}
+
+private func diagnosticDuration(since date: Date) -> String {
+    String(format: "%.0f ms", Date().timeIntervalSince(date) * 1_000)
+}
+
+private func diagnosticDescription(_ status: ScanStatus) -> String {
+    switch status {
+    case .disabled: "disabled"
+    case .succeeded: "completed"
+    case .failed: "failed"
     }
 }
 

@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import UniformTypeIdentifiers
 import UserNotifications
 
 enum HomebrewFilter: String, CaseIterable, Identifiable {
@@ -170,6 +171,10 @@ final class UpkeepStore: ObservableObject {
     @Published private(set) var batchUpdateProgress: BatchUpdateProgress?
     @Published private(set) var runningBundleIdentifiers = Set<String>()
     @Published private(set) var runningApplicationPaths = Set<String>()
+    @Published private(set) var diagnosticEntries = DiagnosticsStore.shared.entries()
+    @Published var diagnosticsSearchText = ""
+    @Published var diagnosticsLevelFilter = DiagnosticLevelFilter.all
+    @Published var diagnosticsCategoryFilter: DiagnosticCategory?
     private var periodicTask: Task<Void, Never>?
     private var runningAppTask: Task<Void, Never>?
     private var didStart = false
@@ -317,6 +322,7 @@ final class UpkeepStore: ObservableObject {
             selectedLocalModelID = localModels.first?.id
         }
         isScanning = false
+        refreshDiagnostics()
         notifyIfNeeded(previousCount: previousCount)
         if didStart { scheduleNextRefresh() }
     }
@@ -426,16 +432,22 @@ final class UpkeepStore: ObservableObject {
             } else if let item = adoptableApps.first(where: { $0.caskToken == token && $0.app.id == update.app.id }) {
                 await updateAdoptableAppNow(item)
             } else {
-                let succeeded = await perform(id: update.id) { try await HomebrewClient().upgradeCask(token: token) }
+                let succeeded = await perform(
+                    id: update.id,
+                    label: update.app.name,
+                    metadata: updateDiagnosticMetadata(update)
+                ) { try await HomebrewClient().upgradeCask(token: token) }
                 if succeeded {
                     await scan()
                     reconcileHomebrewUpdate(token: token, name: update.app.name)
                 }
             }
         } else if update.requiresInAppInstallation {
-            NSWorkspace.shared.open(update.app.url)
+            let opened = NSWorkspace.shared.open(update.app.url)
+            recordExternalUpdateAction(update, opened: opened)
         } else if let actionURL = update.actionURL {
-            NSWorkspace.shared.open(actionURL)
+            let opened = NSWorkspace.shared.open(actionURL)
+            recordExternalUpdateAction(update, opened: opened)
         }
     }
 
@@ -449,7 +461,11 @@ final class UpkeepStore: ObservableObject {
     private func updatePackageNow(_ package: HomebrewPackage) async {
         let record = await recoveryRecord(for: package)
         if package.kind == .cask, matchingApp(for: package) != nil, record == nil { return }
-        let succeeded = await perform(id: package.id) { try await HomebrewClient().upgrade(package) }
+        let succeeded = await perform(id: package.id, label: package.displayName, metadata: [
+            "Source": "Homebrew",
+            "From": package.installedVersion,
+            "To": package.currentVersion
+        ]) { try await HomebrewClient().upgrade(package) }
         if succeeded {
             if let record { try? await UpdateHistoryStore.shared.add(record) }
             await scan()
@@ -467,7 +483,9 @@ final class UpkeepStore: ObservableObject {
 
     private func updateAllPackagesNow() async {
         guard !workingIDs.contains("homebrew-all") else { return }
+        let startedAt = Date()
         workingIDs.insert("homebrew-all")
+        errorMessage = nil
         defer { workingIDs.remove("homebrew-all") }
         var failureMessage: String?
         let attempted = homebrewPackages.filter { $0.isOutdated && !isExcluded($0) }
@@ -495,6 +513,17 @@ final class UpkeepStore: ObservableObject {
                 errorMessage = "Homebrew finished, but \(remaining.map(\.displayName).joined(separator: ", ")) still report available updates."
             }
         }
+        DiagnosticsStore.shared.record(
+            errorMessage == nil ? .info : .error,
+            category: .update,
+            errorMessage == nil ? "Homebrew batch update completed" : "Homebrew batch update needs attention",
+            metadata: [
+                "Attempted": "\(attempted.count)",
+                "Duration": diagnosticDuration(since: startedAt),
+                "Result": errorMessage ?? "All attempted packages refreshed successfully"
+            ]
+        )
+        refreshDiagnostics()
     }
 
     func adopt(_ item: AdoptableApp) async {
@@ -503,7 +532,11 @@ final class UpkeepStore: ObservableObject {
     }
 
     private func adoptNow(_ item: AdoptableApp) async {
-        let succeeded = await perform(id: item.id) { try await HomebrewClient().adopt(item) }
+        let succeeded = await perform(id: item.id, label: item.app.name, metadata: [
+            "Source": "Homebrew adoption",
+            "Installed": item.app.installedVersion,
+            "Catalog": item.caskVersion
+        ]) { try await HomebrewClient().adopt(item) }
         if succeeded { await scan() }
     }
 
@@ -520,9 +553,14 @@ final class UpkeepStore: ObservableObject {
             )
         } catch {
             errorMessage = "Could not create a rollback backup: \(error.localizedDescription)"
+            recordUpdateFailure(item: item.app.name, action: "Prepare rollback backup", error: error)
             return
         }
-        let succeeded = await perform(id: item.id) { try await HomebrewClient().installOrReplace(item) }
+        let succeeded = await perform(id: item.id, label: item.app.name, metadata: [
+            "Source": "Homebrew adoption",
+            "From": item.app.installedVersion,
+            "To": item.caskVersion
+        ]) { try await HomebrewClient().installOrReplace(item) }
         if succeeded {
             try? await UpdateHistoryStore.shared.add(record)
             await scan()
@@ -592,7 +630,11 @@ final class UpkeepStore: ObservableObject {
             errorMessage = "Enter a version to install."
             return
         }
-        let succeeded = await perform(id: package.id) {
+        let succeeded = await perform(id: package.id, label: package.name, metadata: [
+            "Source": package.manager.rawValue,
+            "From": package.currentVersion,
+            "To": selectedVersion
+        ]) {
             try await DeveloperPackageClient().install(package, version: selectedVersion)
         }
         if succeeded {
@@ -628,7 +670,11 @@ final class UpkeepStore: ObservableObject {
     }
 
     func updateLocalModel(_ model: LocalLLMModel) async {
-        let succeeded = await perform(id: model.id) { try await LocalModelClient().update(model) }
+        let succeeded = await perform(id: model.id, label: model.name, metadata: [
+            "Source": model.runtime.rawValue,
+            "From": model.installedRevision,
+            "To": model.latestRevision
+        ]) { try await LocalModelClient().update(model) }
         if succeeded {
             let record = UpdateRecord(
                 id: UUID(), date: Date(), name: model.name,
@@ -665,11 +711,24 @@ final class UpkeepStore: ObservableObject {
                 ))
                 continue
             }
-            results.append(await performBatchItem(item))
+            let result = await performBatchItem(item)
+            results.append(result)
+            DiagnosticsStore.shared.record(
+                result.outcome == .failed ? .error : .info,
+                category: .update,
+                "Batch item \(result.outcome.rawValue.lowercased())",
+                metadata: [
+                    "Item": item.name,
+                    "From": item.currentVersion,
+                    "To": item.availableVersion,
+                    "Detail": result.detail
+                ]
+            )
         }
         batchUpdateProgress = BatchUpdateProgress(completed: items.count, total: items.count, itemName: "Refreshing updates")
 
         if results.contains(where: { $0.outcome == .updated }) { await scan() }
+        refreshDiagnostics()
         return BatchUpdateSummary(results: results)
     }
 
@@ -866,7 +925,11 @@ final class UpkeepStore: ObservableObject {
     func openBetaSettings() { MacOSUpdateClient().openSoftwareUpdateSettings() }
 
     func revert(_ record: UpdateRecord) async {
-        let succeeded = await perform(id: record.id.uuidString) {
+        let succeeded = await perform(id: record.id.uuidString, label: "Restore \(record.name)", metadata: [
+            "From": record.toVersion,
+            "To": record.fromVersion,
+            "Source": "History"
+        ]) {
             try await UpdateHistoryStore.shared.revert(record)
         }
         if succeeded { await scan() }
@@ -907,13 +970,90 @@ final class UpkeepStore: ObservableObject {
     private func exclusionKey(for package: DeveloperPackage) -> String { "developer|\(package.id)" }
     private func exclusionKey(for model: LocalLLMModel) -> String { "model|\(model.id)" }
 
-    private func perform(id: String, operation: () async throws -> Void) async -> Bool {
+    private func perform(
+        id: String,
+        label: String,
+        metadata: [String: String] = [:],
+        operation: () async throws -> Void
+    ) async -> Bool {
         guard !workingIDs.contains(id) else { return false }
+        let startedAt = Date()
         workingIDs.insert(id)
         errorMessage = nil
         defer { workingIDs.remove(id) }
-        do { try await operation(); return true }
-        catch { errorMessage = error.localizedDescription; return false }
+        do {
+            try await operation()
+            DiagnosticsStore.shared.record(.info, category: .update, "Update action completed", metadata: metadata.merging([
+                "Item": label,
+                "Duration": diagnosticDuration(since: startedAt)
+            ]) { _, new in new })
+            refreshDiagnostics()
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            DiagnosticsStore.shared.record(.error, category: .update, "Update action failed", metadata: metadata.merging([
+                "Item": label,
+                "Duration": diagnosticDuration(since: startedAt),
+                "Error": error.localizedDescription
+            ]) { _, new in new })
+            refreshDiagnostics()
+            return false
+        }
+    }
+
+    func refreshDiagnostics() {
+        diagnosticEntries = DiagnosticsStore.shared.entries()
+    }
+
+    func clearDiagnostics() {
+        DiagnosticsStore.shared.clear()
+        refreshDiagnostics()
+    }
+
+    func exportDiagnostics() {
+        let panel = NSSavePanel()
+        panel.title = "Export Upkeep Diagnostics"
+        panel.nameFieldStringValue = "Upkeep Diagnostics.txt"
+        panel.allowedContentTypes = [.plainText]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try DiagnosticsStore.shared.exportText().write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            errorMessage = "Could not export diagnostics: \(error.localizedDescription)"
+        }
+    }
+
+    private func recordExternalUpdateAction(_ update: AvailableUpdate, opened: Bool) {
+        DiagnosticsStore.shared.record(
+            opened ? .info : .error,
+            category: .update,
+            opened ? "External update action opened" : "External update action could not open",
+            metadata: [
+                "Item": update.app.name,
+                "Source": update.source.rawValue,
+                "Installed": update.app.installedVersion,
+                "Available": update.availableVersion
+            ]
+        )
+        if !opened { errorMessage = "Could not open the update action for \(update.app.name)." }
+        refreshDiagnostics()
+    }
+
+    private func updateDiagnosticMetadata(_ update: AvailableUpdate) -> [String: String] {
+        [
+            "Source": update.source.rawValue,
+            "From": update.app.installedVersion,
+            "To": update.availableVersion
+        ]
+    }
+
+    private func recordUpdateFailure(item: String, action: String, error: Error) {
+        DiagnosticsStore.shared.record(.error, category: .update, "Update preparation failed", metadata: [
+            "Item": item,
+            "Action": action,
+            "Error": error.localizedDescription
+        ])
+        refreshDiagnostics()
     }
 
     private func recoveryRecord(for package: HomebrewPackage) async -> UpdateRecord? {
@@ -924,6 +1064,7 @@ final class UpkeepStore: ObservableObject {
                 )
             } catch {
                 errorMessage = "Could not create a rollback backup: \(error.localizedDescription)"
+                recordUpdateFailure(item: package.displayName, action: "Prepare rollback backup", error: error)
                 return nil
             }
         }
@@ -1002,6 +1143,10 @@ final class UpkeepStore: ObservableObject {
     }
 
     private func normalize(_ value: String) -> String { value.lowercased().filter(\.isLetter) }
+
+    private func diagnosticDuration(since date: Date) -> String {
+        String(format: "%.0f ms", Date().timeIntervalSince(date) * 1_000)
+    }
 
     private func mergedUpdates(from report: ScanReport) -> [AvailableUpdate] {
         var merged = Dictionary(uniqueKeysWithValues: report.updates.map { ($0.id, $0) })

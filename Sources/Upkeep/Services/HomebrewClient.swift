@@ -134,6 +134,12 @@ private func runWithRetry(_ executable: URL, _ arguments: [String]) async throws
                   HomebrewClient.BrewError.isConcurrentCommandFailure(message),
                   attempt < delays.count
             else { throw error }
+            DiagnosticsStore.shared.record(.warning, category: .command, "Homebrew command is busy; retrying", metadata: [
+                "Command": "brew " + arguments.joined(separator: " "),
+                "Attempt": "\(attempt + 1)",
+                "Retry delay": "\(delays[attempt])s",
+                "Output": message
+            ])
             try await Task.sleep(nanoseconds: delays[attempt] * 1_000_000_000)
         }
     }
@@ -141,15 +147,42 @@ private func runWithRetry(_ executable: URL, _ arguments: [String]) async throws
 }
 
 private func run(_ executable: URL, _ arguments: [String]) throws -> Data {
+    let startedAt = Date()
+    let command = "brew " + arguments.joined(separator: " ")
     let process = Process()
     let output = Pipe()
     process.executableURL = executable
     process.arguments = arguments
     process.standardOutput = output
     process.standardError = output
-    try process.run()
+    do { try process.run() }
+    catch {
+        DiagnosticsStore.shared.record(.error, category: .command, "Homebrew command could not start", metadata: [
+            "Command": command,
+            "Duration": String(format: "%.0f ms", Date().timeIntervalSince(startedAt) * 1_000),
+            "Error": error.localizedDescription
+        ])
+        throw error
+    }
     let data = output.fileHandleForReading.readDataToEndOfFile()
     process.waitUntilExit()
+    let outputText = String(data: data.prefix(1_200), encoding: .utf8)?
+        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    var metadata = [
+        "Command": command,
+        "Exit status": "\(process.terminationStatus)",
+        "Duration": String(format: "%.0f ms", Date().timeIntervalSince(startedAt) * 1_000),
+        "Output bytes": "\(data.count)"
+    ]
+    if arguments.first != "info" || process.terminationStatus != 0 {
+        metadata["Output"] = outputText.isEmpty ? "(no output)" : outputText
+    }
+    DiagnosticsStore.shared.record(
+        process.terminationStatus == 0 ? .info : .error,
+        category: .command,
+        "Homebrew command \(process.terminationStatus == 0 ? "completed" : "failed")",
+        metadata: metadata
+    )
     guard process.terminationStatus == 0 else {
         throw HomebrewClient.BrewError.failed(String(data: data, encoding: .utf8) ?? "Homebrew failed")
     }

@@ -59,6 +59,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     case general = "General"
     case sources = "Sources"
     case developer = "Developer"
+    case diagnostics = "Diagnostics"
     case changelog = "Changelog"
     case ignored = "Ignored"
     case about = "About"

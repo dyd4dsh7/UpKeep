@@ -35,6 +35,7 @@ struct SettingsView: View {
         case .general: general
         case .sources: sources
         case .developer: developer
+        case .diagnostics: diagnostics
         case .changelog: changelog
         case .ignored: ignored
         case .about: about
@@ -129,6 +130,152 @@ struct SettingsView: View {
 
     private var changelog: some View {
         ChangelogView(compact: true)
+    }
+
+    private var diagnostics: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Diagnostics").font(.title2.bold())
+                        Text("Understand what Upkeep checked and why it reached each result.")
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button { store.exportDiagnostics() } label: {
+                        Label("Export…", systemImage: "square.and.arrow.up")
+                    }
+                    Button(role: .destructive) { store.clearDiagnostics() } label: {
+                        Label("Clear", systemImage: "trash")
+                    }
+                        .disabled(store.diagnosticEntries.isEmpty)
+                }
+
+                HStack(spacing: 8) {
+                    DiagnosticMetric(
+                        title: "Entries",
+                        value: "\(store.diagnosticEntries.count)",
+                        systemImage: "list.bullet.rectangle",
+                        color: .blue
+                    )
+                    DiagnosticMetric(
+                        title: "Warnings",
+                        value: "\(diagnosticWarningCount)",
+                        systemImage: "exclamationmark.triangle.fill",
+                        color: .orange
+                    )
+                    DiagnosticMetric(
+                        title: "Errors",
+                        value: "\(diagnosticErrorCount)",
+                        systemImage: "xmark.octagon.fill",
+                        color: .red
+                    )
+                    DiagnosticMetric(
+                        title: "Latest Scan",
+                        value: latestScanDuration,
+                        systemImage: "clock",
+                        color: .secondary
+                    )
+                }
+
+                HStack {
+                    HStack(spacing: 7) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                        TextField("Search entries", text: $store.diagnosticsSearchText)
+                            .textFieldStyle(.plain)
+                        if !store.diagnosticsSearchText.isEmpty {
+                            Button { store.diagnosticsSearchText = "" } label: {
+                                Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Clear diagnostics search")
+                        }
+                    }
+                    .padding(.horizontal, 9)
+                    .frame(height: 28)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+
+                    Picker("Level", selection: $store.diagnosticsLevelFilter) {
+                        ForEach(DiagnosticLevelFilter.allCases) { Text($0.title).tag($0) }
+                    }
+                    .labelsHidden()
+                    .frame(width: 105)
+
+                    Picker("Category", selection: $store.diagnosticsCategoryFilter) {
+                        Text("All Categories").tag(nil as DiagnosticCategory?)
+                        ForEach(DiagnosticCategory.allCases) { category in
+                            Label(category.shortTitle, systemImage: category.systemImage)
+                                .tag(Optional(category))
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 145)
+
+                    Button { store.refreshDiagnostics() } label: { Image(systemName: "arrow.clockwise") }
+                        .help("Reload diagnostics")
+                }
+                Label(
+                    "Secrets and private paths are redacted. Exports include installed item names, so review them before sharing.",
+                    systemImage: "hand.raised.fill"
+                )
+                .font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 8).padding(.bottom, 14)
+
+            if filteredDiagnostics.isEmpty {
+                ContentUnavailableView(
+                    store.diagnosticsSearchText.isEmpty ? "No diagnostics yet" : "No matching diagnostics",
+                    systemImage: "stethoscope",
+                    description: Text(store.diagnosticsSearchText.isEmpty ? "Run an update check to populate this log." : "Try a different search or level.")
+                )
+            } else {
+                List(filteredDiagnostics) { entry in
+                    DiagnosticRow(entry: entry)
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                }
+                .listStyle(.inset)
+            }
+        }
+        .onAppear { store.refreshDiagnostics() }
+    }
+
+    private var filteredDiagnostics: [DiagnosticEntry] {
+        let query = store.diagnosticsSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return store.diagnosticEntries.filter { entry in
+            let matchesLevel = store.diagnosticsLevelFilter.level.map { entry.level == $0 } ?? true
+            let matchesCategory = store.diagnosticsCategoryFilter.map { entry.category == $0 } ?? true
+            let searchable = ([entry.message, entry.category.rawValue] + entry.metadata.flatMap { [$0.key, $0.value] })
+                .joined(separator: " ")
+            return matchesLevel && matchesCategory
+                && (query.isEmpty || searchable.localizedCaseInsensitiveContains(query))
+        }
+    }
+
+    private var diagnosticWarningCount: Int {
+        latestScanEntries.count { $0.level == .warning }
+    }
+
+    private var diagnosticErrorCount: Int {
+        latestScanEntries.count { $0.level == .error }
+    }
+
+    private var latestScanDuration: String {
+        let rawValue = store.diagnosticEntries.first {
+            $0.category == .scan && $0.message == "Update scan completed"
+        }?.metadata["Duration"] ?? "—"
+        return diagnosticDisplayValue(rawValue, key: "Duration")
+    }
+
+    private var latestScanEntries: ArraySlice<DiagnosticEntry> {
+        guard let completionIndex = store.diagnosticEntries.firstIndex(where: {
+            $0.category == .scan && $0.message == "Update scan completed"
+        }) else { return store.diagnosticEntries[...] }
+        let remaining = store.diagnosticEntries[completionIndex...]
+        guard let startIndex = remaining.firstIndex(where: {
+            $0.category == .scan && $0.message == "Update scan started"
+        }) else { return remaining }
+        return store.diagnosticEntries[completionIndex...startIndex]
     }
 
     private var ignored: some View {
@@ -244,6 +391,7 @@ struct SettingsView: View {
         case .general: "gearshape"
         case .sources: "dot.radiowaves.left.and.right"
         case .developer: "chevron.left.forwardslash.chevron.right"
+        case .diagnostics: "stethoscope"
         case .changelog: "list.bullet.rectangle"
         case .ignored: "eye.slash"
         case .about: "info.circle"
@@ -252,5 +400,132 @@ struct SettingsView: View {
 
     private func sourceToggle(_ title: String, _ icon: String, _ binding: Binding<Bool>) -> some View {
         Toggle(isOn: binding) { Label(title, systemImage: icon) }
+    }
+}
+
+private struct DiagnosticRow: View {
+    let entry: DiagnosticEntry
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 11) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(color.opacity(0.12))
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(color)
+            }
+            .frame(width: 30, height: 30)
+
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(entry.message).fontWeight(.semibold)
+                    Label(entry.category.shortTitle, systemImage: entry.category.systemImage)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .labelStyle(.titleAndIcon)
+                    Spacer()
+                    Text(entry.date, format: .dateTime.hour().minute().second())
+                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                }
+                if !entry.metadata.isEmpty {
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 132), spacing: 7, alignment: .leading)],
+                        alignment: .leading,
+                        spacing: 7
+                    ) {
+                        ForEach(orderedMetadata, id: \.key) { pair in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(pair.key.uppercased())
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundStyle(.tertiary)
+                                Text(diagnosticDisplayValue(pair.value, key: pair.key))
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(pair.key == "Error" ? .red : .secondary)
+                                    .lineLimit(2)
+                                    .textSelection(.enabled)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 8).padding(.vertical, 6)
+                            .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        }
+                    }
+                }
+            }
+        }
+        .padding(11)
+        .background(.background.opacity(0.45), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(.quaternary, lineWidth: 1)
+        }
+        .padding(.vertical, 3)
+    }
+
+    private var orderedMetadata: [(key: String, value: String)] {
+        let priority = [
+            "Item", "Source", "Result", "Installed", "Available", "From", "To",
+            "Duration", "Warnings", "Error", "Command", "Output"
+        ]
+        return entry.metadata.sorted { left, right in
+            let leftIndex = priority.firstIndex(of: left.key) ?? priority.count
+            let rightIndex = priority.firstIndex(of: right.key) ?? priority.count
+            if leftIndex != rightIndex { return leftIndex < rightIndex }
+            return left.key.localizedStandardCompare(right.key) == .orderedAscending
+        }
+    }
+
+    private var icon: String {
+        switch entry.level {
+        case .info: "info.circle.fill"
+        case .warning: "exclamationmark.triangle.fill"
+        case .error: "xmark.octagon.fill"
+        }
+    }
+
+    private var color: Color {
+        switch entry.level {
+        case .info: .blue
+        case .warning: .orange
+        case .error: .red
+        }
+    }
+}
+
+private func diagnosticDisplayValue(_ value: String, key: String) -> String {
+    if key == "Duration",
+       value.hasSuffix(" ms"),
+       let milliseconds = Double(value.dropLast(3)),
+       milliseconds >= 1_000 {
+        return String(format: "%.1f s", milliseconds / 1_000)
+    }
+    if value == "true" { return "Enabled" }
+    if value == "false" { return "Disabled" }
+    if value == "completed" { return "Completed" }
+    if value == "disabled" { return "Disabled" }
+    if value == "failed" { return "Failed" }
+    return value
+}
+
+private struct DiagnosticMetric: View {
+    let title: String
+    let value: String
+    let systemImage: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .foregroundStyle(color)
+                .frame(width: 16)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(value).font(.headline.monospacedDigit()).lineLimit(1)
+                Text(title).font(.caption2).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
+        .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }

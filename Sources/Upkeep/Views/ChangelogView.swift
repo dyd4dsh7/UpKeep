@@ -51,6 +51,13 @@ private struct UpkeepRelease: Identifiable {
     let changes: [String]
 
     static let all = [
+        UpkeepRelease(version: "0.23.0", date: "22 July 2026", changes: [
+            "Records scan timing, update-source requests, version decisions, Homebrew commands, and update outcomes.",
+            "Adds an at-a-glance dashboard, structured entry cards, searchable severity and category filters, plus export and clear controls in Settings.",
+            "Formats scan durations and status values for readability and scopes warning and error totals to the latest completed scan.",
+            "Redacts credentials, authenticated URLs, URL queries, and the user's home-directory path before saving or exporting entries.",
+            "Keeps a bounded local history and includes version, source, duration, and failure context for troubleshooting."
+        ]),
         UpkeepRelease(version: "0.22.0", date: "22 July 2026", changes: [
             "Groups compact Sort, Filter, and Density controls with consistent spacing at the far-left edge of each list toolbar.",
             "Keeps batch update actions on the far right and moves search into the sidebar.",

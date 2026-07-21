@@ -2,6 +2,14 @@
 
 All notable changes to Upkeep are documented here.
 
+## 0.23.0 — 2026-07-22
+
+- Added persistent diagnostics for scan timing, source requests, version decisions, Homebrew commands, and update results.
+- Added an at-a-glance diagnostics dashboard, structured entry cards, searchable severity and category filters, plus export and clear controls in Settings.
+- Made scan durations and status values easier to read, with warning and error totals scoped to the latest completed scan.
+- Redacted credentials, authenticated URLs, URL queries, and the user's home-directory path before diagnostics are written to disk or exported.
+- Bounded the local diagnostics history and added privacy and persistence test coverage.
+
 ## 0.22.0 — 2026-07-22
 
 - Added compact icon menus for sorting, filtering, and list density, grouped with consistent spacing at the far-left edge of each list toolbar.
