@@ -18,6 +18,10 @@ struct UpdatesView: View {
                 }
             }
 
+            if !store.availableBatchUpdateItems.isEmpty {
+                batchUpdateBar
+            }
+
             if store.isScanning && store.apps.isEmpty {
                 scanningState
             } else if store.filteredUpdates.isEmpty && filteredPackages.isEmpty && systemUpdates.isEmpty && filteredDeveloperPackages.isEmpty && filteredModels.isEmpty {
@@ -53,6 +57,34 @@ struct UpdatesView: View {
                 .listStyle(.inset)
             }
         }
+        .sheet(isPresented: $store.isShowingBatchReview) {
+            BatchUpdateSheet(items: store.availableBatchUpdateItems)
+                .environmentObject(store)
+        }
+    }
+
+    private var batchUpdateBar: some View {
+        HStack(spacing: 12) {
+            Label(
+                "\(store.availableBatchUpdateItems.count) actionable \(store.availableBatchUpdateItems.count == 1 ? "update" : "updates")",
+                systemImage: "checklist"
+            )
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            Spacer()
+            if !systemUpdates.isEmpty {
+                Text("macOS updates open separately")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            Button("Review Updates…") { store.isShowingBatchReview = true }
+                .buttonStyle(.borderedProminent)
+                .disabled(store.workingIDs.contains("unified-update-batch"))
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
+        .background(.bar)
+        .overlay(alignment: .bottom) { Divider() }
     }
 
     private var selectedUpdateItemID: Binding<String?> {
@@ -156,6 +188,236 @@ struct UpdatesView: View {
     private var emptyTitle: String {
         if !store.searchText.isEmpty { return "No matching updates" }
         return store.scanWarnings.isEmpty ? "No updates found" : "Scan incomplete"
+    }
+}
+
+private struct BatchUpdateSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var store: UpkeepStore
+    let items: [BatchUpdateItem]
+
+    @StateObject private var state: BatchUpdateSheetState
+
+    init(items: [BatchUpdateItem]) {
+        self.items = items
+        _state = StateObject(wrappedValue: BatchUpdateSheetState(items: items))
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            Divider()
+            if let summary = state.summary {
+                resultsView(summary)
+            } else {
+                reviewView
+            }
+            Divider()
+            footer
+        }
+        .frame(minWidth: 720, idealWidth: 780, minHeight: 560, idealHeight: 640)
+        .interactiveDismissDisabled(state.isRunning)
+    }
+
+    private var header: some View {
+        HStack(spacing: 14) {
+            Image(systemName: state.summary == nil ? "checklist" : resultHeaderIcon)
+                .font(.system(size: 28))
+                .foregroundStyle(state.summary == nil ? Color.accentColor : resultHeaderColor)
+                .frame(width: 36)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(state.summary == nil ? "Review Updates" : "Update Results")
+                    .font(.title2.bold())
+                Text(headerSubtitle).foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(20)
+    }
+
+    private var reviewView: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button(state.selectedIDs.count == items.count ? "Deselect All" : "Select All") {
+                    state.selectedIDs = state.selectedIDs.count == items.count ? [] : Set(items.map(\.id))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tint)
+                Spacer()
+                Text("\(state.selectedIDs.count) of \(items.count) selected")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
+
+            List(items) { item in
+                BatchReviewRow(item: item, isSelected: selectionBinding(for: item))
+            }
+            .listStyle(.inset)
+
+            if items.contains(where: \.opensExternalUpdater) {
+                Label(
+                    "App Store, Sparkle, and GitHub actions open their trusted updater or download page and may require you to finish manually.",
+                    systemImage: "arrow.up.right.square"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+            }
+        }
+    }
+
+    private func resultsView(_ summary: BatchUpdateSummary) -> some View {
+        List(summary.results) { result in
+            HStack(spacing: 12) {
+                Image(systemName: resultIcon(result.outcome))
+                    .foregroundStyle(resultColor(result.outcome))
+                    .font(.title3)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack {
+                        Text(result.item.name).fontWeight(.semibold)
+                        Spacer()
+                        Text(result.outcome.rawValue)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(resultColor(result.outcome))
+                    }
+                    Text(result.detail).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.vertical, 6)
+        }
+        .listStyle(.inset)
+    }
+
+    private var footer: some View {
+        HStack {
+            if state.isRunning, let progress = store.batchUpdateProgress {
+                ProgressView(value: Double(progress.completed), total: Double(max(progress.total, 1)))
+                    .frame(width: 150)
+                Text("\(progress.itemName) · \(progress.completed)/\(progress.total)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            } else if state.summary == nil {
+                Text("Updates run one at a time and continue if an individual item fails.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button(state.summary == nil ? "Cancel" : "Done") { dismiss() }
+                .keyboardShortcut(.cancelAction)
+                .disabled(state.isRunning)
+            if state.summary == nil {
+                Button(batchButtonTitle) {
+                    let selected = items.filter { state.selectedIDs.contains($0.id) }
+                    state.isRunning = true
+                    Task {
+                        state.summary = await store.performBatchUpdates(selected)
+                        state.isRunning = false
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(state.selectedIDs.isEmpty || state.isRunning)
+            }
+        }
+        .padding(16)
+    }
+
+    private func selectionBinding(for item: BatchUpdateItem) -> Binding<Bool> {
+        Binding(
+            get: { state.selectedIDs.contains(item.id) },
+            set: { selected in
+                if selected { state.selectedIDs.insert(item.id) }
+                else { state.selectedIDs.remove(item.id) }
+            }
+        )
+    }
+
+    private var selectedItems: [BatchUpdateItem] { items.filter { state.selectedIDs.contains($0.id) } }
+    private var selectedRunningApps: [InstalledApp] {
+        selectedItems.compactMap { item in
+            switch item {
+            case let .application(update): return update.homebrewToken == nil || !store.isRunning(update.app) ? nil : update.app
+            case let .homebrew(package):
+                guard package.kind == .cask,
+                      let app = store.homebrewPackageApp(for: package),
+                      store.isRunning(app) else { return nil }
+                return app
+            case .developer, .model: return nil
+            }
+        }
+    }
+
+    private var batchButtonTitle: String {
+        if !selectedRunningApps.isEmpty { return "Quit Apps and Update \(state.selectedIDs.count)" }
+        return "Update \(state.selectedIDs.count)"
+    }
+
+    private var headerSubtitle: String {
+        guard let summary = state.summary else { return "Choose what Upkeep should update, then review each action." }
+        var parts = ["\(summary.updatedCount) updated"]
+        if summary.openedCount > 0 { parts.append("\(summary.openedCount) need attention") }
+        if summary.failedCount > 0 { parts.append("\(summary.failedCount) failed") }
+        return parts.joined(separator: " · ")
+    }
+
+    private var resultHeaderIcon: String { state.summary?.failedCount == 0 ? "checkmark.circle.fill" : "exclamationmark.triangle.fill" }
+    private var resultHeaderColor: Color { state.summary?.failedCount == 0 ? .green : .orange }
+    private func resultIcon(_ outcome: BatchUpdateResult.Outcome) -> String {
+        switch outcome { case .updated: "checkmark.circle.fill"; case .opened: "arrow.up.right.circle.fill"; case .failed: "xmark.circle.fill" }
+    }
+    private func resultColor(_ outcome: BatchUpdateResult.Outcome) -> Color {
+        switch outcome { case .updated: .green; case .opened: .blue; case .failed: .red }
+    }
+}
+
+@MainActor
+private final class BatchUpdateSheetState: ObservableObject {
+    @Published var selectedIDs: Set<String>
+    @Published var summary: BatchUpdateSummary?
+    @Published var isRunning = false
+
+    init(items: [BatchUpdateItem]) {
+        selectedIDs = Set(items.map(\.id))
+    }
+}
+
+private struct BatchReviewRow: View {
+    let item: BatchUpdateItem
+    @Binding var isSelected: Bool
+
+    var body: some View {
+        Toggle(isOn: $isSelected) {
+            HStack(spacing: 12) {
+                itemIcon
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.name).fontWeight(.semibold)
+                    Text(item.actionDescription).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                VersionTransitionView(current: item.currentVersion, latest: item.availableVersion)
+                if item.opensExternalUpdater {
+                    Image(systemName: "arrow.up.right.square")
+                        .foregroundStyle(.secondary)
+                        .help("Requires completion outside Upkeep")
+                }
+            }
+            .padding(.vertical, 5)
+        }
+        .toggleStyle(.checkbox)
+    }
+
+    @ViewBuilder private var itemIcon: some View {
+        switch item {
+        case let .application(update): AppIcon(url: update.app.url, size: 34)
+        case .homebrew: BundledPackageIcon(name: "homebrew", size: 34)
+        case let .developer(package): PackageManagerIcon(manager: package.manager, size: 34)
+        case let .model(model): LocalModelRuntimeIcon(runtime: model.runtime, size: 34)
+        }
     }
 }
 

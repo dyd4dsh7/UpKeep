@@ -63,6 +63,16 @@ private enum RunningAppUpdateError: LocalizedError {
     }
 }
 
+private enum BatchUpdateError: LocalizedError {
+    case couldNotOpen(String)
+
+    var errorDescription: String? {
+        switch self {
+        case let .couldNotOpen(source): "Could not open \(source)."
+        }
+    }
+}
+
 @MainActor
 final class UpkeepStore: ObservableObject {
     let settings: AppSettings
@@ -96,6 +106,8 @@ final class UpkeepStore: ObservableObject {
     @Published var workingIDs = Set<String>()
     @Published var pendingRevert: UpdateRecord?
     @Published var pendingRunningAppConfirmation: RunningAppConfirmation?
+    @Published var isShowingBatchReview = false
+    @Published private(set) var batchUpdateProgress: BatchUpdateProgress?
     @Published private(set) var runningBundleIdentifiers = Set<String>()
     @Published private(set) var runningApplicationPaths = Set<String>()
     private var periodicTask: Task<Void, Never>?
@@ -125,6 +137,18 @@ final class UpkeepStore: ObservableObject {
 
     var visibleOutdatedLocalModels: [LocalLLMModel] {
         localModels.filter { $0.isOutdated && !isExcluded($0) }
+    }
+
+    var availableBatchUpdateItems: [BatchUpdateItem] {
+        let appUpdates = visibleUpdates
+        let representedCaskTokens = Set(appUpdates.flatMap { $0.candidates.compactMap(\.homebrewToken) })
+        let packages = homebrewPackages.filter {
+            $0.isOutdated && !isExcluded($0) && !representedCaskTokens.contains($0.token)
+        }
+        return appUpdates.map(BatchUpdateItem.application)
+            + packages.map(BatchUpdateItem.homebrew)
+            + developerPackages.filter { $0.isOutdated && !isExcluded($0) }.map(BatchUpdateItem.developer)
+            + visibleOutdatedLocalModels.map(BatchUpdateItem.model)
     }
 
     var filteredHomebrewPackages: [HomebrewPackage] {
@@ -523,6 +547,134 @@ final class UpkeepStore: ObservableObject {
         }
     }
 
+    func performBatchUpdates(_ items: [BatchUpdateItem]) async -> BatchUpdateSummary {
+        let batchID = "unified-update-batch"
+        guard !items.isEmpty, !workingIDs.contains(batchID) else { return BatchUpdateSummary(results: []) }
+        workingIDs.insert(batchID)
+        errorMessage = nil
+        defer {
+            workingIDs.remove(batchID)
+            batchUpdateProgress = nil
+        }
+
+        let runningApps = batchRunningApps(for: items)
+        if !runningApps.isEmpty { try? await quitRunningApplications(for: runningApps) }
+
+        var results: [BatchUpdateResult] = []
+        for (index, item) in items.enumerated() {
+            batchUpdateProgress = BatchUpdateProgress(completed: index, total: items.count, itemName: item.name)
+            if let app = batchApp(for: item), isRunning(app) {
+                results.append(BatchUpdateResult(
+                    item: item,
+                    outcome: .failed,
+                    detail: "\(app.name) could not be quit. Quit it manually and try again."
+                ))
+                continue
+            }
+            results.append(await performBatchItem(item))
+        }
+        batchUpdateProgress = BatchUpdateProgress(completed: items.count, total: items.count, itemName: "Refreshing updates")
+
+        if results.contains(where: { $0.outcome == .updated }) { await scan() }
+        return BatchUpdateSummary(results: results)
+    }
+
+    private func performBatchItem(_ item: BatchUpdateItem) async -> BatchUpdateResult {
+        let workID = "batch|\(item.id)"
+        workingIDs.insert(workID)
+        defer { workingIDs.remove(workID) }
+
+        do {
+            switch item {
+            case let .application(update):
+                guard let token = update.homebrewToken else {
+                    guard let url = update.actionURL, NSWorkspace.shared.open(url) else {
+                        throw BatchUpdateError.couldNotOpen(update.source.rawValue)
+                    }
+                    return BatchUpdateResult(
+                        item: item,
+                        outcome: .opened,
+                        detail: "Opened \(update.source.rawValue). Complete the update there."
+                    )
+                }
+                if let package = homebrewPackages.first(where: { $0.kind == .cask && $0.token == token }) {
+                    try await upgradeBatchPackage(package)
+                } else if let adoptable = adoptableApps.first(where: { $0.caskToken == token && $0.app.id == update.app.id }) {
+                    let record = try await UpdateHistoryStore.shared.prepareAppBackup(
+                        app: adoptable.app, toVersion: adoptable.caskVersion, kind: .homebrew
+                    )
+                    try await HomebrewClient().installOrReplace(adoptable)
+                    try? await UpdateHistoryStore.shared.add(record)
+                } else {
+                    let record = try await UpdateHistoryStore.shared.prepareAppBackup(
+                        app: update.app, toVersion: update.availableVersion, kind: .homebrew
+                    )
+                    try await HomebrewClient().upgradeCask(token: token)
+                    try? await UpdateHistoryStore.shared.add(record)
+                }
+
+            case let .homebrew(package):
+                try await upgradeBatchPackage(package)
+
+            case let .developer(package):
+                try await DeveloperPackageClient().install(package, version: package.latestVersion)
+                let record = UpdateRecord(
+                    id: UUID(), date: Date(), name: package.name,
+                    fromVersion: package.currentVersion, toVersion: package.latestVersion,
+                    kind: .developer, originalAppPath: nil, backupPath: nil,
+                    recoveryNote: "Package-manager updates do not have a universal rollback mechanism. Reinstall the previous version with \(package.manager.rawValue) if needed."
+                )
+                try? await UpdateHistoryStore.shared.add(record)
+
+            case let .model(model):
+                try await LocalModelClient().update(model)
+                let record = UpdateRecord(
+                    id: UUID(), date: Date(), name: model.name,
+                    fromVersion: model.installedRevision, toVersion: model.latestRevision,
+                    kind: .model, originalAppPath: nil, backupPath: nil,
+                    recoveryNote: "Model files are managed by \(model.runtime.rawValue). Download the earlier model revision again if rollback is required."
+                )
+                try? await UpdateHistoryStore.shared.add(record)
+            }
+            return BatchUpdateResult(item: item, outcome: .updated, detail: "Updated to \(item.availableVersion).")
+        } catch {
+            return BatchUpdateResult(item: item, outcome: .failed, detail: error.localizedDescription)
+        }
+    }
+
+    private func upgradeBatchPackage(_ package: HomebrewPackage) async throws {
+        let record: UpdateRecord
+        if package.kind == .cask, let app = matchingApp(for: package) {
+            record = try await UpdateHistoryStore.shared.prepareAppBackup(
+                app: app, toVersion: package.currentVersion, kind: .homebrew
+            )
+        } else {
+            record = UpdateRecord(
+                id: UUID(), date: Date(), name: package.displayName,
+                fromVersion: package.installedVersion, toVersion: package.currentVersion,
+                kind: .homebrew, originalAppPath: nil, backupPath: nil,
+                recoveryNote: "Homebrew formula versions cannot always be rolled back automatically. Restore from Time Machine or install a versioned formula when available."
+            )
+        }
+        try await HomebrewClient().upgrade(package)
+        try? await UpdateHistoryStore.shared.add(record)
+    }
+
+    private func batchRunningApps(for items: [BatchUpdateItem]) -> [InstalledApp] {
+        refreshRunningApplications()
+        return Dictionary(uniqueKeysWithValues: items.compactMap(batchApp(for:)).filter(isRunning).map { ($0.id, $0) })
+            .values
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    private func batchApp(for item: BatchUpdateItem) -> InstalledApp? {
+        switch item {
+        case let .application(update): return update.homebrewToken == nil ? nil : update.app
+        case let .homebrew(package): return package.kind == .cask ? matchingApp(for: package) : nil
+        case .developer, .model: return nil
+        }
+    }
+
     func isExcluded(_ update: AvailableUpdate) -> Bool {
         settings.isExcluded(key: exclusionKey(for: update.app), version: update.availableVersion)
     }
@@ -695,6 +847,10 @@ final class UpkeepStore: ObservableObject {
     func homebrewPackage(for app: InstalledApp) -> HomebrewPackage? {
         let name = normalize(app.name)
         return homebrewPackages.first { $0.kind == .cask && (normalize($0.displayName) == name || normalize($0.token) == name) }
+    }
+
+    func homebrewPackageApp(for package: HomebrewPackage) -> InstalledApp? {
+        matchingApp(for: package)
     }
 
     private func queueRunningAppConfirmation(for apps: [InstalledApp], action: RunningAppConfirmation.Action) -> Bool {

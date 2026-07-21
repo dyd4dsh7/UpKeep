@@ -51,6 +51,12 @@ private struct UpkeepRelease: Identifiable {
     let changes: [String]
 
     static let all = [
+        UpkeepRelease(version: "0.20.0", date: "22 July 2026", changes: [
+            "Adds a unified review sheet for selecting app, Homebrew, developer-package, and AI-model updates.",
+            "Runs selected updates one at a time, continues after failures, and shows a result for every action.",
+            "Identifies external App Store, Sparkle, and GitHub handoffs while keeping macOS installation separate.",
+            "Prevents the same Homebrew-backed app and cask from being selected twice."
+        ]),
         UpkeepRelease(version: "0.19.0", date: "22 July 2026", changes: [
             "Adds one-to-six-day, one-week, and one-, three-, and six-month time frames for both Skip and Ignore actions.",
             "Keeps timed skips version-specific while timed ignores suppress every version until expiry.",

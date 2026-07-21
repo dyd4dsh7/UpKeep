@@ -170,6 +170,96 @@ struct AvailableUpdate: Identifiable, Hashable, Sendable {
     var prereleaseIsInstalled: Bool { availablePrereleaseChannel == nil && app.prereleaseChannel != nil }
 }
 
+enum BatchUpdateItem: Identifiable, Hashable, Sendable {
+    case application(AvailableUpdate)
+    case homebrew(HomebrewPackage)
+    case developer(DeveloperPackage)
+    case model(LocalLLMModel)
+
+    var id: String {
+        switch self {
+        case let .application(update): "app|\(update.id)"
+        case let .homebrew(package): "homebrew|\(package.id)"
+        case let .developer(package): "developer|\(package.id)"
+        case let .model(model): "model|\(model.id)"
+        }
+    }
+
+    var name: String {
+        switch self {
+        case let .application(update): update.app.name
+        case let .homebrew(package): package.displayName
+        case let .developer(package): package.name
+        case let .model(model): model.name
+        }
+    }
+
+    var currentVersion: String {
+        switch self {
+        case let .application(update): update.app.installedVersion
+        case let .homebrew(package): package.installedVersion
+        case let .developer(package): package.currentVersion
+        case let .model(model): model.installedRevision
+        }
+    }
+
+    var availableVersion: String {
+        switch self {
+        case let .application(update): update.availableVersion
+        case let .homebrew(package): package.currentVersion
+        case let .developer(package): package.latestVersion
+        case let .model(model): model.latestRevision
+        }
+    }
+
+    var actionDescription: String {
+        switch self {
+        case let .application(update):
+            switch update.source {
+            case .homebrew: "Install with Homebrew"
+            case .appStore: "Open in the App Store"
+            case .sparkle: "Open the developer download"
+            case .github: "Open the GitHub release"
+            }
+        case let .homebrew(package): "Upgrade \(package.kind.rawValue.lowercased()) with Homebrew"
+        case let .developer(package): "Install with \(package.manager.rawValue)"
+        case let .model(model): "Pull with \(model.runtime.rawValue)"
+        }
+    }
+
+    var opensExternalUpdater: Bool {
+        if case let .application(update) = self { return update.homebrewToken == nil }
+        return false
+    }
+}
+
+struct BatchUpdateResult: Identifiable, Hashable, Sendable {
+    enum Outcome: String, Hashable, Sendable {
+        case updated = "Updated"
+        case opened = "Action Required"
+        case failed = "Failed"
+    }
+
+    let item: BatchUpdateItem
+    let outcome: Outcome
+    let detail: String
+    var id: String { item.id }
+}
+
+struct BatchUpdateSummary: Hashable, Sendable {
+    let results: [BatchUpdateResult]
+
+    var updatedCount: Int { results.count { $0.outcome == .updated } }
+    var openedCount: Int { results.count { $0.outcome == .opened } }
+    var failedCount: Int { results.count { $0.outcome == .failed } }
+}
+
+struct BatchUpdateProgress: Equatable, Sendable {
+    let completed: Int
+    let total: Int
+    let itemName: String
+}
+
 struct ScanReport: Sendable {
     let apps: [InstalledApp]
     let updates: [AvailableUpdate]

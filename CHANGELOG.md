@@ -2,6 +2,13 @@
 
 All notable changes to Upkeep are documented here.
 
+## 0.20.0 — 2026-07-22
+
+- Added a unified review sheet for selecting application, Homebrew, developer-package, and local-model updates.
+- Runs selected updates sequentially, continues after individual failures, and presents a complete results summary.
+- Clearly identifies actions that must be completed in the App Store, Sparkle, or GitHub and keeps macOS installation separate.
+- Deduplicates Homebrew-backed application updates so the same cask cannot be selected twice.
+
 ## 0.19.0 — 2026-07-22
 
 - Added one-to-six-day, one-week, and one-, three-, and six-month time frames for both Skip and Ignore actions.
