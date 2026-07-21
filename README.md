@@ -2,7 +2,9 @@
 
 Upkeep is a native SwiftUI macOS application that scans installed apps and checks trusted update sources.
 
-The app includes a menu-bar status item with the live update count, native Settings for every source and supported developer manager, configurable launch/background checks, beta visibility, and notifications.
+The app includes a standard unified macOS toolbar with a prominent live update counter, a menu-bar status item, and a Dock icon badge using the same filtered count. It also provides native Settings for every source and supported developer manager, configurable launch/background checks, beta visibility, and notifications.
+
+Individual app, package, and local-model releases can be skipped without hiding later versions, or ignored until restored from Settings. Skipped and ignored updates are excluded from the update list, sidebar badge, menu-bar count, and notifications.
 
 ## Update sources
 
@@ -10,6 +12,7 @@ The app includes a menu-bar status item with the live update count, native Setti
 - Sparkle appcast feeds declared by applications
 - Homebrew casks, when Homebrew is installed
 - GitHub Releases discovered from app and Electron update metadata
+- Ollama registry manifests and LM Studio model repositories for locally installed AI models
 
 ## Homebrew workspace
 
@@ -27,9 +30,15 @@ Package rows use bundled manager artwork and open detailed metadata when selecte
 
 Developer package details load available releases from the package manager or registry into a version menu and select the latest release by default. The Developer toolbar can refresh all installed managers or only npm, pnpm, Python, RubyGems, or Cargo.
 
+## Local AI models
+
+Upkeep detects locally installed Ollama and LM Studio models without showing empty runtime sections. Ollama models are checked by comparing their local and registry manifest digests. LM Studio model files are checked against their originating Hugging Face repository. Supported updates run through `ollama pull` or `lms get`, so credentials, storage, and model management remain with the installed runtime.
+
+The model workspace uses bundled artwork downloaded from the official Ollama and LM Studio websites, with a native generic AI symbol when a logo is unavailable.
+
 ## Changelog
 
-Upkeep includes a native Changelog section. The complete release history is also maintained in [CHANGELOG.md](CHANGELOG.md).
+Upkeep includes its native changelog inside Settings. The complete release history is also maintained in [CHANGELOG.md](CHANGELOG.md).
 
 Upkeep never downloads executables from its own servers. App Store updates open in the App Store, Sparkle downloads come from the app's declared developer feed, and Homebrew apps are upgraded through the local Homebrew installation.
 

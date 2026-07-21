@@ -14,34 +14,44 @@ struct UpdatesView: View {
 
             if store.isScanning && store.apps.isEmpty {
                 scanningState
-            } else if store.filteredUpdates.isEmpty && filteredPackages.isEmpty && systemUpdates.isEmpty && filteredDeveloperPackages.isEmpty {
+            } else if store.filteredUpdates.isEmpty && filteredPackages.isEmpty && systemUpdates.isEmpty && filteredDeveloperPackages.isEmpty && filteredModels.isEmpty {
                 emptyState
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 12) {
-                        ForEach(store.filteredUpdates) { update in
-                            UpdateCard(update: update)
-                        }
-                        ForEach(filteredPackages) { package in
-                            HomebrewUpdateCard(package: package)
-                        }
-                        ForEach(systemUpdates) { update in
-                            MacOSUpdateCard(update: update)
-                        }
-                        ForEach(filteredDeveloperPackages) { package in
-                            DeveloperUpdateCard(package: package)
+                List {
+                    if !store.filteredUpdates.isEmpty {
+                        Section("Applications") {
+                            ForEach(store.filteredUpdates) { UpdateCard(update: $0) }
                         }
                     }
-                    .padding(22)
+                    if !filteredPackages.isEmpty {
+                        Section("Homebrew Packages") {
+                            ForEach(filteredPackages) { HomebrewUpdateCard(package: $0) }
+                        }
+                    }
+                    if !systemUpdates.isEmpty {
+                        Section("macOS") {
+                            ForEach(systemUpdates) { MacOSUpdateCard(update: $0) }
+                        }
+                    }
+                    if !filteredDeveloperPackages.isEmpty {
+                        Section("Developer Packages") {
+                            ForEach(filteredDeveloperPackages) { DeveloperUpdateCard(package: $0) }
+                        }
+                    }
+                    if !filteredModels.isEmpty {
+                        Section("AI Models") {
+                            ForEach(filteredModels) { LocalModelUpdateCard(model: $0) }
+                        }
+                    }
                 }
+                .listStyle(.inset)
             }
         }
-        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var filteredPackages: [HomebrewPackage] {
         store.homebrewPackages.filter {
-            $0.isOutdated && (store.searchText.isEmpty || $0.displayName.localizedCaseInsensitiveContains(store.searchText))
+            $0.isOutdated && !store.isExcluded($0) && (store.searchText.isEmpty || $0.displayName.localizedCaseInsensitiveContains(store.searchText))
         }
     }
 
@@ -50,12 +60,16 @@ struct UpdatesView: View {
     }
 
     private var filteredDeveloperPackages: [DeveloperPackage] {
-        store.developerPackages.filter { $0.isOutdated && (store.searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(store.searchText)) }
+        store.developerPackages.filter { $0.isOutdated && !store.isExcluded($0) && (store.searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(store.searchText)) }
+    }
+
+    private var filteredModels: [LocalLLMModel] {
+        store.visibleOutdatedLocalModels.filter { store.searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(store.searchText) }
     }
 
     private var subtitle: String {
         if store.isScanning { return "Looking for new versions…" }
-        let total = store.updates.count + store.outdatedPackageCount + store.macOSUpdates.count(where: { !$0.isFullInstaller }) + store.outdatedDeveloperPackageCount
+        let total = store.totalUpdateCount
         if total == 0 { return "No updates found" }
         return "\(total) updates available across apps and packages"
     }
@@ -92,20 +106,23 @@ private struct DeveloperUpdateCard: View {
     @EnvironmentObject private var store: UpkeepStore
     let package: DeveloperPackage
     var body: some View {
-        HStack(spacing: 16) {
-            PackageManagerIcon(manager: package.manager, size: 52)
-            VStack(alignment: .leading, spacing: 5) {
-                HStack { Text(package.name).font(.headline); Text(package.manager.rawValue).font(.caption2.bold()).foregroundStyle(.purple) }
-                Text("Global developer package").font(.callout).foregroundStyle(.secondary)
+        StandardItemRow {
+            PackageManagerIcon(manager: package.manager, size: 36)
+        } content: {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack { Text(package.name).fontWeight(.semibold).lineLimit(1); Text(package.manager.rawValue).font(.caption2.bold()).foregroundStyle(.secondary).lineLimit(1) }
+                Text("Global developer package").font(.caption).foregroundStyle(.secondary)
             }
-            Spacer()
-            Text("\(package.currentVersion) → \(package.latestVersion)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+        } accessories: {
+            VersionTransitionView(current: package.currentVersion, latest: package.latestVersion)
             Button("Update") { Task { await store.updateDeveloperPackage(package) } }
-                .buttonStyle(.borderedProminent).controlSize(.small)
+                .buttonStyle(.bordered).controlSize(.small)
                 .disabled(store.workingIDs.contains(package.id))
+            Menu {
+                Button("Skip Version \(package.latestVersion)") { store.skip(package) }
+                Button("Ignore \(package.name)") { store.ignore(package) }
+            } label: { MoreMenuIcon() }.menuStyle(.borderlessButton).menuIndicator(.hidden)
         }
-        .padding(16).background(.background, in: RoundedRectangle(cornerRadius: 14))
-        .overlay { RoundedRectangle(cornerRadius: 14).stroke(Color.primary.opacity(0.08)) }
         .contentShape(Rectangle())
         .onTapGesture {
             store.selectedDeveloperPackageID = package.id
@@ -119,22 +136,21 @@ private struct MacOSUpdateCard: View {
     @EnvironmentObject private var store: UpkeepStore
     let update: MacOSUpdate
     var body: some View {
-        HStack(spacing: 16) {
+        StandardItemRow {
             ZStack {
                 RoundedRectangle(cornerRadius: 12).fill(Color.blue.opacity(0.12))
                 Image(systemName: "apple.logo").font(.title2).foregroundStyle(.blue)
-            }.frame(width: 52, height: 52)
-            VStack(alignment: .leading, spacing: 5) {
-                HStack { Text(update.title).font(.headline); if update.isBeta { Text("BETA").font(.caption2.bold()).foregroundStyle(.purple) } }
+            }.frame(width: 36, height: 36)
+        } content: {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack { Text(update.title).fontWeight(.semibold); if update.isBeta { Text("BETA").font(.caption2.bold()).foregroundStyle(.purple) } }
                 Text("macOS \(update.version)" + (update.requiresRestart ? " · Restart required" : ""))
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(.secondary)
             }
-            Spacer()
+        } accessories: {
             Button("Open Software Update") { Task { await store.prepareMacOSUpdate(update) } }
-                .buttonStyle(.borderedProminent).controlSize(.small)
+                .buttonStyle(.bordered).controlSize(.small)
         }
-        .padding(16).background(.background, in: RoundedRectangle(cornerRadius: 14))
-        .overlay { RoundedRectangle(cornerRadius: 14).stroke(Color.primary.opacity(0.08)) }
     }
 }
 
@@ -143,69 +159,49 @@ struct UpdateCard: View {
     let update: AvailableUpdate
 
     var body: some View {
-        HStack(alignment: .top, spacing: 16) {
-            AppIcon(url: update.app.url, size: 52)
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .firstTextBaseline) {
+        StandardItemRow {
+            AppIcon(url: update.app.url, size: 36)
+        } content: {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 7) {
                     Text(update.app.name)
-                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .lineLimit(1)
                     SourceBadge(source: update.source)
-                    Spacer()
-                    versionText
                 }
 
                 if let notes = update.releaseNotes, !notes.isEmpty {
                     Text(notes)
-                        .font(.callout)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                        .lineLimit(1)
                 } else {
                     Text("A newer version is available from \(update.source.rawValue).")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-
-                HStack {
-                    Button {
-                        Task { await store.performUpdate(update) }
-                    } label: {
-                        if store.workingIDs.contains(update.id) {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Text(actionTitle)
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .disabled(store.workingIDs.contains(update.id))
-
-                    Button("Show in Finder") {
-                        NSWorkspace.shared.activateFileViewerSelecting([update.app.url])
-                    }
-                    .buttonStyle(.plain)
-                    .font(.caption)
+                        .font(.caption)
                     .foregroundStyle(.secondary)
                 }
             }
-        }
-        .padding(16)
-        .background(.background, in: RoundedRectangle(cornerRadius: 14))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(Color.primary.opacity(0.08))
+        } accessories: {
+            VersionTransitionView(current: update.app.installedVersion, latest: update.availableVersion)
+            Button {
+                Task { await store.performUpdate(update) }
+            } label: {
+                if store.workingIDs.contains(update.id) { ProgressView().controlSize(.small) }
+                else { Text(actionTitle) }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(store.workingIDs.contains(update.id))
+            Menu {
+                Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([update.app.url]) }
+                Divider()
+                Button("Skip Version \(update.availableVersion)") { store.skip(update) }
+                Button("Ignore \(update.app.name)") { store.ignore(update.app) }
+            } label: { MoreMenuIcon() }
+            .menuStyle(.borderlessButton).menuIndicator(.hidden)
         }
         .contentShape(Rectangle())
         .onTapGesture { store.selectedApp = update.app }
-    }
-
-    private var versionText: some View {
-        HStack(spacing: 5) {
-            Text(update.app.installedVersion).foregroundStyle(.secondary)
-            Image(systemName: "arrow.right").foregroundStyle(.tertiary)
-            Text(update.availableVersion).fontWeight(.semibold)
-        }
-        .font(.caption.monospacedDigit())
     }
 
     private var actionTitle: String {
@@ -223,31 +219,59 @@ private struct HomebrewUpdateCard: View {
     let package: HomebrewPackage
 
     var body: some View {
-        HStack(spacing: 16) {
-            BundledPackageIcon(name: "homebrew", size: 52)
-            VStack(alignment: .leading, spacing: 6) {
+        StandardItemRow {
+            BundledPackageIcon(name: "homebrew", size: 36)
+        } content: {
+            VStack(alignment: .leading, spacing: 3) {
                 HStack {
-                    Text(package.displayName).font(.headline)
+                    Text(package.displayName).fontWeight(.semibold).lineLimit(1)
                     SourceBadge(source: .homebrew)
                     if package.isDependency { Text("DEPENDENCY").font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary) }
                 }
                 Text(package.description ?? "Homebrew \(package.kind.rawValue.lowercased())")
-                    .font(.callout).foregroundStyle(.secondary).lineLimit(1)
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
-            Spacer()
-            Text("\(package.installedVersion) → \(package.currentVersion)")
-                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+        } accessories: {
+            VersionTransitionView(current: package.installedVersion, latest: package.currentVersion)
             Button("Update") { Task { await store.updatePackage(package) } }
-                .buttonStyle(.borderedProminent).controlSize(.small)
+                .buttonStyle(.bordered).controlSize(.small)
                 .disabled(store.workingIDs.contains(package.id))
+            Menu {
+                Button("Skip Version \(package.currentVersion)") { store.skip(package) }
+                Button("Ignore \(package.displayName)") { store.ignore(package) }
+            } label: { MoreMenuIcon() }.menuStyle(.borderlessButton).menuIndicator(.hidden)
         }
-        .padding(16)
-        .background(.background, in: RoundedRectangle(cornerRadius: 14))
-        .overlay { RoundedRectangle(cornerRadius: 14).stroke(Color.primary.opacity(0.08)) }
         .contentShape(Rectangle())
         .onTapGesture {
             store.selectedPackageID = package.id
             store.selection = .homebrewPackages
         }
+    }
+}
+
+private struct LocalModelUpdateCard: View {
+    @EnvironmentObject private var store: UpkeepStore
+    let model: LocalLLMModel
+
+    var body: some View {
+        StandardItemRow {
+            LocalModelRuntimeIcon(runtime: model.runtime, size: 36)
+        } content: {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack { Text(model.name).fontWeight(.semibold).lineLimit(1); Text(model.runtime.rawValue).font(.caption2.bold()).foregroundStyle(.secondary).lineLimit(1) }
+                Text(model.variant ?? "Local language model").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+        } accessories: {
+            VersionTransitionView(current: model.installedRevision, latest: model.latestRevision)
+            Button("Update") { Task { await store.updateLocalModel(model) } }
+                .buttonStyle(.bordered).controlSize(.small)
+                .disabled(store.workingIDs.contains(model.id))
+            Menu {
+                Button("Skip This Revision") { store.skip(model) }
+                Button("Ignore \(model.name)") { store.ignore(model) }
+            } label: { MoreMenuIcon() }.menuStyle(.borderlessButton).menuIndicator(.hidden)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { store.selectedLocalModelID = model.id; store.selection = .localModels }
     }
 }

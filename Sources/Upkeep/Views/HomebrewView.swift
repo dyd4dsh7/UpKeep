@@ -36,9 +36,7 @@ struct HomebrewView: View {
                     .disabled(store.workingIDs.contains("homebrew-all"))
             }
         }
-        .padding(.horizontal, 20).padding(.vertical, 10)
-        .background(.bar)
-        .overlay(alignment: .bottom) { Divider() }
+        .padding(.horizontal, 20).padding(.bottom, 10)
     }
 
     private var packageList: some View {
@@ -58,29 +56,45 @@ private struct PackageRow: View {
     let package: HomebrewPackage
 
     var body: some View {
-        HStack(spacing: 12) {
-            BundledPackageIcon(name: "homebrew", size: 30)
-            VStack(alignment: .leading, spacing: 4) {
+        StandardItemRow {
+            BundledPackageIcon(name: "homebrew", size: 36)
+        } content: {
+            VStack(alignment: .leading, spacing: 3) {
                 HStack {
-                    Text(package.displayName).fontWeight(.semibold)
+                    Text(package.displayName).fontWeight(.semibold).lineLimit(1)
                     if package.isDependency { badge("DEPENDENCY") }
                     else if package.kind == .cask { badge("CASK") }
+                    if let exclusion = store.exclusion(for: package) { badge(exclusion.mode.rawValue.uppercased()) }
                 }
-                HStack(spacing: 5) {
-                    Text(package.installedVersion)
-                    if package.isOutdated {
-                        Image(systemName: "arrow.right")
-                        Text(package.currentVersion).foregroundStyle(.blue).fontWeight(.medium)
-                    }
-                }.font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                Text(package.description ?? "Homebrew \(package.kind.rawValue.lowercased())")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
-            Spacer()
-            if package.isOutdated {
+        } accessories: {
+            VersionTransitionView(current: package.installedVersion, latest: package.isOutdated ? package.currentVersion : nil)
+            if package.isOutdated && !store.isExcluded(package) {
                 Button("Update") { Task { await store.updatePackage(package) } }
-                    .buttonStyle(.borderedProminent).controlSize(.small)
+                    .buttonStyle(.bordered).controlSize(.small)
                     .disabled(store.workingIDs.contains(package.id))
             }
-        }.padding(.vertical, 7)
+            if package.isOutdated {
+                Menu {
+                    if let exclusion = store.exclusion(for: package) {
+                        Button("Restore Updates") { store.restore(exclusion) }
+                    } else {
+                        Button("Skip Version \(package.currentVersion)") { store.skip(package) }
+                        Button("Ignore \(package.displayName)") { store.ignore(package) }
+                    }
+                } label: { MoreMenuIcon() }.menuStyle(.borderlessButton).menuIndicator(.hidden)
+            }
+        }
+        .contextMenu {
+            if let exclusion = store.exclusion(for: package) {
+                Button("Restore Updates") { store.restore(exclusion) }
+            } else {
+                if package.isOutdated { Button("Skip Version \(package.currentVersion)") { store.skip(package) } }
+                Button("Ignore \(package.displayName)") { store.ignore(package) }
+            }
+        }
     }
 
     private func badge(_ text: String) -> some View {
@@ -104,7 +118,18 @@ private struct PackageDetail: View {
                         if let description = package.description { Text(description).foregroundStyle(.secondary) }
                     }
                     if package.isOutdated {
-                        Button("Update") { Task { await store.updatePackage(package) } }.buttonStyle(.borderedProminent)
+                        HStack {
+                            if let exclusion = store.exclusion(for: package) {
+                                Label(exclusion.mode.rawValue, systemImage: exclusion.mode == .ignored ? "eye.slash" : "forward.end").foregroundStyle(.orange)
+                                Button("Restore Updates") { store.restore(exclusion) }
+                            } else {
+                                Button("Update") { Task { await store.updatePackage(package) } }.buttonStyle(.borderedProminent)
+                                Menu("More") {
+                                    Button("Skip Version \(package.currentVersion)") { store.skip(package) }
+                                    Button("Ignore \(package.displayName)") { store.ignore(package) }
+                                }
+                            }
+                        }
                     }
                     detailCard(package)
                     versionSupport(package)

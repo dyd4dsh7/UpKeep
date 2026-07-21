@@ -240,7 +240,7 @@ private func isPrerelease(_ version: String) -> Bool {
 private func registryData(from url: URL) async -> Data? {
     var request = URLRequest(url: url)
     request.timeoutInterval = 20
-    request.setValue("Upkeep/0.7 (+https://github.com/dyd4dsh7/UpKeep)", forHTTPHeaderField: "User-Agent")
+    request.setValue("Upkeep/0.9", forHTTPHeaderField: "User-Agent")
     guard let (data, response) = try? await URLSession.shared.data(for: request),
           let http = response as? HTTPURLResponse,
           200..<300 ~= http.statusCode else { return nil }

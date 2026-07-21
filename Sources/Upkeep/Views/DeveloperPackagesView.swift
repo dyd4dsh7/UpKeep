@@ -31,8 +31,7 @@ struct DeveloperPackagesView: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(store.workingIDs.contains(refreshIdentifier))
             }
-            .padding(.horizontal, 20).padding(.vertical, 10).background(.bar)
-            .overlay(alignment: .bottom) { Divider() }
+            .padding(.horizontal, 20).padding(.bottom, 10)
 
             if store.filteredDeveloperPackages.isEmpty {
                 ContentUnavailableView(
@@ -75,7 +74,7 @@ struct DeveloperPackagesView: View {
 
 struct PackageManagerIcon: View {
     let manager: DeveloperPackageManager
-    var size: CGFloat = 32
+    var size: CGFloat = 36
 
     var body: some View {
         BundledPackageIcon(name: manager.assetName, size: size)
@@ -106,29 +105,44 @@ private struct DeveloperPackageRow: View {
     let package: DeveloperPackage
 
     var body: some View {
-        HStack(spacing: 14) {
+        StandardItemRow {
             PackageManagerIcon(manager: package.manager)
-            VStack(alignment: .leading, spacing: 4) {
+        } content: {
+            VStack(alignment: .leading, spacing: 3) {
                 HStack {
-                    Text(package.name).fontWeight(.semibold)
-                    Text(package.manager.rawValue).font(.caption2.bold()).foregroundStyle(.secondary)
+                    Text(package.name).fontWeight(.semibold).lineLimit(1)
+                    if let exclusion = store.exclusion(for: package) {
+                        Text(exclusion.mode.rawValue.uppercased()).font(.system(size: 9, weight: .bold)).foregroundStyle(.orange)
+                    }
                 }
-                if package.isOutdated {
-                    Text("\(package.currentVersion) → \(package.latestVersion)")
-                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                } else {
-                    Label("Current · \(package.currentVersion)", systemImage: "checkmark")
-                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                }
+                Text("Global \(package.manager.packageLabel.lowercased())")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
-            Spacer()
-            if package.isOutdated {
+        } accessories: {
+            VersionTransitionView(current: package.currentVersion, latest: package.isOutdated ? package.latestVersion : nil)
+            if package.isOutdated && !store.isExcluded(package) {
                 Button("Update") { Task { await store.updateDeveloperPackage(package) } }
-                    .buttonStyle(.borderedProminent).controlSize(.small)
+                    .buttonStyle(.bordered).controlSize(.small)
                     .disabled(store.workingIDs.contains(package.id))
             }
-            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
-        }.padding(.vertical, 6).contentShape(Rectangle())
+            Menu {
+                if let exclusion = store.exclusion(for: package) {
+                    Button("Restore Updates") { store.restore(exclusion) }
+                } else {
+                    if package.isOutdated { Button("Skip Version \(package.latestVersion)") { store.skip(package) } }
+                    Button("Ignore \(package.name)") { store.ignore(package) }
+                }
+            } label: { MoreMenuIcon() }.menuStyle(.borderlessButton).menuIndicator(.hidden)
+        }
+        .contentShape(Rectangle())
+        .contextMenu {
+            if let exclusion = store.exclusion(for: package) {
+                Button("Restore Updates") { store.restore(exclusion) }
+            } else {
+                if package.isOutdated { Button("Skip Version \(package.latestVersion)") { store.skip(package) } }
+                Button("Ignore \(package.name)") { store.ignore(package) }
+            }
+        }
     }
 }
 
@@ -158,6 +172,15 @@ private struct DeveloperPackageDetailContent: View {
                         Text(package.name).font(.largeTitle.bold())
                         Text(package.manager.packageLabel).foregroundStyle(.secondary)
                     }
+                    Spacer()
+                    Menu {
+                        if let exclusion = store.exclusion(for: package) {
+                            Button("Restore Updates") { store.restore(exclusion) }
+                        } else {
+                            if package.isOutdated { Button("Skip Version \(package.latestVersion)") { store.skip(package) } }
+                            Button("Ignore \(package.name)") { store.ignore(package) }
+                        }
+                    } label: { Image(systemName: "ellipsis.circle").font(.title2) }.menuStyle(.borderlessButton)
                 }
 
                 Grid(alignment: .leading, horizontalSpacing: 30, verticalSpacing: 12) {

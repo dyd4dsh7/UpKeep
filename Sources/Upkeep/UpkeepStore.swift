@@ -23,11 +23,13 @@ final class UpkeepStore: ObservableObject {
     @Published var developerPackages: [DeveloperPackage] = []
     @Published var developerManagerFilter = "all"
     @Published var installedDeveloperManagers: [DeveloperPackageManager] = []
+    @Published var localModels: [LocalLLMModel] = []
     @Published var selection: SidebarDestination = .updates
     @Published var homebrewFilter: HomebrewFilter = .all
     @Published var selectedPackageID: String?
     @Published var selectedDeveloperPackageID: String?
     @Published var selectedDeveloperVersion = ""
+    @Published var selectedLocalModelID: String?
     @Published var availableDeveloperVersions: [String] = []
     @Published var isLoadingDeveloperVersions = false
     @Published var selectedApp: InstalledApp?
@@ -44,13 +46,15 @@ final class UpkeepStore: ObservableObject {
 
     init(settings: AppSettings = AppSettings()) { self.settings = settings }
 
-    var filteredUpdates: [AvailableUpdate] { matching(updates, name: { $0.app.name }) }
+    var visibleUpdates: [AvailableUpdate] { updates.filter { !isExcluded($0) } }
+    var filteredUpdates: [AvailableUpdate] { matching(visibleUpdates, name: { $0.app.name }) }
     var filteredApps: [InstalledApp] { matching(apps, name: \InstalledApp.name) }
     var filteredAdoptableApps: [AdoptableApp] { matching(adoptableApps, name: { $0.app.name }) }
-    var outdatedPackageCount: Int { homebrewPackages.count(where: \.isOutdated) }
-    var outdatedDeveloperPackageCount: Int { developerPackages.count(where: \.isOutdated) }
+    var outdatedPackageCount: Int { homebrewPackages.count { $0.isOutdated && !isExcluded($0) } }
+    var outdatedDeveloperPackageCount: Int { developerPackages.count { $0.isOutdated && !isExcluded($0) } }
+    var outdatedLocalModelCount: Int { localModels.count { $0.isOutdated && !isExcluded($0) } }
     var totalUpdateCount: Int {
-        updates.count + outdatedPackageCount + macOSUpdates.count(where: { !$0.isFullInstaller }) + outdatedDeveloperPackageCount
+        visibleUpdates.count + outdatedPackageCount + macOSUpdates.count(where: { !$0.isFullInstaller }) + outdatedDeveloperPackageCount + outdatedLocalModelCount
     }
     var filteredDeveloperPackages: [DeveloperPackage] {
         matching(developerPackages.filter {
@@ -59,11 +63,15 @@ final class UpkeepStore: ObservableObject {
         }, name: { $0.name })
     }
 
+    var visibleOutdatedLocalModels: [LocalLLMModel] {
+        localModels.filter { $0.isOutdated && !isExcluded($0) }
+    }
+
     var filteredHomebrewPackages: [HomebrewPackage] {
         let scoped = homebrewPackages.filter { package in
             switch homebrewFilter {
             case .all: true
-            case .updates: package.isOutdated
+            case .updates: package.isOutdated && !isExcluded(package)
             case .requested: !package.isDependency
             case .dependencies: package.isDependency
             case .casks: package.kind == .cask
@@ -103,8 +111,7 @@ final class UpkeepStore: ObservableObject {
         case .macOSUpdates: macOSUpdates.count
         case .history: updateHistory.count
         case .developerPackages: developerPackages.count
-        case .changelog: 0
-        case .settings: 0
+        case .localModels: localModels.count
         default: apps(for: destination).count
         }
     }
@@ -123,6 +130,7 @@ final class UpkeepStore: ObservableObject {
         updateHistory = await UpdateHistoryStore.shared.records()
         developerPackages = report.developerPackages
         installedDeveloperManagers = report.installedDeveloperManagers
+        localModels = report.localModels
         if developerManagerFilter != "all", !installedDeveloperManagers.contains(where: { $0.rawValue == developerManagerFilter }) {
             developerManagerFilter = "all"
         }
@@ -131,6 +139,9 @@ final class UpkeepStore: ObservableObject {
         if selectedDeveloperPackageID == nil || !developerPackages.contains(where: { $0.id == selectedDeveloperPackageID }) {
             selectedDeveloperPackageID = developerPackages.first?.id
             selectedDeveloperVersion = developerPackages.first?.latestVersion ?? ""
+        }
+        if selectedLocalModelID == nil || !localModels.contains(where: { $0.id == selectedLocalModelID }) {
+            selectedLocalModelID = localModels.first?.id
         }
         isScanning = false
         notifyIfNeeded(previousCount: previousCount)
@@ -221,7 +232,7 @@ final class UpkeepStore: ObservableObject {
         guard !workingIDs.contains("homebrew-all") else { return }
         workingIDs.insert("homebrew-all")
         defer { workingIDs.remove("homebrew-all") }
-        for package in homebrewPackages where package.isOutdated {
+        for package in homebrewPackages where package.isOutdated && !isExcluded(package) {
             let record = await recoveryRecord(for: package)
             if package.kind == .cask, matchingApp(for: package) != nil, record == nil { break }
             do {
@@ -282,6 +293,115 @@ final class UpkeepStore: ObservableObject {
         }
     }
 
+    func scanLocalModels() async {
+        let identifier = "local-model-scan"
+        guard !workingIDs.contains(identifier) else { return }
+        workingIDs.insert(identifier)
+        defer { workingIDs.remove(identifier) }
+        localModels = await LocalModelClient().scan()
+        if selectedLocalModelID == nil || !localModels.contains(where: { $0.id == selectedLocalModelID }) {
+            selectedLocalModelID = localModels.first?.id
+        }
+        lastChecked = Date()
+    }
+
+    func updateLocalModel(_ model: LocalLLMModel) async {
+        let succeeded = await perform(id: model.id) { try await LocalModelClient().update(model) }
+        if succeeded {
+            let record = UpdateRecord(
+                id: UUID(), date: Date(), name: model.name,
+                fromVersion: model.installedRevision, toVersion: model.latestRevision,
+                kind: .model, originalAppPath: nil, backupPath: nil,
+                recoveryNote: "Model files are managed by \(model.runtime.rawValue). Download the earlier model revision again if rollback is required."
+            )
+            try? await UpdateHistoryStore.shared.add(record)
+            await scanLocalModels()
+        }
+    }
+
+    func isExcluded(_ update: AvailableUpdate) -> Bool {
+        settings.isExcluded(key: exclusionKey(for: update.app), version: update.availableVersion)
+    }
+
+    func isExcluded(_ package: HomebrewPackage) -> Bool {
+        settings.isExcluded(key: exclusionKey(for: package), version: package.currentVersion)
+    }
+
+    func isExcluded(_ package: DeveloperPackage) -> Bool {
+        settings.isExcluded(key: exclusionKey(for: package), version: package.latestVersion)
+    }
+
+    func isExcluded(_ model: LocalLLMModel) -> Bool {
+        settings.isExcluded(key: exclusionKey(for: model), version: model.latestRevision)
+    }
+
+    func exclusion(for app: InstalledApp, version: String) -> UpdateExclusion? {
+        settings.exclusion(for: exclusionKey(for: app), version: version)
+    }
+
+    func exclusion(for package: HomebrewPackage) -> UpdateExclusion? {
+        settings.exclusion(for: exclusionKey(for: package), version: package.currentVersion)
+    }
+
+    func exclusion(for package: DeveloperPackage) -> UpdateExclusion? {
+        settings.exclusion(for: exclusionKey(for: package), version: package.latestVersion)
+    }
+
+    func exclusion(for model: LocalLLMModel) -> UpdateExclusion? {
+        settings.exclusion(for: exclusionKey(for: model), version: model.latestRevision)
+    }
+
+    func ignoredExclusion(for app: InstalledApp) -> UpdateExclusion? {
+        settings.ignoredExclusion(for: exclusionKey(for: app))
+    }
+
+    func skip(_ update: AvailableUpdate) {
+        exclude(.skipped, key: exclusionKey(for: update.app), name: update.app.name, category: "App", version: update.availableVersion)
+    }
+
+    func ignore(_ app: InstalledApp) {
+        exclude(.ignored, key: exclusionKey(for: app), name: app.name, category: "App", version: nil)
+    }
+
+    func skip(_ package: HomebrewPackage) {
+        exclude(.skipped, key: exclusionKey(for: package), name: package.displayName, category: "Homebrew", version: package.currentVersion)
+    }
+
+    func ignore(_ package: HomebrewPackage) {
+        exclude(.ignored, key: exclusionKey(for: package), name: package.displayName, category: "Homebrew", version: nil)
+    }
+
+    func skip(_ package: DeveloperPackage) {
+        exclude(.skipped, key: exclusionKey(for: package), name: package.name, category: package.manager.rawValue, version: package.latestVersion)
+    }
+
+    func ignore(_ package: DeveloperPackage) {
+        exclude(.ignored, key: exclusionKey(for: package), name: package.name, category: package.manager.rawValue, version: nil)
+    }
+
+    func skip(_ model: LocalLLMModel) {
+        exclude(.skipped, key: exclusionKey(for: model), name: model.name, category: model.runtime.rawValue, version: model.latestRevision)
+    }
+
+    func ignore(_ model: LocalLLMModel) {
+        exclude(.ignored, key: exclusionKey(for: model), name: model.name, category: model.runtime.rawValue, version: nil)
+    }
+
+    func restore(_ exclusion: UpdateExclusion) {
+        settings.restore(exclusion)
+        objectWillChange.send()
+    }
+
+    func restore(app: InstalledApp) {
+        settings.restore(key: exclusionKey(for: app))
+        objectWillChange.send()
+    }
+
+    func restoreAllExclusions() {
+        settings.restoreAllExclusions()
+        objectWillChange.send()
+    }
+
     func prepareMacOSUpdate(_ update: MacOSUpdate) async {
         do {
             try await UpdateHistoryStore.shared.addMacOSPlan(update: update)
@@ -321,6 +441,17 @@ final class UpkeepStore: ObservableObject {
         content.sound = .default
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "upkeep-updates", content: content, trigger: nil))
     }
+
+    private func exclude(_ mode: UpdateExclusionMode, key: String, name: String, category: String, version: String?) {
+        if mode == .skipped, let version { settings.skip(key: key, name: name, category: category, version: version) }
+        else { settings.ignore(key: key, name: name, category: category) }
+        objectWillChange.send()
+    }
+
+    private func exclusionKey(for app: InstalledApp) -> String { "app|\(app.id)" }
+    private func exclusionKey(for package: HomebrewPackage) -> String { "homebrew|\(package.id)" }
+    private func exclusionKey(for package: DeveloperPackage) -> String { "developer|\(package.id)" }
+    private func exclusionKey(for model: LocalLLMModel) -> String { "model|\(model.id)" }
 
     private func perform(id: String, operation: () async throws -> Void) async -> Bool {
         guard !workingIDs.contains(id) else { return false }

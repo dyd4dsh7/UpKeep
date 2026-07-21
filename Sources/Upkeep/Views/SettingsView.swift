@@ -3,18 +3,22 @@ import UserNotifications
 
 struct SettingsView: View {
     @EnvironmentObject private var settings: AppSettings
+    @EnvironmentObject private var store: UpkeepStore
 
     var body: some View {
-        VStack(spacing: 12) {
-            Picker("Settings Section", selection: $settings.selectedSection) {
-                ForEach(SettingsSection.allCases) { section in Text(section.rawValue).tag(section) }
+        NavigationSplitView {
+            List(SettingsSection.allCases, selection: $settings.selectedSection) { section in
+                Label(section.rawValue, systemImage: icon(for: section))
+                    .tag(section)
             }
-            .labelsHidden().pickerStyle(.segmented).frame(maxWidth: 470)
-            Divider()
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(min: 150, ideal: 170, max: 210)
+        } detail: {
             selectedContent
+                .padding(16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: 580, height: 430)
-        .padding(16)
+        .frame(width: 780, height: 540)
     }
 
     @ViewBuilder private var selectedContent: some View {
@@ -22,6 +26,8 @@ struct SettingsView: View {
         case .general: general
         case .sources: sources
         case .developer: developer
+        case .changelog: changelog
+        case .ignored: ignored
         case .about: about
         }
     }
@@ -39,7 +45,9 @@ struct SettingsView: View {
                     }
             }
             Section("Menu Bar") {
+                Toggle("Show Upkeep in the menu bar", isOn: $settings.showMenuBarItem)
                 Toggle("Show the available update count", isOn: $settings.showMenuBarCount)
+                    .disabled(!settings.showMenuBarItem)
                 Text("The Upkeep icon remains available for quick scans, Settings, and opening the main window.")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -54,6 +62,9 @@ struct SettingsView: View {
                 sourceToggle("Sparkle feeds", "sparkles", $settings.checkSparkle)
                 sourceToggle("Homebrew apps and packages", "shippingbox", $settings.checkHomebrew)
                 sourceToggle("GitHub Releases", "chevron.left.forwardslash.chevron.right", $settings.checkGitHub)
+                sourceToggle("Local LLM models", "brain.head.profile", $settings.checkLocalModels)
+                Text("Checks model files directly against upstream registries. Ollama and LM Studio can remain closed.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("macOS") {
                 sourceToggle("Software Update and full installers", "apple.logo", $settings.checkMacOS)
@@ -62,6 +73,46 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private var changelog: some View {
+        ChangelogView(compact: true)
+    }
+
+    private var ignored: some View {
+        Group {
+            if settings.updateExclusions.isEmpty {
+                ContentUnavailableView(
+                    "Nothing skipped or ignored", systemImage: "eye",
+                    description: Text("Use the More menu beside an update to skip one version or ignore future updates.")
+                )
+            } else {
+                VStack(spacing: 0) {
+                    HStack {
+                        Text("Skipped versions return automatically when a newer version is released.")
+                            .font(.callout).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Restore All") { store.restoreAllExclusions() }
+                    }.padding(.horizontal, 10).padding(.bottom, 10)
+                    List(settings.updateExclusions) { exclusion in
+                        StandardItemRow {
+                            Image(systemName: exclusion.mode == .ignored ? "eye.slash.fill" : "forward.end.fill")
+                                .foregroundStyle(exclusion.mode == .ignored ? .orange : .blue)
+                        } content: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(exclusion.name).fontWeight(.semibold).lineLimit(1)
+                                Text(exclusion.mode == .ignored
+                                     ? "\(exclusion.category) · All future updates ignored"
+                                     : "\(exclusion.category) · Version \(exclusion.version ?? "") skipped")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        } accessories: {
+                            Button("Restore") { store.restore(exclusion) }.buttonStyle(.bordered).controlSize(.small)
+                        }
+                    }.listStyle(.inset)
+                }
+            }
+        }
     }
 
     private var developer: some View {
@@ -87,13 +138,29 @@ struct SettingsView: View {
     private var about: some View {
         VStack(spacing: 14) {
             AppBrandIcon(size: 104)
-            Text("Upkeep").font(.largeTitle.bold())
-            Text("Version 0.7.0").foregroundStyle(.secondary)
+            Text("Upkeep").font(.largeTitle.weight(.semibold))
+            Text(versionText).foregroundStyle(.secondary)
             Text("Every app, package, and system update in one native macOS workspace.")
                 .multilineTextAlignment(.center).foregroundStyle(.secondary).frame(maxWidth: 390)
-            Link("Private GitHub Repository", destination: URL(string: "https://github.com/dyd4dsh7/UpKeep")!)
             Spacer()
         }.padding(.top, 28)
+    }
+
+    private var versionText: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
+        return "Version \(version) (\(build))"
+    }
+
+    private func icon(for section: SettingsSection) -> String {
+        switch section {
+        case .general: "gearshape"
+        case .sources: "dot.radiowaves.left.and.right"
+        case .developer: "chevron.left.forwardslash.chevron.right"
+        case .changelog: "list.bullet.rectangle"
+        case .ignored: "eye.slash"
+        case .about: "info.circle"
+        }
     }
 
     private func sourceToggle(_ title: String, _ icon: String, _ binding: Binding<Bool>) -> some View {

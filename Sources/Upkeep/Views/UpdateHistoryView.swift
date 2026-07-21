@@ -18,23 +18,26 @@ struct UpdateHistoryView: View {
                 ).frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List(store.updateHistory) { record in
-                    HStack(spacing: 14) {
-                        Image(systemName: icon(for: record.kind)).font(.title2).foregroundStyle(color(for: record.kind)).frame(width: 34)
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack { Text(record.name).fontWeight(.semibold); Text(record.kind.rawValue).font(.caption2.bold()).foregroundStyle(.secondary) }
-                            Text("\(record.fromVersion) → \(record.toVersion) · \(record.date.formatted(date: .abbreviated, time: .shortened))")
-                                .font(.caption).foregroundStyle(.secondary)
-                            if let note = record.recoveryNote { Text(note).font(.caption).foregroundStyle(.tertiary).lineLimit(2) }
+                    StandardItemRow {
+                        Image(systemName: icon(for: record.kind)).font(.title3).foregroundStyle(color(for: record.kind))
+                    } content: {
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack { Text(record.name).fontWeight(.semibold); Text(record.kind.rawValue.uppercased()).font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary) }
+                            Text(record.recoveryNote ?? "Updated with Upkeep")
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }
-                        Spacer()
+                    } accessories: {
+                        VersionTransitionView(current: record.fromVersion, latest: record.toVersion)
+                        Text(record.date.formatted(date: .abbreviated, time: .shortened))
+                            .font(.caption).foregroundStyle(.secondary).frame(width: 120, alignment: .trailing)
                         if record.canRevertDirectly {
-                            Button("Revert") { store.pendingRevert = record }.buttonStyle(.borderedProminent)
+                            Button("Revert") { store.pendingRevert = record }.buttonStyle(.bordered).controlSize(.small)
                         } else if record.kind == .macOS {
-                            Button("Recovery Options") { store.openMacOSRecoveryHelp() }
+                            Button("Recovery Options") { store.openMacOSRecoveryHelp() }.controlSize(.small)
                         } else {
                             Text("Manual recovery").font(.caption).foregroundStyle(.secondary)
                         }
-                    }.padding(.vertical, 7)
+                    }
                 }.listStyle(.inset)
             }
         }
@@ -56,9 +59,9 @@ struct UpdateHistoryView: View {
     }
 
     private func icon(for kind: UpdateRecordKind) -> String {
-        switch kind { case .app: "app.fill"; case .homebrew: "shippingbox.fill"; case .macOS: "apple.logo"; case .developer: "chevron.left.forwardslash.chevron.right" }
+        switch kind { case .app: "app.fill"; case .homebrew: "shippingbox.fill"; case .macOS: "apple.logo"; case .developer: "chevron.left.forwardslash.chevron.right"; case .model: "brain.head.profile.fill" }
     }
     private func color(for kind: UpdateRecordKind) -> Color {
-        switch kind { case .app: .blue; case .homebrew: .orange; case .macOS: .primary; case .developer: .purple }
+        switch kind { case .app: .blue; case .homebrew: .orange; case .macOS: .primary; case .developer: .purple; case .model: .indigo }
     }
 }

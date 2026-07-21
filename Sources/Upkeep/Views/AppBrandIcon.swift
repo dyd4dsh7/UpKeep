@@ -9,7 +9,18 @@ enum AppBrand {
     }()
 
     @MainActor static func applyApplicationIcon() {
-        NSApplication.shared.applicationIconImage = image
+        let application = NSApplication.shared
+        application.setActivationPolicy(.regular)
+        application.applicationIconImage = image
+        application.dockTile.display()
+    }
+
+    @MainActor static func applyDockBadge(updateCount: Int) {
+        let application = NSApplication.shared
+        application.setActivationPolicy(.regular)
+        application.dockTile.contentView = nil
+        application.dockTile.badgeLabel = updateCount > 0 ? String(updateCount) : nil
+        application.dockTile.display()
     }
 }
 

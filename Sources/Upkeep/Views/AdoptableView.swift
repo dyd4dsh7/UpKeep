@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct AdoptableView: View {
@@ -18,26 +19,31 @@ struct AdoptableView: View {
                 ).frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List(store.filteredAdoptableApps) { item in
-                    HStack(spacing: 14) {
-                        AppIcon(url: item.app.url, size: 40)
+                    StandardItemRow {
+                        AppIcon(url: item.app.url, size: 36)
+                    } content: {
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(item.app.name).fontWeight(.medium)
-                            Text("\(item.app.installedVersion) · Homebrew cask: \(item.caskToken)")
+                            Text(item.app.name).fontWeight(.semibold).lineLimit(1)
+                            Text("Homebrew cask · \(item.caskToken)")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
-                        Spacer()
-                        Text(item.caskVersion).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    } accessories: {
+                        VersionTransitionView(current: item.app.installedVersion, latest: item.caskVersion)
                         Button {
                             Task { await store.adopt(item) }
                         } label: {
                             if store.workingIDs.contains(item.id) { ProgressView().controlSize(.small) }
                             else { Text("Adopt") }
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.bordered).controlSize(.small)
                         .disabled(store.workingIDs.contains(item.id))
-                        Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+                        Menu {
+                            Button("View Details") { store.selectedApp = item.app }
+                            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([item.app.url]) }
+                        } label: { MoreMenuIcon() }
+                        .menuStyle(.borderlessButton).menuIndicator(.hidden)
                     }
-                    .padding(.vertical, 6).contentShape(Rectangle())
+                    .contentShape(Rectangle())
                     .onTapGesture { store.selectedApp = item.app }
                 }.listStyle(.inset)
             }

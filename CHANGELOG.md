@@ -2,6 +2,97 @@
 
 All notable changes to Upkeep are documented here.
 
+## 0.11.2 — 2026-07-21
+
+- Removed the requirement for Ollama or LM Studio to be running during model update checks.
+- Reads Ollama's installed manifest store directly and compares its exact content digest with the registry.
+- Detects LM Studio's configured model directory from its settings, with support for standard legacy locations.
+- Retains runtime CLI commands only for installing updates, with CLI discovery as a compatibility fallback.
+
+## 0.11.1 — 2026-07-21
+
+- Rebuilt every item list around one shared native row layout.
+- Anchored versions, status labels, action buttons, and More menus to consistent right-side columns.
+- Standardized 36-point icons, title and subtitle hierarchy, spacing, and control sizing across apps, packages, models, macOS updates, history, adoptable apps, and exclusions.
+- Prevented long descriptions from shifting actions or producing mismatched row designs.
+
+## 0.11.0 — 2026-07-21
+
+- Standardized app, package, model, update, and history rows around a compact native macOS list layout.
+- Aligned installed and available versions into a consistent, monospaced trailing column for faster scanning.
+- Reduced oversized icons and repeated prominent buttons while consolidating secondary actions into a single More menu.
+- Improved current, skipped, and ignored status presentation across installed-item lists.
+
+## 0.10.1 — 2026-07-21
+
+- Removed duplicate toolbar titles, the selectable sidebar branding row, and the persistent bottom status strip.
+- Rebuilt Settings with standard sidebar navigation and restored the menu-bar visibility control.
+- Reduced repetitive app status text and corrected the About screen to show the installed version dynamically.
+- Converted macOS updates and installers to standard inset list sections and removed more custom bar and card backgrounds.
+
+## 0.10.0 — 2026-07-21
+
+- Refreshed the interface for Apple’s latest macOS design language and automatic Liquid Glass adoption.
+- Replaced custom content chrome and card stacks with standard split-view, toolbar, sidebar, search, and inset-list patterns.
+- Simplified toolbar actions, strengthened typography and section hierarchy, and improved icon accessibility.
+- Reduced decorative color and custom backgrounds so system materials adapt to appearance and accessibility settings.
+
+## 0.9.7 — 2026-07-21
+
+- Fixed a 100% CPU launch hang on macOS 27 caused by recursive SwiftUI `NSHostingView` environment propagation in `MenuBarExtra`.
+- Replaced the unstable menu-bar scene with a direct AppKit status item implemented in Swift.
+- Preserved the menu-bar visibility and count settings, update actions, tooltip, and Dock badge.
+
+## 0.9.6 — 2026-07-21
+
+- Fixed a launch crash on macOS 27 caused by recursive SwiftUI scene updates in the custom application command block.
+- Removed redundant Settings and refresh command overrides; Settings remains available through the system-generated app menu and the menu-bar extra.
+- Simplified the SwiftUI scene graph while retaining the menu-bar update counter and Dock badge.
+
+## 0.9.5 — 2026-07-21
+
+- Rebuilt the menu-bar item as a native SwiftUI `MenuBarExtra` with a reliable system-symbol label, live count, tooltip, and controls.
+- Restored the menu-bar item once for existing installations that had previously hidden it while preserving the user-controlled setting afterward.
+- Simplified Dock badging to the smallest required `NSDockTile.badgeLabel` bridge because SwiftUI does not provide a macOS Dock-badge API.
+
+## 0.9.4 — 2026-07-21
+
+- Replaced the SwiftUI menu-bar extra with a direct AppKit status item containing the Upkeep icon, live count, tooltip, and app controls.
+- Replaced the system-dependent Dock badge with a high-contrast count drawn directly onto the Dock icon.
+- Kept all visible count surfaces synchronized to the filtered update total.
+
+## 0.9.3 — 2026-07-21
+
+- Added a prominent live available-update counter to the main toolbar.
+- Made the toolbar counter open the Updates workspace and expose a descriptive tooltip.
+- Unified the toolbar, sidebar, menu-bar, notification, and Dock counts.
+
+## 0.9.2 — 2026-07-21
+
+- Fixed Dock badge rendering by explicitly installing and redrawing the application Dock tile.
+- Enforced regular-app activation so the Dock icon and its standard Upkeep hover label remain available.
+- Refreshes the Dock tile whenever the app becomes active or the filtered update count changes.
+
+## 0.9.1 — 2026-07-21
+
+- Restored a standard unified macOS toolbar for the main app window.
+- Added a live Dock icon badge for the filtered available-update count.
+- Made the Dock badge react immediately to scans and exclusion changes, and clear automatically at zero.
+
+## 0.9.0 — 2026-07-21
+
+- Added official Ollama and LM Studio logos with a generic fallback icon.
+- Added version-specific skipping and persistent update ignoring for apps, Homebrew packages, developer packages, and local models.
+- Added an Ignored Settings section where exclusions can be restored individually or together.
+- Removed skipped and ignored items from the Updates workspace and update counters.
+
+## 0.8.0 — 2026-07-21
+
+- Added update discovery for locally installed Ollama and LM Studio models.
+- Added model details and native update actions through `ollama pull` and `lms get`.
+- Moved the in-app changelog into Settings and removed Settings and Changelog from the sidebar.
+- Removed the repository shortcut from the app and project documentation.
+
 ## 0.7.0 — 2026-07-21
 
 - Added a new original Upkeep app icon across the Dock, sidebar, app bundle, and menu bar.
@@ -9,14 +100,13 @@ All notable changes to Upkeep are documented here.
 - Added persistent General, Sources, Developer, notification, beta, and refresh settings.
 - Replaced manual version entry with registry-backed version menus that default to the latest release.
 - Added all-manager and individual package-manager refresh controls in the Developer view.
-- Renamed the private repository to `UpKeep`.
 
 ## 0.6.0 — 2026-07-21
 
 - Added bundled package-manager artwork for Homebrew, npm, pnpm, Python, RubyGems, and Cargo.
 - Made installed apps and developer packages clickable with complete detail views.
 - Added explicit version installation for npm, pnpm, pip, RubyGems, and Cargo packages.
-- Added an in-app changelog and private repository release history.
+- Added an in-app changelog and complete local release history.
 
 ## 0.5.0 — 2026-07-21
 

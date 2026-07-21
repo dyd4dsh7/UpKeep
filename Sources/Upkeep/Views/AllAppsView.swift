@@ -12,37 +12,72 @@ struct AllAppsView: View {
             HeaderView(title: title, subtitle: subtitle, systemImage: "square.grid.2x2.fill")
 
             List(apps) { app in
-                Button { store.selectedApp = app } label: {
-                    HStack(spacing: 12) {
-                        AppIcon(url: app.url, size: 34)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(app.name).fontWeight(.medium)
-                            Text(app.bundleIdentifier ?? app.url.path)
-                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                        }
-                        Spacer()
-                        if let update = store.updates.first(where: { $0.app.id == app.id }) {
-                            Text("Update \(update.availableVersion)")
-                                .font(.caption.weight(.medium)).foregroundStyle(.blue)
-                        } else {
-                            Label("No update found", systemImage: "checkmark")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        Text(app.installedVersion)
-                            .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                            .frame(width: 80, alignment: .trailing)
-                        Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+                StandardItemRow {
+                    AppIcon(url: app.url, size: 36)
+                } content: {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(app.name).fontWeight(.semibold).lineLimit(1)
+                        Text(app.bundleIdentifier ?? app.url.path)
+                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
-                    .padding(.vertical, 4)
-                    .contentShape(Rectangle())
+                } accessories: {
+                    status(for: app)
+                        .frame(width: 128, alignment: .trailing)
+                    Text(app.installedVersion)
+                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                        .frame(width: 92, alignment: .trailing)
+                    Menu {
+                        Button("View Details") { store.selectedApp = app }
+                        Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([app.url]) }
+                        Divider()
+                        if let exclusion = activeExclusion(for: app) {
+                            Button("Restore Updates") { store.restore(exclusion) }
+                        } else {
+                            if let update = store.updates.first(where: { $0.app.id == app.id }) {
+                                Button("Skip Version \(update.availableVersion)") { store.skip(update) }
+                            }
+                            Button("Ignore \(app.name)") { store.ignore(app) }
+                        }
+                    } label: { MoreMenuIcon() }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden)
                 }
-                .buttonStyle(.plain)
+                .contentShape(Rectangle())
+                .onTapGesture { store.selectedApp = app }
                 .contextMenu {
                     Button("View Details") { store.selectedApp = app }
                     Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([app.url]) }
+                    Divider()
+                    if let exclusion = activeExclusion(for: app) {
+                        Button("Restore Updates") { store.restore(exclusion) }
+                    } else {
+                        if let update = store.updates.first(where: { $0.app.id == app.id }) {
+                            Button("Skip Version \(update.availableVersion)") { store.skip(update) }
+                        }
+                        Button("Ignore \(app.name)") { store.ignore(app) }
+                    }
                 }
             }
             .listStyle(.inset)
+        }
+    }
+
+    private func activeExclusion(for app: InstalledApp) -> UpdateExclusion? {
+        if let update = store.updates.first(where: { $0.app.id == app.id }),
+           let exclusion = store.exclusion(for: app, version: update.availableVersion) { return exclusion }
+        return store.ignoredExclusion(for: app)
+    }
+
+    @ViewBuilder
+    private func status(for app: InstalledApp) -> some View {
+        if let exclusion = activeExclusion(for: app) {
+            Label(exclusion.mode.rawValue, systemImage: exclusion.mode == .ignored ? "eye.slash" : "forward.end")
+                .font(.caption.weight(.medium)).foregroundStyle(.orange)
+        } else if let update = store.visibleUpdates.first(where: { $0.app.id == app.id }) {
+            Label("\(update.availableVersion) available", systemImage: "arrow.down.circle.fill")
+                .font(.caption.weight(.medium)).foregroundStyle(.tint)
+        } else {
+            Label("Current", systemImage: "checkmark.circle.fill")
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 }
@@ -53,6 +88,10 @@ struct AppDetailView: View {
     let app: InstalledApp
 
     private var update: AvailableUpdate? { store.updates.first { $0.app.id == app.id } }
+    private var exclusion: UpdateExclusion? {
+        if let update, let exclusion = store.exclusion(for: app, version: update.availableVersion) { return exclusion }
+        return store.ignoredExclusion(for: app)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -80,9 +119,19 @@ struct AppDetailView: View {
                                     Text("Available through \(update.source.rawValue)").foregroundStyle(.secondary)
                                 }
                                 Spacer()
-                                Button("Update") { Task { await store.performUpdate(update) } }
-                                    .buttonStyle(.borderedProminent)
-                                    .disabled(store.workingIDs.contains(update.id))
+                                if let exclusion {
+                                    Label(exclusion.mode.rawValue, systemImage: exclusion.mode == .ignored ? "eye.slash" : "forward.end")
+                                        .foregroundStyle(.orange)
+                                    Button("Restore") { store.restore(exclusion) }
+                                } else {
+                                    Button("Update") { Task { await store.performUpdate(update) } }
+                                        .buttonStyle(.borderedProminent)
+                                        .disabled(store.workingIDs.contains(update.id))
+                                    Menu("More") {
+                                        Button("Skip Version \(update.availableVersion)") { store.skip(update) }
+                                        Button("Ignore \(app.name)") { store.ignore(app) }
+                                    }
+                                }
                             }.padding(8)
                         }
                     }
@@ -103,6 +152,13 @@ struct AppDetailView: View {
                     HStack {
                         Button("Open App") { NSWorkspace.shared.open(app.url) }
                         Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([app.url]) }
+                        if update == nil {
+                            if let exclusion {
+                                Button("Restore Updates") { store.restore(exclusion) }
+                            } else {
+                                Button("Ignore Updates") { store.ignore(app) }
+                            }
+                        }
                     }
                 }
                 .padding(24).frame(maxWidth: .infinity, alignment: .leading)
@@ -121,16 +177,21 @@ struct HeaderView: View {
     let systemImage: String
 
     var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: systemImage).font(.system(size: 30)).foregroundStyle(.blue).symbolRenderingMode(.hierarchical)
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.title2.weight(.medium))
+                .foregroundStyle(.tint)
+                .symbolRenderingMode(.hierarchical)
+                .frame(width: 32, height: 32)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.largeTitle.bold())
-                Text(subtitle).foregroundStyle(.secondary)
+                Text(title).font(.title2.weight(.semibold))
+                Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
             }
             Spacer()
         }
-        .padding(.horizontal, 24).padding(.vertical, 20).background(.bar)
-        .overlay(alignment: .bottom) { Divider() }
+        .padding(.horizontal, 20)
+        .padding(.top, 18)
+        .padding(.bottom, 12)
     }
 }
 

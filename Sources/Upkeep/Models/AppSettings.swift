@@ -21,8 +21,24 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     case general = "General"
     case sources = "Sources"
     case developer = "Developer"
+    case changelog = "Changelog"
+    case ignored = "Ignored"
     case about = "About"
     var id: Self { self }
+}
+
+enum UpdateExclusionMode: String, Codable, Sendable {
+    case skipped = "Skipped"
+    case ignored = "Ignored"
+}
+
+struct UpdateExclusion: Codable, Hashable, Identifiable, Sendable {
+    var id: String { "\(key)|\(mode.rawValue)|\(version ?? "")" }
+    let key: String
+    let name: String
+    let category: String
+    let version: String?
+    let mode: UpdateExclusionMode
 }
 
 struct ScanSettings: Sendable {
@@ -31,6 +47,7 @@ struct ScanSettings: Sendable {
     let checkHomebrew: Bool
     let checkGitHub: Bool
     let checkMacOS: Bool
+    let checkLocalModels: Bool
     let includeBetas: Bool
     let enabledDeveloperManagers: Set<DeveloperPackageManager>
 }
@@ -51,8 +68,10 @@ final class AppSettings: ObservableObject {
     @Published var checkHomebrew: Bool { didSet { save(checkHomebrew, "checkHomebrew") } }
     @Published var checkGitHub: Bool { didSet { save(checkGitHub, "checkGitHub") } }
     @Published var checkMacOS: Bool { didSet { save(checkMacOS, "checkMacOS") } }
+    @Published var checkLocalModels: Bool { didSet { save(checkLocalModels, "checkLocalModels") } }
     @Published var includeBetas: Bool { didSet { save(includeBetas, "includeBetas") } }
     @Published private(set) var enabledDeveloperManagers: Set<DeveloperPackageManager>
+    @Published private(set) var updateExclusions: [UpdateExclusion]
     @Published var selectedSection: SettingsSection = .general
 
     init() {
@@ -69,8 +88,13 @@ final class AppSettings: ObservableObject {
             "checkHomebrew": true,
             "checkGitHub": true,
             "checkMacOS": true,
+            "checkLocalModels": true,
             "includeBetas": true
         ])
+        if !defaults.bool(forKey: "didRestoreSwiftUIMenuBarItem") {
+            defaults.set(true, forKey: "showMenuBarItem")
+            defaults.set(true, forKey: "didRestoreSwiftUIMenuBarItem")
+        }
         checkOnLaunch = defaults.bool(forKey: "checkOnLaunch")
         refreshInterval = RefreshInterval(rawValue: defaults.integer(forKey: "refreshInterval")) ?? .everySixHours
         showMenuBarItem = defaults.bool(forKey: "showMenuBarItem")
@@ -83,9 +107,13 @@ final class AppSettings: ObservableObject {
         checkHomebrew = defaults.bool(forKey: "checkHomebrew")
         checkGitHub = defaults.bool(forKey: "checkGitHub")
         checkMacOS = defaults.bool(forKey: "checkMacOS")
+        checkLocalModels = defaults.bool(forKey: "checkLocalModels")
         includeBetas = defaults.bool(forKey: "includeBetas")
         let disabled = Set(defaults.stringArray(forKey: "disabledDeveloperManagers") ?? [])
         enabledDeveloperManagers = Set(DeveloperPackageManager.allCases.filter { !disabled.contains($0.rawValue) })
+        updateExclusions = (defaults.data(forKey: "updateExclusions")
+            .flatMap { try? JSONDecoder().decode([UpdateExclusion].self, from: $0) } ?? [])
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
     func isManagerEnabled(_ manager: DeveloperPackageManager) -> Bool {
@@ -100,14 +128,67 @@ final class AppSettings: ObservableObject {
         defaults.set(disabled, forKey: "disabledDeveloperManagers")
     }
 
+    func isExcluded(key: String, version: String) -> Bool {
+        updateExclusions.contains {
+            $0.key == key && ($0.mode == .ignored || ($0.mode == .skipped && $0.version == version))
+        }
+    }
+
+    func exclusion(for key: String, version: String) -> UpdateExclusion? {
+        updateExclusions.first {
+            $0.key == key && ($0.mode == .ignored || ($0.mode == .skipped && $0.version == version))
+        }
+    }
+
+    func ignoredExclusion(for key: String) -> UpdateExclusion? {
+        updateExclusions.first { $0.key == key && $0.mode == .ignored }
+    }
+
+    func skip(key: String, name: String, category: String, version: String) {
+        updateExclusions.removeAll { $0.key == key }
+        updateExclusions.append(UpdateExclusion(
+            key: key, name: name, category: category, version: version, mode: .skipped
+        ))
+        saveExclusions()
+    }
+
+    func ignore(key: String, name: String, category: String) {
+        updateExclusions.removeAll { $0.key == key }
+        updateExclusions.append(UpdateExclusion(
+            key: key, name: name, category: category, version: nil, mode: .ignored
+        ))
+        saveExclusions()
+    }
+
+    func restore(_ exclusion: UpdateExclusion) {
+        updateExclusions.removeAll { $0.id == exclusion.id }
+        saveExclusions()
+    }
+
+    func restore(key: String) {
+        updateExclusions.removeAll { $0.key == key }
+        saveExclusions()
+    }
+
+    func restoreAllExclusions() {
+        updateExclusions.removeAll()
+        saveExclusions()
+    }
+
     var scanSettings: ScanSettings {
         ScanSettings(
             checkAppStore: checkAppStore, checkSparkle: checkSparkle,
             checkHomebrew: checkHomebrew, checkGitHub: checkGitHub,
-            checkMacOS: checkMacOS, includeBetas: includeBetas,
+            checkMacOS: checkMacOS, checkLocalModels: checkLocalModels,
+            includeBetas: includeBetas,
             enabledDeveloperManagers: enabledDeveloperManagers
         )
     }
 
     private func save(_ value: Any, _ key: String) { defaults.set(value, forKey: key) }
+
+    private func saveExclusions() {
+        updateExclusions.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        if let data = try? JSONEncoder().encode(updateExclusions) { defaults.set(data, forKey: "updateExclusions") }
+    }
 }

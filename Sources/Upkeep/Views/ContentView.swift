@@ -2,24 +2,51 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var store: UpkeepStore
+    @EnvironmentObject private var settings: AppSettings
 
     var body: some View {
         NavigationSplitView {
             Sidebar()
-                .navigationSplitViewColumnWidth(min: 205, ideal: 220, max: 270)
+                .navigationSplitViewColumnWidth(min: 215, ideal: 235, max: 300)
         } detail: {
             detail
-                .searchable(text: $store.searchText, placement: .toolbar, prompt: "Search")
+                .searchable(text: $store.searchText, placement: .toolbar, prompt: "Search apps and packages")
                 .toolbar { toolbar }
         }
+        .navigationTitle("Upkeep")
         .task {
             AppBrand.applyApplicationIcon()
+            MenuBarController.shared.configure(store: store, settings: settings)
             await store.start()
+            AppBrand.applyDockBadge(updateCount: store.totalUpdateCount)
+            refreshMenuBar()
+        }
+        .onChange(of: store.totalUpdateCount, initial: true) { _, count in
+            AppBrand.applyDockBadge(updateCount: count)
+            refreshMenuBar()
+        }
+        .onChange(of: settings.showMenuBarItem) { _, _ in
+            refreshMenuBar()
+        }
+        .onChange(of: settings.showMenuBarCount) { _, _ in
+            refreshMenuBar()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            AppBrand.applyApplicationIcon()
+            AppBrand.applyDockBadge(updateCount: store.totalUpdateCount)
         }
         .alert("The operation couldn’t be completed", isPresented: Binding(
             get: { store.errorMessage != nil }, set: { if !$0 { store.errorMessage = nil } }
         )) { Button("OK", role: .cancel) {} } message: { Text(store.errorMessage ?? "Unknown error") }
         .sheet(item: $store.selectedApp) { app in AppDetailView(app: app) }
+    }
+
+    private func refreshMenuBar() {
+        MenuBarController.shared.refresh(
+            updateCount: store.totalUpdateCount,
+            showCount: settings.showMenuBarCount,
+            isVisible: settings.showMenuBarItem
+        )
     }
 
     @ViewBuilder private var detail: some View {
@@ -31,8 +58,7 @@ struct ContentView: View {
         case .macOSUpdates: MacOSUpdatesView()
         case .history: UpdateHistoryView()
         case .developerPackages: DeveloperPackagesView()
-        case .changelog: ChangelogView()
-        case .settings: SettingsView()
+        case .localModels: LocalModelsView()
         case .appStore, .sparkle, .homebrewApps, .github, .noSource:
             AllAppsView(
                 apps: store.apps(for: store.selection).filter { store.searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(store.searchText) },
@@ -43,17 +69,32 @@ struct ContentView: View {
     }
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
-        ToolbarItem(placement: .primaryAction) {
-            Button { store.selection = .settings } label: { Label("Settings", systemImage: "gearshape") }
-                .help("Open Upkeep settings")
-        }
-        ToolbarItem(placement: .primaryAction) {
+        ToolbarItemGroup(placement: .primaryAction) {
+            Button { store.selection = .updates } label: {
+                Label(
+                    store.totalUpdateCount > 0 ? "\(store.totalUpdateCount) Updates" : "Up to Date",
+                    systemImage: store.totalUpdateCount > 0 ? "arrow.down.circle.fill" : "checkmark.circle.fill"
+                )
+            }
+            .labelStyle(.titleAndIcon)
+            .foregroundStyle(store.totalUpdateCount > 0 ? Color.accentColor : Color.green)
+            .help(store.totalUpdateCount > 0
+                  ? "Open \(store.totalUpdateCount) available updates"
+                  : "All supported apps and packages are up to date")
+            .accessibilityLabel(store.totalUpdateCount > 0
+                                ? "\(store.totalUpdateCount) updates available"
+                                : "Up to date")
             Button { Task { await store.scan() } } label: {
                 if store.isScanning { ProgressView().controlSize(.small) }
-                else { Label("Check Again", systemImage: "arrow.clockwise") }
+                else { Image(systemName: "arrow.clockwise") }
             }
+            .accessibilityLabel("Check for Updates")
             .help("Check all sources for updates")
             .disabled(store.isScanning)
+
+            SettingsLink { Image(systemName: "gearshape") }
+                .accessibilityLabel("Settings")
+                .help("Open Upkeep settings")
         }
     }
 }
@@ -62,50 +103,36 @@ private struct Sidebar: View {
     @EnvironmentObject private var store: UpkeepStore
 
     var body: some View {
-        VStack(spacing: 0) {
-            brand
-            List(selection: $store.selection) {
-                Section("Updates") {
-                    item(.updates, icon: "arrow.down.circle")
+        List(selection: $store.selection) {
+            Section("Updates") {
+                item(.updates, icon: "arrow.down.circle")
+            }
+            Section("Installed") {
+                item(.allApps, icon: "square.grid.2x2")
+                item(.adoptable, icon: "arrow.down.app")
+            }
+            Section("Sources") {
+                item(.appStore, icon: "bag")
+                item(.homebrewApps, icon: "shippingbox")
+                item(.sparkle, icon: "sparkles")
+                item(.github, icon: "chevron.left.forwardslash.chevron.right")
+                item(.noSource, icon: "questionmark.app")
+            }
+            Section("Packages") {
+                item(.homebrewPackages, icon: "terminal")
+                if !store.installedDeveloperManagers.isEmpty {
+                    item(.developerPackages, icon: "chevron.left.forwardslash.chevron.right")
                 }
-                Section("Installed") {
-                    item(.allApps, icon: "square.grid.2x2")
-                    item(.adoptable, icon: "arrow.down.app")
-                }
-                Section("Sources") {
-                    item(.appStore, icon: "bag")
-                    item(.homebrewApps, icon: "shippingbox")
-                    item(.sparkle, icon: "sparkles")
-                    item(.github, icon: "chevron.left.forwardslash.chevron.right")
-                    item(.noSource, icon: "questionmark.app")
-                }
-                Section("Packages") {
-                    item(.homebrewPackages, icon: "terminal")
-                    if !store.installedDeveloperManagers.isEmpty {
-                        item(.developerPackages, icon: "chevron.left.forwardslash.chevron.right")
-                    }
-                }
-                Section("System") {
-                    item(.macOSUpdates, icon: "apple.logo")
-                    item(.history, icon: "clock.arrow.circlepath")
-                    item(.changelog, icon: "list.bullet.rectangle")
-                    item(.settings, icon: "gearshape")
+                if !store.localModels.isEmpty {
+                    item(.localModels, icon: "brain.head.profile")
                 }
             }
-            .listStyle(.sidebar)
-            status
+            Section("System") {
+                item(.macOSUpdates, icon: "apple.logo")
+                item(.history, icon: "clock.arrow.circlepath")
+            }
         }
-    }
-
-    private var brand: some View {
-        HStack(spacing: 10) {
-            AppBrandIcon(size: 42)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Upkeep").font(.headline)
-                Text("Every update. One place.").font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-        }.padding(16)
+        .listStyle(.sidebar)
     }
 
     private func item(_ destination: SidebarDestination, icon: String) -> some View {
@@ -118,19 +145,5 @@ private struct Sidebar: View {
             }
         } icon: { Image(systemName: icon) }
         .tag(destination)
-    }
-
-    private var status: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Divider()
-            HStack(spacing: 7) {
-                Circle().fill(store.isScanning ? .orange : .green).frame(width: 7, height: 7)
-                Text(store.isScanning ? "Checking all sources…" : checkedText).font(.caption).foregroundStyle(.secondary)
-            }
-        }.padding(14)
-    }
-
-    private var checkedText: String {
-        store.lastChecked.map { "Checked " + $0.formatted(.relative(presentation: .named)) } ?? "Ready"
     }
 }

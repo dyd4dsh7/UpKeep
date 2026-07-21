@@ -6,7 +6,8 @@ struct UpdateScanner: Sendable {
         async let brewInventory = settings.checkHomebrew ? HomebrewClient().inventory() : []
         async let macOSReport = settings.checkMacOS ? MacOSUpdateClient().scan() : MacOSUpdateClient.Report.empty
         async let developerReport = DeveloperPackageClient().scan(enabledManagers: settings.enabledDeveloperManagers)
-        let (apps, packages, systemReport, devReport) = await (installedApps, brewInventory, macOSReport, developerReport)
+        async let localModels = settings.checkLocalModels ? LocalModelClient().scan() : []
+        let (apps, packages, systemReport, devReport, models) = await (installedApps, brewInventory, macOSReport, developerReport, localModels)
 
         var updates: [AvailableUpdate] = []
         await withTaskGroup(of: AvailableUpdate?.self) { group in
@@ -61,7 +62,8 @@ struct UpdateScanner: Sendable {
             adoptableApps: adoptable,
             macOSUpdates: systemReport.updates.filter { settings.includeBetas || !$0.isBeta },
             developerPackages: devReport.packages,
-            installedDeveloperManagers: devReport.installedManagers
+            installedDeveloperManagers: devReport.installedManagers,
+            localModels: models
         )
     }
 

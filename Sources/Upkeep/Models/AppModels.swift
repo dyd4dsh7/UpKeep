@@ -60,6 +60,7 @@ struct ScanReport: Sendable {
     let macOSUpdates: [MacOSUpdate]
     let developerPackages: [DeveloperPackage]
     let installedDeveloperManagers: [DeveloperPackageManager]
+    let localModels: [LocalLLMModel]
 }
 
 enum SidebarDestination: String, CaseIterable, Identifiable {
@@ -75,10 +76,42 @@ enum SidebarDestination: String, CaseIterable, Identifiable {
     case macOSUpdates = "macOS"
     case history = "History"
     case developerPackages = "Developer"
-    case changelog = "Changelog"
-    case settings = "Settings"
+    case localModels = "AI Models"
 
     var id: Self { self }
+}
+
+enum LocalModelRuntime: String, Codable, CaseIterable, Identifiable, Sendable {
+    case ollama = "Ollama"
+    case lmStudio = "LM Studio"
+    var id: Self { self }
+    var systemImage: String {
+        switch self {
+        case .ollama: "circle.hexagongrid.fill"
+        case .lmStudio: "brain.head.profile.fill"
+        }
+    }
+    var assetName: String {
+        switch self {
+        case .ollama: "ollama"
+        case .lmStudio: "lmstudio"
+        }
+    }
+}
+
+struct LocalLLMModel: Identifiable, Hashable, Sendable {
+    let id: String
+    let name: String
+    let variant: String?
+    let runtime: LocalModelRuntime
+    let installedRevision: String
+    let latestRevision: String
+    let sizeBytes: Int64?
+    let modifiedAt: Date?
+    let homepage: URL?
+    let executablePath: String?
+    let updateReference: String
+    let isOutdated: Bool
 }
 
 enum HomebrewPackageKind: String, Codable, Sendable {
@@ -124,6 +157,7 @@ enum UpdateRecordKind: String, Codable, Sendable {
     case homebrew = "Homebrew"
     case macOS = "macOS"
     case developer = "Developer"
+    case model = "AI Model"
 }
 
 struct UpdateRecord: Identifiable, Codable, Hashable, Sendable {
