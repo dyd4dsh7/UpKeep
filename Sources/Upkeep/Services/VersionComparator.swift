@@ -29,6 +29,7 @@ enum VersionComparator {
             default: return .prerelease
             }
         }
+        if isPlatformQualified(value) { return nil }
         return hasHyphenatedQualifier(value) ? .prerelease : nil
     }
 
@@ -134,7 +135,8 @@ enum VersionComparator {
 
         fileprivate static let packagingLabels: Set<String> = [
             "darwin", "mac", "macos", "osx", "universal", "universal2",
-            "x64", "x86", "x86_64", "amd64", "arm", "arm64", "aarch64"
+            "linux", "windows", "win", "x64", "x86", "x86_64", "amd64",
+            "arm", "arm64", "aarch64"
         ]
 
         private static func isPackagingGroup(_ group: String) -> Bool {

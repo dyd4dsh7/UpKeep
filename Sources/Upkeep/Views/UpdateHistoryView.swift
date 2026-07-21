@@ -31,6 +31,8 @@ struct UpdateHistoryView: View {
                             .font(.caption).foregroundStyle(.secondary).frame(width: 120, alignment: .trailing)
                         if record.canRevertDirectly {
                             Button("Revert") { store.pendingRevert = record }.buttonStyle(.bordered).controlSize(.small)
+                        } else if record.backupPath != nil {
+                            Text("Backup expired").font(.caption).foregroundStyle(.secondary)
                         } else if record.kind == .macOS {
                             Button("Recovery Options") { store.openMacOSRecoveryHelp() }.controlSize(.small)
                         } else {

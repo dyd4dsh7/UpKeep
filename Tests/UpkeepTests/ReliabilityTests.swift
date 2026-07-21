@@ -31,3 +31,34 @@ import Testing
     #expect(warning.message.count == 601)
     #expect(warning.message.hasSuffix("…"))
 }
+
+@Test func externallyManagedAppsRejectHomebrewCandidates() {
+    for management in [AppUpdateManagement.testFlight, .setapp, .microsoftAutoUpdate] {
+        let app = InstalledApp(
+            name: "Managed App",
+            bundleIdentifier: "com.example.managed",
+            installedVersion: "1.0",
+            buildVersion: nil,
+            url: URL(fileURLWithPath: "/Applications/Managed App.app"),
+            sparkleFeedURL: nil,
+            githubRepository: nil,
+            hasAppStoreReceipt: management == .testFlight,
+            updateManagement: management
+        )
+        #expect(!UpdateScanner.allowsHomebrewCandidate(for: app))
+    }
+}
+
+@Test func directAppsAllowHomebrewCandidates() {
+    let app = InstalledApp(
+        name: "Direct App",
+        bundleIdentifier: "com.example.direct",
+        installedVersion: "1.0",
+        buildVersion: nil,
+        url: URL(fileURLWithPath: "/Applications/Direct App.app"),
+        sparkleFeedURL: nil,
+        githubRepository: nil,
+        hasAppStoreReceipt: false
+    )
+    #expect(UpdateScanner.allowsHomebrewCandidate(for: app))
+}

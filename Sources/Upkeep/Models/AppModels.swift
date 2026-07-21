@@ -605,7 +605,9 @@ struct UpdateRecord: Identifiable, Codable, Hashable, Sendable {
     let backupPath: String?
     let recoveryNote: String?
 
-    var canRevertDirectly: Bool { originalAppPath != nil && backupPath != nil }
+    var canRevertDirectly: Bool {
+        originalAppPath != nil && backupPath.map(FileManager.default.fileExists(atPath:)) == true
+    }
 }
 
 enum DeveloperPackageManager: String, Codable, CaseIterable, Identifiable, Sendable {

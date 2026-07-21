@@ -181,7 +181,10 @@ final class UpkeepStore: ObservableObject {
     private let startedAt = Date()
     private var versionCache: [String: [String]] = [:]
 
-    init(settings: AppSettings = AppSettings()) { self.settings = settings }
+    init(settings: AppSettings = AppSettings()) {
+        self.settings = settings
+        self.lastChecked = settings.lastCompletedScanDate
+    }
 
     var visibleUpdates: [AvailableUpdate] { updates.filter { !isExcluded($0) } }
     var filteredUpdates: [AvailableUpdate] { matching(visibleUpdates, name: { $0.app.name }) }
@@ -313,6 +316,7 @@ final class UpkeepStore: ObservableObject {
             developerManagerFilter = "all"
         }
         lastChecked = report.checkedAt
+        settings.lastCompletedScanDate = report.checkedAt
         if selectedPackageID == nil { selectedPackageID = filteredHomebrewPackages.first?.id }
         if selectedDeveloperPackageID == nil || !developerPackages.contains(where: { $0.id == selectedDeveloperPackageID }) {
             selectedDeveloperPackageID = developerPackages.first?.id
@@ -389,6 +393,7 @@ final class UpkeepStore: ObservableObject {
             versionCache.removeAll()
         }
         lastChecked = Date()
+        settings.lastCompletedScanDate = lastChecked
         if let package = selectedDeveloperPackage { await loadAvailableVersions(for: package, force: true) }
     }
 
@@ -432,14 +437,30 @@ final class UpkeepStore: ObservableObject {
             } else if let item = adoptableApps.first(where: { $0.caskToken == token && $0.app.id == update.app.id }) {
                 await updateAdoptableAppNow(item)
             } else {
+                let record: UpdateRecord
+                do {
+                    record = try await UpdateHistoryStore.shared.prepareAppBackup(
+                        app: update.app, toVersion: update.availableVersion, kind: .homebrew
+                    )
+                } catch {
+                    errorMessage = "Could not create a rollback backup: \(error.localizedDescription)"
+                    recordUpdateFailure(item: update.app.name, action: "Prepare rollback backup", error: error)
+                    return
+                }
                 let succeeded = await perform(
                     id: update.id,
                     label: update.app.name,
                     metadata: updateDiagnosticMetadata(update)
                 ) { try await HomebrewClient().upgradeCask(token: token) }
                 if succeeded {
+                    var historyError: Error?
+                    do { try await UpdateHistoryStore.shared.add(record) }
+                    catch { historyError = error }
                     await scan()
+                    if let historyError { recordHistoryFailure(item: update.app.name, error: historyError) }
                     reconcileHomebrewUpdate(token: token, name: update.app.name)
+                } else {
+                    await UpdateHistoryStore.shared.discardBackup(for: record)
                 }
             }
         } else if update.requiresInAppInstallation {
@@ -467,9 +488,16 @@ final class UpkeepStore: ObservableObject {
             "To": package.currentVersion
         ]) { try await HomebrewClient().upgrade(package) }
         if succeeded {
-            if let record { try? await UpdateHistoryStore.shared.add(record) }
+            var historyError: Error?
+            if let record {
+                do { try await UpdateHistoryStore.shared.add(record) }
+                catch { historyError = error }
+            }
             await scan()
+            if let historyError { recordHistoryFailure(item: package.displayName, error: historyError) }
             reconcileHomebrewUpdate(token: package.token, name: package.displayName)
+        } else if let record {
+            await UpdateHistoryStore.shared.discardBackup(for: record)
         }
     }
 
@@ -494,10 +522,18 @@ final class UpkeepStore: ObservableObject {
             if package.kind == .cask, matchingApp(for: package) != nil, record == nil { break }
             do {
                 try await HomebrewClient().upgrade(package)
-                if let record { try? await UpdateHistoryStore.shared.add(record) }
             } catch {
+                if let record { await UpdateHistoryStore.shared.discardBackup(for: record) }
                 failureMessage = error.localizedDescription
                 break
+            }
+            if let record {
+                do { try await UpdateHistoryStore.shared.add(record) }
+                catch {
+                    failureMessage = "\(package.displayName) was updated, but its rollback history could not be saved: \(error.localizedDescription)"
+                    recordHistoryFailure(item: package.displayName, error: error)
+                    break
+                }
             }
         }
         await scan()
@@ -562,9 +598,14 @@ final class UpkeepStore: ObservableObject {
             "To": item.caskVersion
         ]) { try await HomebrewClient().installOrReplace(item) }
         if succeeded {
-            try? await UpdateHistoryStore.shared.add(record)
+            var historyError: Error?
+            do { try await UpdateHistoryStore.shared.add(record) }
+            catch { historyError = error }
             await scan()
+            if let historyError { recordHistoryFailure(item: item.app.name, error: historyError) }
             reconcileHomebrewUpdate(token: item.caskToken, name: item.app.name)
+        } else {
+            await UpdateHistoryStore.shared.discardBackup(for: record)
         }
     }
 
@@ -597,7 +638,7 @@ final class UpkeepStore: ObservableObject {
             target = app.url
         }
         guard let target, NSWorkspace.shared.open(target) else {
-            errorMessage = "Could not open (app.updateManagement.rawValue)."
+            errorMessage = "Could not open \(app.updateManagement.rawValue)."
             return
         }
     }
@@ -667,6 +708,7 @@ final class UpkeepStore: ObservableObject {
             selectedLocalModelID = localModels.first?.id
         }
         lastChecked = Date()
+        settings.lastCompletedScanDate = lastChecked
     }
 
     func updateLocalModel(_ model: LocalLLMModel) async {
@@ -759,14 +801,22 @@ final class UpkeepStore: ObservableObject {
                     let record = try await UpdateHistoryStore.shared.prepareAppBackup(
                         app: adoptable.app, toVersion: adoptable.caskVersion, kind: .homebrew
                     )
-                    try await HomebrewClient().installOrReplace(adoptable)
-                    try? await UpdateHistoryStore.shared.add(record)
+                    do { try await HomebrewClient().installOrReplace(adoptable) }
+                    catch {
+                        await UpdateHistoryStore.shared.discardBackup(for: record)
+                        throw error
+                    }
+                    try await UpdateHistoryStore.shared.add(record)
                 } else {
                     let record = try await UpdateHistoryStore.shared.prepareAppBackup(
                         app: update.app, toVersion: update.availableVersion, kind: .homebrew
                     )
-                    try await HomebrewClient().upgradeCask(token: token)
-                    try? await UpdateHistoryStore.shared.add(record)
+                    do { try await HomebrewClient().upgradeCask(token: token) }
+                    catch {
+                        await UpdateHistoryStore.shared.discardBackup(for: record)
+                        throw error
+                    }
+                    try await UpdateHistoryStore.shared.add(record)
                 }
 
             case let .homebrew(package):
@@ -812,8 +862,12 @@ final class UpkeepStore: ObservableObject {
                 recoveryNote: "Homebrew formula versions cannot always be rolled back automatically. Restore from Time Machine or install a versioned formula when available."
             )
         }
-        try await HomebrewClient().upgrade(package)
-        try? await UpdateHistoryStore.shared.add(record)
+        do { try await HomebrewClient().upgrade(package) }
+        catch {
+            await UpdateHistoryStore.shared.discardBackup(for: record)
+            throw error
+        }
+        try await UpdateHistoryStore.shared.add(record)
     }
 
     private func batchRunningApps(for items: [BatchUpdateItem]) -> [InstalledApp] {
@@ -1056,6 +1110,15 @@ final class UpkeepStore: ObservableObject {
         refreshDiagnostics()
     }
 
+    private func recordHistoryFailure(item: String, error: Error) {
+        errorMessage = "\(item) was updated, but its rollback history could not be saved: \(error.localizedDescription)"
+        DiagnosticsStore.shared.record(.error, category: .update, "Rollback history could not be saved", metadata: [
+            "Item": item,
+            "Error": error.localizedDescription
+        ])
+        refreshDiagnostics()
+    }
+
     private func recoveryRecord(for package: HomebrewPackage) async -> UpdateRecord? {
         if package.kind == .cask, let app = matchingApp(for: package) {
             do {
@@ -1150,12 +1213,16 @@ final class UpkeepStore: ObservableObject {
 
     private func mergedUpdates(from report: ScanReport) -> [AvailableUpdate] {
         var merged = Dictionary(uniqueKeysWithValues: report.updates.map { ($0.id, $0) })
+        let currentApps = Dictionary(uniqueKeysWithValues: report.apps.map { ($0.id, $0) })
 
         for previous in updates {
+            guard let currentApp = currentApps[previous.id] else { continue }
             let failedSources = report.failedAppSources[previous.app.id] ?? []
-            let retained = previous.candidates.filter { failedSources.contains($0.source) }
+            let retained = Self.retainableCandidates(
+                in: previous, currentApp: currentApp, failedSources: failedSources
+            )
             guard !retained.isEmpty else { continue }
-            let retainedUpdate = AvailableUpdate(app: previous.app, candidates: retained)
+            let retainedUpdate = AvailableUpdate(app: currentApp, candidates: retained)
             if let fresh = merged[previous.id] {
                 merged[previous.id] = AvailableUpdate.merging([fresh, retainedUpdate])
             } else {
@@ -1165,9 +1232,12 @@ final class UpkeepStore: ObservableObject {
 
         if report.homebrewInventoryStatus == .failed {
             for previous in updates {
-                let retained = previous.candidates.filter { $0.source == .homebrew && !$0.requiresHomebrewAdoption }
+                guard let currentApp = currentApps[previous.id] else { continue }
+                let retained = Self.retainableCandidates(
+                    in: previous, currentApp: currentApp, failedSources: [.homebrew]
+                ).filter { !$0.requiresHomebrewAdoption }
                 guard !retained.isEmpty else { continue }
-                let retainedUpdate = AvailableUpdate(app: previous.app, candidates: retained)
+                let retainedUpdate = AvailableUpdate(app: currentApp, candidates: retained)
                 if let fresh = merged[previous.id] {
                     merged[previous.id] = AvailableUpdate.merging([fresh, retainedUpdate])
                 } else {
@@ -1176,9 +1246,12 @@ final class UpkeepStore: ObservableObject {
             }
         } else if report.homebrewCatalogStatus == .failed {
             for previous in updates {
-                let retained = previous.candidates.filter { $0.source == .homebrew && $0.requiresHomebrewAdoption }
+                guard let currentApp = currentApps[previous.id] else { continue }
+                let retained = Self.retainableCandidates(
+                    in: previous, currentApp: currentApp, failedSources: [.homebrew]
+                ).filter(\.requiresHomebrewAdoption)
                 guard !retained.isEmpty else { continue }
-                let retainedUpdate = AvailableUpdate(app: previous.app, candidates: retained)
+                let retainedUpdate = AvailableUpdate(app: currentApp, candidates: retained)
                 if let fresh = merged[previous.id] {
                     merged[previous.id] = AvailableUpdate.merging([fresh, retainedUpdate])
                 } else {
@@ -1188,6 +1261,17 @@ final class UpkeepStore: ObservableObject {
         }
 
         return merged.values.sorted { $0.app.name.localizedStandardCompare($1.app.name) == .orderedAscending }
+    }
+
+    static func retainableCandidates(
+        in previous: AvailableUpdate,
+        currentApp: InstalledApp,
+        failedSources: Set<UpdateSource>
+    ) -> [UpdateCandidate] {
+        previous.candidates.filter {
+            failedSources.contains($0.source)
+                && VersionComparator.isNewer($0.availableVersion, than: currentApp.installedVersion)
+        }
     }
 
     private func mergedMacOSUpdates(from report: ScanReport) -> [MacOSUpdate] {

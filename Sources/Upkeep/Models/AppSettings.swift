@@ -159,6 +159,12 @@ final class AppSettings: ObservableObject {
     @Published var checkMacOS: Bool { didSet { save(checkMacOS, "checkMacOS") } }
     @Published var checkLocalModels: Bool { didSet { save(checkLocalModels, "checkLocalModels") } }
     @Published var includePrereleaseUpdates: Bool { didSet { save(includePrereleaseUpdates, "includePrereleaseUpdates") } }
+    @Published var lastCompletedScanDate: Date? {
+        didSet {
+            if let lastCompletedScanDate { save(lastCompletedScanDate, "lastCompletedScanDate") }
+            else { defaults.removeObject(forKey: "lastCompletedScanDate") }
+        }
+    }
     @Published private(set) var enabledDeveloperManagers: Set<DeveloperPackageManager>
     @Published private(set) var updateExclusions: [UpdateExclusion]
     @Published var selectedSection: SettingsSection = .general
@@ -205,6 +211,7 @@ final class AppSettings: ObservableObject {
         checkMacOS = defaults.bool(forKey: "checkMacOS")
         checkLocalModels = defaults.bool(forKey: "checkLocalModels")
         includePrereleaseUpdates = defaults.bool(forKey: "includePrereleaseUpdates")
+        lastCompletedScanDate = defaults.object(forKey: "lastCompletedScanDate") as? Date
         let disabled = Set(defaults.stringArray(forKey: "disabledDeveloperManagers") ?? [])
         enabledDeveloperManagers = Set(DeveloperPackageManager.allCases.filter { !disabled.contains($0.rawValue) })
         updateExclusions = (defaults.data(forKey: "updateExclusions")

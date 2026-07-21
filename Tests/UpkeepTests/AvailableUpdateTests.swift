@@ -61,3 +61,45 @@ private func update(
     #expect(merged?.candidates.count == 1)
     #expect(merged?.availableVersion == "2.1")
 }
+
+@MainActor
+@Test func failedSourcesDoNotRetainUpdatesAlreadyInstalledExternally() {
+    let previous = update(.sparkle, version: "2.0")
+    let currentApp = InstalledApp(
+        name: app.name,
+        bundleIdentifier: app.bundleIdentifier,
+        installedVersion: "2.0",
+        buildVersion: "200",
+        url: app.url,
+        sparkleFeedURL: app.sparkleFeedURL,
+        githubRepository: app.githubRepository,
+        hasAppStoreReceipt: app.hasAppStoreReceipt
+    )
+
+    #expect(UpkeepStore.retainableCandidates(
+        in: previous,
+        currentApp: currentApp,
+        failedSources: [.sparkle]
+    ).isEmpty)
+}
+
+@MainActor
+@Test func failedSourcesRetainStillNewerCandidatesAgainstCurrentAppSnapshot() {
+    let previous = update(.sparkle, version: "2.0")
+    let currentApp = InstalledApp(
+        name: app.name,
+        bundleIdentifier: app.bundleIdentifier,
+        installedVersion: "1.5",
+        buildVersion: "150",
+        url: app.url,
+        sparkleFeedURL: app.sparkleFeedURL,
+        githubRepository: app.githubRepository,
+        hasAppStoreReceipt: app.hasAppStoreReceipt
+    )
+
+    #expect(UpkeepStore.retainableCandidates(
+        in: previous,
+        currentApp: currentApp,
+        failedSources: [.sparkle]
+    ).map(\.availableVersion) == ["2.0"])
+}

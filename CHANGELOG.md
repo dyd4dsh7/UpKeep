@@ -2,6 +2,15 @@
 
 All notable changes to Upkeep are documented here.
 
+## 0.23.1 — 2026-07-22
+
+- Prevented stale update candidates from surviving a failed source check after an app was updated elsewhere.
+- Prevented Homebrew candidates from replacing TestFlight, Setapp, or Microsoft AutoUpdate-managed apps.
+- Corrected prerelease detection for stable platform-qualified versions and restored them to version menus.
+- Preserved scheduled-check timing across relaunches and restored Sparkle release notes delivered as CDATA.
+- Added bounded rollback-backup retention, failed-update cleanup, corrupt-history protection, and accurate expired-backup states.
+- Corrected the managed-updater launch error message and expanded regression coverage for every fix.
+
 ## 0.23.0 — 2026-07-22
 
 - Added persistent diagnostics for scan timing, source requests, version decisions, Homebrew commands, and update results.

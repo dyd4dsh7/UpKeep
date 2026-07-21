@@ -143,6 +143,11 @@ final class SparkleFeedParser: NSObject, XMLParserDelegate {
         if inItem { currentText += string }
     }
 
+    func parser(_ parser: XMLParser, foundCDATA CDATABlock: Data) {
+        guard inItem else { return }
+        currentText += String(decoding: CDATABlock, as: UTF8.self)
+    }
+
     func parser(
         _ parser: XMLParser,
         didEndElement elementName: String,

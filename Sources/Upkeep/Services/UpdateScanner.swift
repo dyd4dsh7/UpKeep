@@ -67,7 +67,9 @@ struct UpdateScanner: Sendable {
         let normalizedApps = Dictionary(grouping: apps) { normalize($0.name) }
         for package in packages where package.kind == .cask && package.isOutdated {
             let caskName = normalize(package.displayName)
-            guard let app = normalizedApps[caskName]?.first ?? normalizedApps[normalize(package.token)]?.first else { continue }
+            guard let app = normalizedApps[caskName]?.first ?? normalizedApps[normalize(package.token)]?.first,
+                  Self.allowsHomebrewCandidate(for: app)
+            else { continue }
             updates.append(AvailableUpdate(
                 app: app,
                 availableVersion: package.currentVersion,
@@ -275,6 +277,10 @@ struct UpdateScanner: Sendable {
 
     private func normalize(_ value: String) -> String {
         value.lowercased().filter(\.isLetter)
+    }
+
+    static func allowsHomebrewCandidate(for app: InstalledApp) -> Bool {
+        !app.updateManagement.isExternallyManaged
     }
 
     private func caskIsNewer(_ candidate: String, than app: InstalledApp) -> Bool {

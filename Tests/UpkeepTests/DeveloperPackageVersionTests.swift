@@ -22,7 +22,7 @@ import Testing
     #expect(versions.contains("1.0.5"))
     #expect(versions.contains("1.0.4"))
     #expect(!versions.contains("1.2.0-alpha.2"))
-    #expect(!versions.contains("1.0.5-darwin-arm64"))
+    #expect(versions.contains("1.0.5-darwin-arm64"))
     #expect(package.prereleaseChannel == .beta)
 }
 

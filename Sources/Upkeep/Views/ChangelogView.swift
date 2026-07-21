@@ -51,6 +51,14 @@ private struct UpkeepRelease: Identifiable {
     let changes: [String]
 
     static let all = [
+        UpkeepRelease(version: "0.23.1", date: "22 July 2026", changes: [
+            "Drops stale update candidates when an app has already been updated outside Upkeep.",
+            "Prevents Homebrew from replacing TestFlight, Setapp, or Microsoft AutoUpdate-managed apps.",
+            "Treats stable platform-qualified versions correctly while preserving genuine prerelease channels.",
+            "Keeps scheduled-check timing across relaunches and reads Sparkle release notes delivered as CDATA.",
+            "Bounds rollback backups, removes failed-update backups, protects corrupt history, and marks expired backups accurately.",
+            "Corrects the managed-updater launch error and adds regression coverage for these reliability paths."
+        ]),
         UpkeepRelease(version: "0.23.0", date: "22 July 2026", changes: [
             "Records scan timing, update-source requests, version decisions, Homebrew commands, and update outcomes.",
             "Adds an at-a-glance dashboard, structured entry cards, searchable severity and category filters, plus export and clear controls in Settings.",
