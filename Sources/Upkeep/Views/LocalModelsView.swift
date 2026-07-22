@@ -5,33 +5,26 @@ struct LocalModelsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HeaderView(
-                title: "Local AI Models",
-                subtitle: "\(store.localModels.count) installed · \(store.outdatedLocalModelCount) updates",
-                systemImage: "brain.head.profile.fill"
-            )
-            HStack {
-                Text("Installed models · Ollama and LM Studio do not need to be open")
-                    .font(.callout).foregroundStyle(.secondary)
-                Spacer()
-                Button { Task { await store.scanLocalModels() } } label: {
-                    Label("Check Models", systemImage: "arrow.clockwise")
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(store.workingIDs.contains("local-model-scan"))
-            }
-            .padding(.horizontal, 20).padding(.bottom, 10)
-
             if store.localModels.isEmpty {
                 ContentUnavailableView(
                     "No local models found", systemImage: "brain.head.profile",
                     description: Text("Models appear here when Ollama or LM Studio has models installed.")
                 )
             } else {
-                HSplitView {
-                    modelList.frame(minWidth: 390, idealWidth: 500)
-                    LocalModelDetail(model: selectedModel).frame(minWidth: 310)
+                modelList
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .secondaryAction) {
+                Button { Task { await store.scanLocalModels() } } label: {
+                    if store.workingIDs.contains("local-model-scan") {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Check Models", systemImage: "arrow.clockwise")
+                    }
                 }
+                .help("Check Ollama and LM Studio models")
+                .disabled(store.workingIDs.contains("local-model-scan"))
             }
         }
     }
@@ -43,11 +36,6 @@ struct LocalModelsView: View {
         .listStyle(.inset)
         .onAppear { ensureModelSelection() }
         .onChange(of: store.localModels.map(\.id)) { _, _ in ensureModelSelection() }
-    }
-
-    private var selectedModel: LocalLLMModel? {
-        guard let id = store.selectedLocalModelID else { return nil }
-        return store.localModels.first { $0.id == id }
     }
 
     private var sortedModels: [LocalLLMModel] {
@@ -105,8 +93,17 @@ private struct LocalModelRow: View {
                         Button("Restore Updates") { store.restore(exclusion) }
                     }
                 } else {
-                    if model.isOutdated { Button("Skip This Revision") { store.skip(model) } }
-                    Button("Ignore \(model.name)") { store.ignore(model) }
+                    if model.isOutdated {
+                        Button("Update") { Task { await store.updateLocalModel(model) } }
+                        Divider()
+                    }
+                    UpdateExclusionOptions(
+                        skipTitle: "Skip This Revision",
+                        ignoreTitle: "Ignore \(model.name) Indefinitely",
+                        skip: { store.skip(model) }, ignore: { store.ignore(model) },
+                        skipFor: { store.skip(model, duration: $0) },
+                        ignoreFor: { store.ignore(model, duration: $0) }
+                    )
                 }
             }
         }
@@ -127,18 +124,7 @@ struct LocalModelDetail: View {
                         if let variant = model.variant { Text(variant).font(.title3).foregroundStyle(.secondary).textSelection(.enabled) }
                     }
                     if model.isOutdated {
-                        HStack {
-                            Button("Update with \(model.runtime.rawValue)") { Task { await store.updateLocalModel(model) } }
-                                .buttonStyle(.borderedProminent).disabled(store.workingIDs.contains(model.id) || store.isExcluded(model))
-                            Menu("More") {
-                                if store.isExcluded(model), let exclusion = store.exclusion(for: model) {
-                                    Button("Restore Updates") { store.restore(exclusion) }
-                                } else {
-                                    Button("Skip This Revision") { store.skip(model) }
-                                    Button("Ignore \(model.name)") { store.ignore(model) }
-                                }
-                            }
-                        }
+                        updateCard(model)
                     } else {
                         Label("Model is current", systemImage: "checkmark.seal.fill").foregroundStyle(.green)
                     }
@@ -159,6 +145,32 @@ struct LocalModelDetail: View {
             }
         } else {
             ContentUnavailableView("Select a model", systemImage: "brain.head.profile")
+        }
+    }
+
+    private func updateCard(_ model: LocalLLMModel) -> some View {
+        InspectorUpdateStatusCard(subtitle: "Available through \(model.runtime.rawValue)") {
+            if let exclusion = store.exclusion(for: model) {
+                Label(exclusion.mode.rawValue, systemImage: exclusion.mode == .ignored ? "eye.slash" : "forward.end")
+                    .foregroundStyle(.orange)
+                Button("Restore Updates") { store.restore(exclusion) }.buttonStyle(.borderedProminent)
+            } else {
+                Button("Update with \(model.runtime.rawValue)") { Task { await store.updateLocalModel(model) } }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(store.workingIDs.contains(model.id))
+            }
+        } options: {
+            if let exclusion = store.exclusion(for: model) {
+                Button("Restore Updates") { store.restore(exclusion) }
+            } else {
+                UpdateExclusionOptions(
+                    skipTitle: "Skip This Revision",
+                    ignoreTitle: "Ignore \(model.name) Indefinitely",
+                    skip: { store.skip(model) }, ignore: { store.ignore(model) },
+                    skipFor: { store.skip(model, duration: $0) },
+                    ignoreFor: { store.ignore(model, duration: $0) }
+                )
+            }
         }
     }
 

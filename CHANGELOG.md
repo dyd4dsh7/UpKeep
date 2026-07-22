@@ -2,6 +2,24 @@
 
 All notable changes to Upkeep are documented here.
 
+## Unreleased
+
+- Adopted the macOS Liquid Glass structure with system toolbar search, native inspectors, dynamic navigation titles, and contextual toolbar controls.
+- Removed custom page chrome and in-content command strips so macOS can manage glass grouping, scroll-edge treatment, and window hierarchy.
+- Improved narrow-window behavior, restored the user’s preferred Dynamic Type size, and added update, filter, inspector, and batch-review menu commands.
+- Added a layered Icon Composer asset with default, dark, and tinted treatments while retaining the legacy ICNS fallback for macOS 14.
+- Added a reliable native-style Dock update counter and synchronized the Dock icon with macOS icon appearance changes for the SwiftPM app bundle.
+- Removed the Settings and update-count shortcuts from the main toolbar while retaining their standard menu and sidebar access.
+- Refined Settings with grouped native navigation, clearer form sections, and a flatter diagnostics workspace that follows modern macOS conventions.
+- Replaced the macOS 27-unstable Settings split view with standard Settings tabs to prevent AppKit constraint crashes when switching sections.
+- Unified app, update, Homebrew, developer-package, and model details in one resizable inspector so a user-adjusted width carries across every section, and changed sidebar symbols to the native monochrome treatment.
+- Rebuilt application, update, Homebrew, developer-package, and model rows with larger identity artwork, stronger typography, accent-coloured available versions, native selection, and trailing capsule actions that remain aligned in both Comfortable and Compact density modes.
+- Moved secondary row controls into complete right-click menus and consolidated Skip and Ignore actions into the inspector’s trailing Options menu.
+- Added targeted per-app and per-package refresh operations with live progress and a persisted Last checked time, without triggering an unrelated full scan.
+- Expanded application and package inspectors with richer metadata, declared macOS permissions, signing and sandbox status, notarization and Gatekeeper details, and package provenance guidance.
+- Removed warning banners, warning filters, and inline warning markers from the main interface; source failures are now normalized, redacted, and retained in Diagnostics.
+- Stabilized toolbar and inspector transitions across scans, selections, and settings changes to prevent macOS 27 AppKit constraint failures.
+
 ## 0.23.1 — 2026-07-22
 
 - Prevented stale update candidates from surviving a failed source check after an app was updated elsewhere.

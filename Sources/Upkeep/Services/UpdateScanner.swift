@@ -1,6 +1,23 @@
 import Foundation
 
 struct UpdateScanner: Sendable {
+    struct TargetedAppReport: Sendable {
+        let updates: [AvailableUpdate]
+        let failedSources: Set<UpdateSource>
+        let warnings: [ScanWarning]
+    }
+
+    /// Checks only the sources declared by one application. Homebrew candidates are
+    /// refreshed separately by token in `UpkeepStore`.
+    func scan(app: InstalledApp, settings: ScanSettings) async -> TargetedAppReport {
+        let result = await checkApp(app, settings: settings)
+        return TargetedAppReport(
+            updates: result.updates,
+            failedSources: result.failedSources,
+            warnings: result.warnings
+        )
+    }
+
     func scan(settings: ScanSettings) async -> ScanReport {
         let scanStartedAt = Date()
         DiagnosticsStore.shared.recordBuffered(.info, category: .scan, "Update scan started", metadata: [
@@ -198,6 +215,18 @@ struct UpdateScanner: Sendable {
             installedDeveloperManagers: devReport.installedManagers,
             localModels: modelReport.models
         )
+        for warning in report.warnings {
+            DiagnosticsStore.shared.recordBuffered(
+                .warning,
+                category: .source,
+                warning.title,
+                metadata: [
+                    "Source": warning.source.rawValue,
+                    "Details": warning.detail,
+                    "Affected items": "\(warning.affectedItemCount)"
+                ]
+            )
+        }
         DiagnosticsStore.shared.record(
             warnings.isEmpty ? .info : .warning,
             category: .scan,

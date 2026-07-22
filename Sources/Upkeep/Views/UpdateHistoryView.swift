@@ -5,11 +5,6 @@ struct UpdateHistoryView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HeaderView(
-                title: "Update History",
-                subtitle: "Backups and recovery options for updates made through Upkeep",
-                systemImage: "clock.arrow.circlepath"
-            )
             if store.updateHistory.isEmpty {
                 ContentUnavailableView(
                     "No update history",

@@ -8,6 +8,8 @@
     <string>Upkeep</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
     <key>CFBundleExecutable</key>
     <string>Upkeep</string>
     <key>CFBundleIdentifier</key>

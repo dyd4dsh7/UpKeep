@@ -5,21 +5,6 @@ struct MacOSUpdatesView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HeaderView(
-                title: "macOS Updates",
-                subtitle: availableUpdates.isEmpty ? "No system updates available" : "\(availableUpdates.count) system updates available",
-                systemImage: "apple.logo"
-            )
-            HStack {
-                Label("Stable and beta updates come directly from Apple", systemImage: "checkmark.shield")
-                    .font(.callout).foregroundStyle(.secondary)
-                Spacer()
-                Button("Beta Updates…") { store.openBetaSettings() }
-                    .help("Choose a beta channel in Apple’s Software Update settings")
-                Button("Check Again") { Task { await store.scan() } }.buttonStyle(.borderedProminent)
-            }
-            .padding(.horizontal, 20).padding(.bottom, 12)
-
             if availableUpdates.isEmpty && installers.isEmpty {
                 ContentUnavailableView(
                     "Your Mac is up to date",
@@ -44,6 +29,17 @@ struct MacOSUpdatesView: View {
                     }
                 }
                 .listStyle(.inset)
+            }
+        }
+        .toolbar {
+            ToolbarItemGroup(placement: .secondaryAction) {
+                Button("Beta Updates…") { store.openBetaSettings() }
+                    .help("Choose a beta channel in Apple’s Software Update settings")
+                Button { Task { await store.scan() } } label: {
+                    Label("Check Again", systemImage: "arrow.clockwise")
+                }
+                .help("Check Apple Software Update")
+                .disabled(store.isScanning)
             }
         }
     }

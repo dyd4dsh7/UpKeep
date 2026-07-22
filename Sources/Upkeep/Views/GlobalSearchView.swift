@@ -5,17 +5,11 @@ struct GlobalSearchView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HeaderView(
-                title: "Search",
-                subtitle: "\(resultCount) results across Upkeep for “\(displayQuery)”",
-                systemImage: "magnifyingglass"
-            )
-
             if resultCount == 0 {
                 ContentUnavailableView {
                     Label("No Results", systemImage: "magnifyingglass")
                 } description: {
-                    Text("No apps, packages, models, system updates, warnings, or history match “\(displayQuery)”.")
+                    Text("No apps, packages, models, system updates, or history match “\(displayQuery)”.")
                 } actions: {
                     Button("Clear Search") { store.searchText = "" }
                         .buttonStyle(.borderedProminent)
@@ -51,11 +45,6 @@ struct GlobalSearchView: View {
                     if !matchingMacOSUpdates.isEmpty {
                         Section("macOS") {
                             ForEach(matchingMacOSUpdates) { update in macOSRow(update) }
-                        }
-                    }
-                    if !matchingWarnings.isEmpty {
-                        Section("Scan Warnings") {
-                            ForEach(matchingWarnings) { warning in warningRow(warning) }
                         }
                     }
                     if !matchingHistory.isEmpty {
@@ -113,12 +102,6 @@ struct GlobalSearchView: View {
             .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
     }
 
-    private var matchingWarnings: [ScanWarning] {
-        store.scanWarnings.filter {
-            matches($0.source.rawValue, $0.message, $0.itemNames.joined(separator: " "))
-        }
-    }
-
     private var matchingHistory: [UpdateRecord] {
         store.updateHistory.filter {
             matches($0.name, $0.kind.rawValue, $0.fromVersion, $0.toVersion, $0.recoveryNote)
@@ -128,7 +111,7 @@ struct GlobalSearchView: View {
     private var resultCount: Int {
         matchingApps.count + matchingAdoptableApps.count + matchingHomebrewPackages.count
             + matchingDeveloperPackages.count + matchingModels.count + matchingMacOSUpdates.count
-            + matchingWarnings.count + matchingHistory.count
+            + matchingHistory.count
     }
 
     private func matches(_ values: String?...) -> Bool {
@@ -239,16 +222,6 @@ struct GlobalSearchView: View {
             InstalledVersionView(version: update.version)
             Button("Open") { Task { await store.prepareMacOSUpdate(update) } }
                 .buttonStyle(.bordered).controlSize(.small)
-        }
-    }
-
-    private func warningRow(_ warning: ScanWarning) -> some View {
-        StandardItemRow {
-            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-        } content: {
-            ItemIdentityView(title: warning.title, detail: warning.detail)
-        } accessories: {
-            Text(warning.source.rawValue).font(.caption.weight(.semibold)).foregroundStyle(.orange)
         }
     }
 

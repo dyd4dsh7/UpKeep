@@ -6,24 +6,8 @@ struct UpdatesView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HeaderView(
-                title: "Updates",
-                subtitle: subtitle,
-                systemImage: "arrow.down.circle.fill"
-            )
-
-            if store.updateListFilter != .warnings && !store.scanWarningsHidden && !store.scanWarnings.isEmpty {
-                ScanWarningsBanner(warnings: store.scanWarnings) {
-                    withAnimation { store.scanWarningsHidden = true }
-                }
-            }
-
-            listControls
-
             if store.isScanning && store.apps.isEmpty {
                 scanningState
-            } else if store.updateListFilter == .warnings {
-                warningsList
             } else if appUpdates.isEmpty && filteredPackages.isEmpty && systemUpdates.isEmpty && filteredDeveloperPackages.isEmpty && filteredModels.isEmpty {
                 emptyState
             } else {
@@ -61,27 +45,24 @@ struct UpdatesView: View {
             BatchUpdateSheet(items: store.availableBatchUpdateItems)
                 .environmentObject(store)
         }
+        .toolbar { listToolbar }
     }
 
-    private var listControls: some View {
-        HStack(spacing: 0) {
-            HStack(spacing: 4) {
-                updateSortMenu
-                updateFilterMenu
-                ListDensityButton()
-            }
-            .frame(width: 98, alignment: .leading)
-            Spacer()
-            if !store.availableBatchUpdateItems.isEmpty {
-                Button("Update All…") { store.isShowingBatchReview = true }
-                    .buttonStyle(.borderless)
-                    .fontWeight(.medium)
-                    .disabled(store.workingIDs.contains("unified-update-batch"))
-            }
+    @ToolbarContentBuilder private var listToolbar: some ToolbarContent {
+        ToolbarItemGroup(placement: .secondaryAction) {
+            updateSortMenu
+            updateFilterMenu
+            ListDensityButton()
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 8)
-        .overlay(alignment: .bottom) { Divider() }
+        ToolbarItem(placement: .primaryAction) {
+            Button("Update All…") { store.isShowingBatchReview = true }
+                .buttonStyle(.borderedProminent)
+                .disabled(
+                    store.availableBatchUpdateItems.isEmpty ||
+                    store.workingIDs.contains("unified-update-batch")
+                )
+                .help("Review all available updates")
+        }
     }
 
     private var updateSortMenu: some View {
@@ -102,11 +83,7 @@ struct UpdatesView: View {
                 isActive: store.updateSortOrder != .recommended
             )
         }
-        .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
-        .frame(width: 30, height: 26)
-        .fixedSize()
-        .disabled(store.updateListFilter == .warnings)
         .help("Sort updates")
         .accessibilityLabel("Sort updates")
     }
@@ -128,10 +105,7 @@ struct UpdatesView: View {
                 isActive: store.updateListFilter != .all
             )
         }
-        .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
-        .frame(width: 30, height: 26)
-        .fixedSize()
         .help("Filter updates")
         .accessibilityLabel("Filter updates")
     }
@@ -150,27 +124,6 @@ struct UpdatesView: View {
                 isSelected: store.updateSortOrder == order &&
                     (order == .recommended || store.updateSortAscending == ascending)
             )
-        }
-    }
-
-    @ViewBuilder private var warningsList: some View {
-        if store.scanWarnings.isEmpty {
-            ContentUnavailableView(
-                "No Scan Warnings", systemImage: "checkmark.seal.fill",
-                description: Text("Every enabled update source completed its latest check.")
-            ).frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            List(store.scanWarnings) { warning in
-                StandardItemRow {
-                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                } content: {
-                    ItemIdentityView(title: warning.title, detail: warning.detail)
-                } accessories: {
-                    Text(warning.source.rawValue)
-                        .font(.caption.weight(.semibold)).foregroundStyle(.orange)
-                }
-            }
-            .listStyle(.inset)
         }
     }
 
@@ -299,14 +252,6 @@ struct UpdatesView: View {
         }
     }
 
-    private var subtitle: String {
-        if store.isScanning { return "Looking for new versions…" }
-        let total = store.totalUpdateCount
-        if total == 0, !store.scanWarnings.isEmpty { return "Scan completed with warnings" }
-        if total == 0 { return "No updates found" }
-        return "\(total) updates available across apps and packages"
-    }
-
     private var scanningState: some View {
         VStack(spacing: 16) {
             ProgressView().controlSize(.large)
@@ -320,14 +265,12 @@ struct UpdatesView: View {
 
     private var emptyState: some View {
         ContentUnavailableView {
-            Label(emptyTitle, systemImage: store.scanWarnings.isEmpty ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+            Label(emptyTitle, systemImage: "checkmark.seal.fill")
         } description: {
             Text(store.searchText.isEmpty
                  ? (store.updateListFilter != .all
                     ? "No available updates match the selected category."
-                    : store.scanWarnings.isEmpty
-                    ? "Supported update sources reported no newer versions for your apps."
-                    : "Some update sources could not be checked. Last-known results were preserved where possible.")
+                    : "Supported update sources reported no newer versions for your apps.")
                  : "Try a different search term.")
         } actions: {
             if store.searchText.isEmpty {
@@ -341,7 +284,7 @@ struct UpdatesView: View {
     private var emptyTitle: String {
         if !store.searchText.isEmpty { return "No matching updates" }
         if store.updateListFilter != .all { return "No \(store.updateListFilter.rawValue)" }
-        return store.scanWarnings.isEmpty ? "No updates found" : "Scan incomplete"
+        return "No updates found"
     }
 }
 
@@ -575,47 +518,6 @@ private struct BatchReviewRow: View {
     }
 }
 
-private struct ScanWarningsBanner: View {
-    let warnings: [ScanWarning]
-    let dismiss: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label(
-                    "\(warnings.count) update source \(warnings.count == 1 ? "warning" : "warnings")",
-                    systemImage: "exclamationmark.triangle.fill"
-                )
-                .font(.callout.weight(.medium))
-                .foregroundStyle(.orange)
-                Spacer()
-                Button(action: dismiss) { Image(systemName: "xmark") }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .help("Hide warnings until the next scan")
-                    .accessibilityLabel("Hide update source warnings")
-            }
-
-            ForEach(warnings.prefix(3)) { warning in
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(warning.title).font(.caption.weight(.semibold))
-                    Text(warning.detail).font(.caption).foregroundStyle(.secondary).lineLimit(3)
-                }
-            }
-            if warnings.count > 3 {
-                Text("And \(warnings.count - 3) more. Refresh after checking the affected sources.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 20)
-        .padding(.vertical, 10)
-        .background(Color.orange.opacity(0.08))
-        .overlay(alignment: .bottom) { Divider() }
-    }
-}
-
 private struct DeveloperUpdateCard: View {
     @EnvironmentObject private var store: UpkeepStore
     let package: DeveloperPackage
@@ -630,23 +532,23 @@ private struct DeveloperUpdateCard: View {
                 prereleaseIsInstalled: package.prereleaseIsInstalled
             )
         } accessories: {
+            if store.isRefreshing(package) {
+                ProgressView().controlSize(.small)
+                    .accessibilityLabel("Refreshing \(package.name)")
+            }
             VersionTransitionView(current: package.currentVersion, latest: package.latestVersion)
             Button("Update") { Task { await store.updateDeveloperPackage(package) } }
-                .buttonStyle(.bordered).controlSize(.small)
+                .listRowPrimaryAction()
                 .disabled(store.workingIDs.contains(package.id))
-                .frame(width: 120)
-            exclusionMenu(
-                skipTitle: "Skip Version \(package.latestVersion)",
-                ignoreTitle: "Ignore Indefinitely",
-                skip: { store.skip(package) },
-                ignore: { store.ignore(package) },
-                skipFor: { store.skip(package, duration: $0) },
-                ignoreFor: { store.ignore(package, duration: $0) }
-            )
         }
         .tag(UpdateInspectorSelection.developer(package.id).listID)
         .contentShape(Rectangle())
         .contextMenu {
+            Button("Update") { Task { await store.updateDeveloperPackage(package) } }
+                .disabled(store.workingIDs.contains(package.id))
+            Button("Refresh") { Task { await store.refresh(package) } }
+                .disabled(store.isRefreshing(package))
+            Divider()
             exclusionOptions(
                 skipTitle: "Skip Version \(package.latestVersion)",
                 skip: { store.skip(package) }, ignore: { store.ignore(package) },
@@ -698,6 +600,10 @@ struct UpdateCard: View {
                 prereleaseIsInstalled: update.prereleaseIsInstalled
             )
         } accessories: {
+            if store.isRefreshing(update.app) {
+                ProgressView().controlSize(.small)
+                    .accessibilityLabel("Refreshing \(update.app.name)")
+            }
             VersionTransitionView(current: update.app.installedVersion, latest: update.availableVersion)
             Button {
                 Task { await store.performUpdate(update) }
@@ -705,28 +611,33 @@ struct UpdateCard: View {
                 if store.workingIDs.contains(update.id) { ProgressView().controlSize(.small) }
                 else { Text(actionTitle) }
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+            .listRowPrimaryAction()
             .disabled(store.workingIDs.contains(update.id))
-            .frame(width: 120)
-            exclusionMenu(
-                skipTitle: "Skip Version \(update.availableVersion)",
-                ignoreTitle: "Ignore Indefinitely",
-                skip: { store.skip(update) },
-                ignore: { store.ignore(update.app) },
-                skipFor: { store.skip(update, duration: $0) },
-                ignoreFor: { store.ignore(update.app, duration: $0) }
-            )
         }
         .tag("app:\(update.app.id)")
         .contentShape(Rectangle())
         .contextMenu {
+            Button(actionTitle) { Task { await store.performUpdate(update) } }
+                .disabled(store.workingIDs.contains(update.id))
+            Button("Refresh") { Task { await store.refresh(update.app) } }
+                .disabled(store.workingIDs.contains("app-refresh-\(update.app.id)"))
+            Divider()
             exclusionOptions(
                 skipTitle: "Skip Version \(update.availableVersion)",
                 skip: { store.skip(update) }, ignore: { store.ignore(update.app) },
                 skipFor: { store.skip(update, duration: $0) },
                 ignoreFor: { store.ignore(update.app, duration: $0) }
             )
+            if update.candidates.contains(where: \.requiresHomebrewAdoption) {
+                if store.isHomebrewAdoptionIgnored(update.app) {
+                    Button("Restore Homebrew Adoption") { store.restoreHomebrewAdoption(update.app) }
+                } else {
+                    Button("Ignore Homebrew Adoption") { store.ignoreHomebrewAdoption(update.app) }
+                }
+            }
+            Divider()
+            Button("Open") { NSWorkspace.shared.open(update.app.url) }
+            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([update.app.url]) }
         }
     }
 
@@ -750,23 +661,23 @@ private struct HomebrewUpdateCard: View {
                 prereleaseIsInstalled: package.prereleaseIsInstalled
             )
         } accessories: {
+            if store.isRefreshing(package) {
+                ProgressView().controlSize(.small)
+                    .accessibilityLabel("Refreshing \(package.displayName)")
+            }
             VersionTransitionView(current: package.installedVersion, latest: package.currentVersion)
             Button("Update") { Task { await store.updatePackage(package) } }
-                .buttonStyle(.bordered).controlSize(.small)
+                .listRowPrimaryAction()
                 .disabled(store.workingIDs.contains(package.id))
-                .frame(width: 120)
-            exclusionMenu(
-                skipTitle: "Skip Version \(package.currentVersion)",
-                ignoreTitle: "Ignore Indefinitely",
-                skip: { store.skip(package) },
-                ignore: { store.ignore(package) },
-                skipFor: { store.skip(package, duration: $0) },
-                ignoreFor: { store.ignore(package, duration: $0) }
-            )
         }
         .tag(UpdateInspectorSelection.homebrew(package.id).listID)
         .contentShape(Rectangle())
         .contextMenu {
+            Button("Update") { Task { await store.updatePackage(package) } }
+                .disabled(store.workingIDs.contains(package.id))
+            Button("Refresh") { Task { await store.refresh(package) } }
+                .disabled(store.isRefreshing(package))
+            Divider()
             exclusionOptions(
                 skipTitle: "Skip Version \(package.currentVersion)",
                 skip: { store.skip(package) }, ignore: { store.ignore(package) },
@@ -793,21 +704,15 @@ private struct LocalModelUpdateCard: View {
         } accessories: {
             VersionTransitionView(current: model.installedRevision, latest: model.latestRevision)
             Button("Update") { Task { await store.updateLocalModel(model) } }
-                .buttonStyle(.bordered).controlSize(.small)
+                .listRowPrimaryAction()
                 .disabled(store.workingIDs.contains(model.id))
-                .frame(width: 120)
-            exclusionMenu(
-                skipTitle: "Skip This Revision",
-                ignoreTitle: "Ignore Indefinitely",
-                skip: { store.skip(model) },
-                ignore: { store.ignore(model) },
-                skipFor: { store.skip(model, duration: $0) },
-                ignoreFor: { store.ignore(model, duration: $0) }
-            )
         }
         .tag(UpdateInspectorSelection.model(model.id).listID)
         .contentShape(Rectangle())
         .contextMenu {
+            Button("Update") { Task { await store.updateLocalModel(model) } }
+                .disabled(store.workingIDs.contains(model.id))
+            Divider()
             exclusionOptions(
                 skipTitle: "Skip This Revision",
                 skip: { store.skip(model) }, ignore: { store.ignore(model) },
@@ -816,34 +721,6 @@ private struct LocalModelUpdateCard: View {
             )
         }
     }
-}
-
-@MainActor
-private func exclusionMenu(
-    skipTitle: String,
-    ignoreTitle: String,
-    skip: @escaping () -> Void,
-    ignore: @escaping () -> Void,
-    skipFor: @escaping (UpdateExclusionDuration) -> Void,
-    ignoreFor: @escaping (UpdateExclusionDuration) -> Void
-) -> some View {
-    Menu {
-        UpdateExclusionOptions(
-            skipTitle: skipTitle,
-            ignoreTitle: ignoreTitle,
-            skip: skip,
-            ignore: ignore,
-            skipFor: skipFor,
-            ignoreFor: ignoreFor
-        )
-    } label: {
-        Image(systemName: "ellipsis.circle")
-    }
-    .menuStyle(.borderlessButton)
-    .menuIndicator(.hidden)
-    .fixedSize()
-    .help("Update options")
-    .accessibilityLabel("Update options")
 }
 
 @MainActor

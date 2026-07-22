@@ -5,13 +5,6 @@ struct ChangelogView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if !compact {
-                HeaderView(
-                    title: "Changelog",
-                    subtitle: "What’s new in Upkeep",
-                    systemImage: "list.bullet.rectangle.fill"
-                )
-            }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     ForEach(UpkeepRelease.all) { release in
@@ -69,12 +62,12 @@ private struct UpkeepRelease: Identifiable {
         UpkeepRelease(version: "0.22.0", date: "22 July 2026", changes: [
             "Groups compact Sort, Filter, and Density controls with consistent spacing at the far-left edge of each list toolbar.",
             "Keeps batch update actions on the far right and moves search into the sidebar.",
-            "Searches apps, packages, models, macOS, warnings, and history in one global results workspace.",
+            "Searches apps, packages, models, macOS, and history in one global results workspace.",
             "Sorts apps by Default, A–Z, Z–A, install date, recent updates, source, or version.",
-            "Filters app lists by available updates, source warnings, or unmapped apps and surfaces issues inline.",
+            "Filters app lists by available updates or unmapped apps.",
             "Adds an Unmapped Homebrew filter for casks without a matching application bundle.",
             "Adds persisted Comfortable and Compact list densities in list controls and Settings.",
-            "Provides a complete warnings-only view for inspecting every update-source failure."
+            "Routes update-source failures into the searchable Diagnostics workspace."
         ]),
         UpkeepRelease(version: "0.21.0", date: "22 July 2026", changes: [
             "Distinguishes TestFlight builds from production Mac App Store installations and opens the correct updater.",
@@ -180,7 +173,7 @@ private struct UpkeepRelease: Identifiable {
             "Shows complete release notes and expanded application and source metadata."
         ]),
         UpkeepRelease(version: "0.12.1", date: "21 July 2026", changes: [
-            "Lets you hide scan warnings until the next full or targeted scan.",
+            "Records scan warnings in Diagnostics for full and targeted scans.",
             "Adds Homebrew adoption to app details, including Update & Adopt when a newer cask is available."
         ]),
         UpkeepRelease(version: "0.12.0", date: "21 July 2026", changes: [
@@ -192,7 +185,7 @@ private struct UpkeepRelease: Identifiable {
         UpkeepRelease(version: "0.11.3", date: "21 July 2026", changes: [
             "Distinguishes genuine up-to-date results from update-source and package-manager scan failures.",
             "Preserves last-known updates only for the affected app or source when part of a scan fails.",
-            "Shows compact, actionable warnings for network, HTTP, timeout, malformed-data, and command failures.",
+            "Records actionable network, HTTP, timeout, malformed-data, and command failures in Diagnostics.",
             "Retries Homebrew lock contention and verifies inventory after update commands complete.",
             "Refined the app icon with rounded, appearance-aware artwork and added developer details to About.",
             "Restored test compatibility with standalone Apple Command Line Tools and added reliability coverage."

@@ -8,6 +8,13 @@ enum AppDiscovery {
         }.value
     }
 
+    /// Re-reads one application bundle without enumerating either Applications folder.
+    static func discover(at url: URL) async -> InstalledApp? {
+        await Task.detached(priority: .userInitiated) {
+            app(at: url, microsoftRegisteredPaths: microsoftAutoUpdateRegisteredPaths())
+        }.value
+    }
+
     private static func discoverSynchronously() -> [InstalledApp] {
         let fileManager = FileManager.default
         let microsoftRegisteredPaths = microsoftAutoUpdateRegisteredPaths()

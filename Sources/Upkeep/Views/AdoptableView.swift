@@ -6,11 +6,6 @@ struct AdoptableView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HeaderView(
-                title: "Adoptable",
-                subtitle: "\(store.adoptableApps.count) apps can be managed by Homebrew",
-                systemImage: "arrow.down.app.fill"
-            )
             if store.filteredAdoptableApps.isEmpty {
                 ContentUnavailableView(
                     "No adoptable apps",
@@ -37,9 +32,8 @@ struct AdoptableView: View {
                             if store.workingIDs.contains(item.id) { ProgressView().controlSize(.small) }
                             else { Text("Adopt") }
                         }
-                        .buttonStyle(.bordered).controlSize(.small)
+                        .listRowPrimaryAction()
                         .disabled(store.workingIDs.contains(item.id))
-                        .frame(width: 120)
                     }
                     .tag(item.app.id)
                     .contentShape(Rectangle())

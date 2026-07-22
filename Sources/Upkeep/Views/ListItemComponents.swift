@@ -1,5 +1,11 @@
 import SwiftUI
 
+enum UpkeepLayout {
+    static let inspectorMinimumWidth: CGFloat = 320
+    static let inspectorIdealWidth: CGFloat = 430
+    static let inspectorMaximumWidth: CGFloat = 560
+}
+
 struct StandardItemRow<Icon: View, Content: View, Accessories: View>: View {
     @EnvironmentObject private var settings: AppSettings
     private let icon: Icon
@@ -17,23 +23,24 @@ struct StandardItemRow<Icon: View, Content: View, Accessories: View>: View {
     }
 
     var body: some View {
-        HStack(spacing: settings.listDensity == .compact ? 9 : 12) {
+        HStack(spacing: settings.listDensity == .compact ? 10 : 14) {
             icon
-                .scaleEffect(settings.listDensity == .compact ? 0.78 : 1)
-                .frame(width: settings.listDensity == .compact ? 30 : 36,
-                       height: settings.listDensity == .compact ? 30 : 36)
+                .scaleEffect(settings.listDensity == .compact ? 0.82 : 1.08)
+                .frame(width: settings.listDensity == .compact ? 32 : 42,
+                       height: settings.listDensity == .compact ? 32 : 42)
 
             content
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .layoutPriority(1)
 
-            HStack(spacing: 10) {
+            HStack(spacing: settings.listDensity == .compact ? 8 : 12) {
                 accessories
             }
             .fixedSize(horizontal: true, vertical: false)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, settings.listDensity == .compact ? 3 : 8)
+        .padding(.horizontal, settings.listDensity == .compact ? 2 : 6)
+        .padding(.vertical, settings.listDensity == .compact ? 5 : 10)
         .listRowSeparator(.hidden)
         .animation(.snappy(duration: 0.18), value: settings.listDensity)
     }
@@ -49,9 +56,11 @@ struct ItemIdentityView: View {
     var prereleaseIsInstalled = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: settings.listDensity == .compact ? 1 : 3) {
+        VStack(alignment: .leading, spacing: settings.listDensity == .compact ? 1 : 4) {
             HStack(spacing: 7) {
-                Text(title).font(.body.weight(.semibold)).lineLimit(1)
+                Text(title)
+                    .font(settings.listDensity == .compact ? .body.weight(.semibold) : .title3.weight(.semibold))
+                    .lineLimit(1)
                 if isRunning { RunningIndicator() }
                 if let tag {
                     Text(tag.uppercased())
@@ -63,7 +72,7 @@ struct ItemIdentityView: View {
                 }
             }
             Text(detail)
-                .font(settings.listDensity == .compact ? .caption : .callout)
+                .font(settings.listDensity == .compact ? .caption : .subheadline)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
@@ -84,9 +93,6 @@ struct ListDensityButton: View {
                 isActive: settings.listDensity == .compact
             )
         }
-        .buttonStyle(.plain)
-        .frame(width: 30, height: 26)
-        .fixedSize()
         .help(settings.listDensity == .compact ? "Use comfortable rows" : "Use compact rows")
         .accessibilityLabel(settings.listDensity == .compact ? "Use comfortable rows" : "Use compact rows")
     }
@@ -167,11 +173,11 @@ struct InstalledVersionView: View {
 
     var body: some View {
         Text(version)
-            .font(.callout.monospacedDigit())
+            .font(.subheadline.monospacedDigit())
             .foregroundStyle(.secondary)
             .lineLimit(1)
             .minimumScaleFactor(0.75)
-            .frame(width: 92, alignment: .trailing)
+            .frame(width: 104, alignment: .trailing)
     }
 }
 
@@ -191,7 +197,7 @@ struct VersionTransitionView: View {
                         .foregroundStyle(.tertiary)
                     Text(latest)
                         .fontWeight(.semibold)
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(Color.accentColor)
                 }
             } else {
                 HStack(spacing: 5) {
@@ -202,20 +208,27 @@ struct VersionTransitionView: View {
                 }
             }
         }
-        .font(.callout.monospacedDigit())
+        .font(.subheadline.monospacedDigit())
         .lineLimit(1)
         .minimumScaleFactor(0.8)
-        .frame(width: usesFixedWidth ? 190 : nil, alignment: usesFixedWidth ? .trailing : .leading)
+        .frame(width: usesFixedWidth ? 178 : nil, alignment: usesFixedWidth ? .trailing : .leading)
         .accessibilityElement(children: .combine)
     }
 }
 
-struct MoreMenuIcon: View {
-    var body: some View {
-        Image(systemName: "ellipsis")
-            .frame(width: 18, height: 18)
-            .contentShape(Rectangle())
-            .accessibilityLabel("More")
+struct ListRowPrimaryAction: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.capsule)
+            .controlSize(.small)
+            .frame(width: 108, alignment: .trailing)
+    }
+}
+
+extension View {
+    func listRowPrimaryAction() -> some View {
+        modifier(ListRowPrimaryAction())
     }
 }
 
@@ -242,6 +255,58 @@ struct UpdateExclusionOptions: View {
                 Button("For \(duration.title)") { ignoreFor(duration) }
             }
         }
+    }
+}
+
+struct InspectorUpdateStatusCard<Actions: View, Options: View>: View {
+    let title: String
+    let subtitle: String
+    let systemImage: String
+    var color: Color = .accentColor
+    @ViewBuilder let actions: Actions
+    @ViewBuilder let options: Options
+
+    init(
+        title: String = "Update available",
+        subtitle: String,
+        systemImage: String = "arrow.down.circle.fill",
+        color: Color = .accentColor,
+        @ViewBuilder actions: () -> Actions,
+        @ViewBuilder options: () -> Options
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.systemImage = systemImage
+        self.color = color
+        self.actions = actions()
+        self.options = options()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 14) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 28, weight: .medium))
+                    .foregroundStyle(color)
+                    .symbolRenderingMode(.hierarchical)
+                    .frame(width: 38)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title).font(.title3.weight(.semibold))
+                    Text(subtitle).font(.callout).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Menu { options } label: {
+                    Text("Options")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .accessibilityLabel("Update options")
+            }
+            Divider()
+            HStack(spacing: 10) { actions }
+        }
+        .padding(16)
+        .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 14))
     }
 }
 

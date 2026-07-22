@@ -167,6 +167,8 @@ final class AppSettings: ObservableObject {
     }
     @Published private(set) var enabledDeveloperManagers: Set<DeveloperPackageManager>
     @Published private(set) var updateExclusions: [UpdateExclusion]
+    @Published private(set) var ignoredHomebrewAdoptionKeys: Set<String>
+    @Published private(set) var itemLastCheckedDates: [String: Date]
     @Published var selectedSection: SettingsSection = .general
     @Published var confirmingPrereleaseUpdates = false
     private var exclusionExpiryTask: Task<Void, Never>?
@@ -218,6 +220,9 @@ final class AppSettings: ObservableObject {
             .flatMap { try? JSONDecoder().decode([UpdateExclusion].self, from: $0) } ?? [])
             .filter { $0.isActive() }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        ignoredHomebrewAdoptionKeys = Set(defaults.stringArray(forKey: "ignoredHomebrewAdoptionKeys") ?? [])
+        itemLastCheckedDates = defaults.data(forKey: "itemLastCheckedDates")
+            .flatMap { try? JSONDecoder().decode([String: Date].self, from: $0) } ?? [:]
         saveExclusions()
     }
 
@@ -293,6 +298,31 @@ final class AppSettings: ObservableObject {
     func restoreAllExclusions() {
         updateExclusions.removeAll()
         saveExclusions()
+    }
+
+    func isHomebrewAdoptionIgnored(key: String) -> Bool {
+        ignoredHomebrewAdoptionKeys.contains(key)
+    }
+
+    func setHomebrewAdoptionIgnored(_ ignored: Bool, key: String) {
+        if ignored { ignoredHomebrewAdoptionKeys.insert(key) }
+        else { ignoredHomebrewAdoptionKeys.remove(key) }
+        defaults.set(ignoredHomebrewAdoptionKeys.sorted(), forKey: "ignoredHomebrewAdoptionKeys")
+    }
+
+    func lastChecked(for key: String) -> Date? {
+        itemLastCheckedDates[key]
+    }
+
+    func recordCheck(for key: String, at date: Date = Date()) {
+        recordChecks(for: [key], at: date)
+    }
+
+    func recordChecks(for keys: [String], at date: Date = Date()) {
+        for key in keys { itemLastCheckedDates[key] = date }
+        if let data = try? JSONEncoder().encode(itemLastCheckedDates) {
+            defaults.set(data, forKey: "itemLastCheckedDates")
+        }
     }
 
     func migrateExclusion(from legacyKey: String, to key: String) {

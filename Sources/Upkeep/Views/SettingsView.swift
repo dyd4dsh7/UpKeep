@@ -6,19 +6,16 @@ struct SettingsView: View {
     @EnvironmentObject private var store: UpkeepStore
 
     var body: some View {
-        NavigationSplitView {
-            List(SettingsSection.allCases, selection: $settings.selectedSection) { section in
-                Label(section.rawValue, systemImage: icon(for: section))
+        TabView(selection: $settings.selectedSection) {
+            ForEach(SettingsSection.allCases) { section in
+                settingsContent(for: section)
+                    .tabItem {
+                        Label(section.rawValue, systemImage: icon(for: section))
+                    }
                     .tag(section)
             }
-            .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(min: 150, ideal: 170, max: 210)
-        } detail: {
-            selectedContent
-                .padding(16)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: 780, height: 540)
+        .frame(width: 860, height: 620)
         .alert("Include prerelease updates?", isPresented: $settings.confirmingPrereleaseUpdates) {
             Button("Cancel", role: .cancel) {}
             Button("Include Prereleases", role: .destructive) {
@@ -30,8 +27,8 @@ struct SettingsView: View {
         }
     }
 
-    @ViewBuilder private var selectedContent: some View {
-        switch settings.selectedSection {
+    @ViewBuilder private func settingsContent(for section: SettingsSection) -> some View {
+        switch section {
         case .general: general
         case .sources: sources
         case .developer: developer
@@ -44,7 +41,7 @@ struct SettingsView: View {
 
     private var general: some View {
         Form {
-            Section("Checking") {
+            Section {
                 Toggle("Check for updates when Upkeep opens", isOn: $settings.checkOnLaunch)
                 Picker("Background check", selection: $settings.refreshInterval) {
                     ForEach(RefreshInterval.allCases) { Text($0.title).tag($0) }
@@ -68,23 +65,32 @@ struct SettingsView: View {
                     .onChange(of: settings.notificationsEnabled) { _, enabled in
                         if enabled { Task { _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) } }
                     }
+            } header: {
+                Text("Automatic Checking")
+            } footer: {
+                Text("Upkeep schedules checks while it is running and reports when the available update count changes.")
             }
-            Section("Menu Bar") {
+            Section {
                 Toggle("Show Upkeep in the menu bar", isOn: $settings.showMenuBarItem)
                 Toggle("Show the available update count", isOn: $settings.showMenuBarCount)
                     .disabled(!settings.showMenuBarItem)
                 Toggle("Show the available update count on the Dock icon", isOn: $settings.showDockBadge)
-                Text("The Upkeep icon remains available for quick scans, Settings, and opening the main window.")
-                    .font(.caption).foregroundStyle(.secondary)
+            } header: {
+                Text("Menu Bar and Dock")
+            } footer: {
+                Text("The menu-bar item provides quick access to scans, Settings, and the main window.")
             }
-            Section("Appearance") {
+            Section {
                 Picker("List density", selection: $settings.listDensity) {
                     ForEach(ListDensity.allCases) { density in
                         Label(density.title, systemImage: density.systemImage).tag(density)
                     }
                 }
+                .pickerStyle(.segmented)
+            } header: {
+                Text("Appearance")
+            } footer: {
                 Text("Compact rows fit more apps and packages on screen without hiding status information.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -92,16 +98,18 @@ struct SettingsView: View {
 
     private var sources: some View {
         Form {
-            Section("Application Sources") {
+            Section {
                 sourceToggle("Mac App Store", "bag", $settings.checkAppStore)
                 sourceToggle("Sparkle feeds", "sparkles", $settings.checkSparkle)
                 sourceToggle("Homebrew apps and packages", "shippingbox", $settings.checkHomebrew)
                 sourceToggle("GitHub Releases", "chevron.left.forwardslash.chevron.right", $settings.checkGitHub)
                 sourceToggle("Local LLM models", "brain.head.profile", $settings.checkLocalModels)
-                Text("Checks model files directly against upstream registries. Ollama and LM Studio can remain closed.")
-                    .font(.caption).foregroundStyle(.secondary)
+            } header: {
+                Text("Application Sources")
+            } footer: {
+                Text("Model files are checked directly against upstream registries, so Ollama and LM Studio can remain closed.")
             }
-            Section("Prerelease Updates") {
+            Section {
                 Toggle("Include prerelease updates for all apps and packages", isOn: Binding(
                     get: { settings.includePrereleaseUpdates },
                     set: { enabled in
@@ -116,13 +124,17 @@ struct SettingsView: View {
                     "Warning: prerelease software may be unstable, incompatible, or unsafe for important data.",
                     systemImage: "exclamationmark.triangle.fill"
                 )
-                .font(.caption.weight(.medium))
+                .font(.callout.weight(.medium))
                 .foregroundStyle(.orange)
-                Text("Applies to Sparkle, GitHub, Homebrew, developer packages, and macOS updates. Sources such as the Mac App Store only expose releases available through their public update service.")
-                    .font(.caption).foregroundStyle(.secondary)
+            } header: {
+                Text("Prerelease Updates")
+            } footer: {
+                Text("Applies to Sparkle, GitHub, Homebrew, developer packages, and macOS updates. The Mac App Store only exposes releases from its public update service.")
             }
-            Section("macOS") {
+            Section {
                 sourceToggle("Software Update and full installers", "apple.logo", $settings.checkMacOS)
+            } header: {
+                Text("macOS")
             }
         }
         .formStyle(.grouped)
@@ -134,93 +146,55 @@ struct SettingsView: View {
 
     private var diagnostics: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Diagnostics").font(.title2.bold())
-                        Text("Understand what Upkeep checked and why it reached each result.")
-                            .font(.callout).foregroundStyle(.secondary)
+            Form {
+                Section("Latest Activity") {
+                    Grid(alignment: .leading, horizontalSpacing: 28, verticalSpacing: 8) {
+                        GridRow {
+                            diagnosticSummary("Entries", "\(store.diagnosticEntries.count)", "list.bullet.rectangle")
+                            diagnosticSummary("Warnings", "\(diagnosticWarningCount)", "exclamationmark.triangle.fill")
+                        }
+                        GridRow {
+                            diagnosticSummary("Errors", "\(diagnosticErrorCount)", "xmark.octagon.fill")
+                            diagnosticSummary("Latest scan", latestScanDuration, "clock")
+                        }
                     }
-                    Spacer()
-                    Button { store.exportDiagnostics() } label: {
-                        Label("Export…", systemImage: "square.and.arrow.up")
-                    }
-                    Button(role: .destructive) { store.clearDiagnostics() } label: {
-                        Label("Clear", systemImage: "trash")
-                    }
-                        .disabled(store.diagnosticEntries.isEmpty)
                 }
-
-                HStack(spacing: 8) {
-                    DiagnosticMetric(
-                        title: "Entries",
-                        value: "\(store.diagnosticEntries.count)",
-                        systemImage: "list.bullet.rectangle",
-                        color: .blue
-                    )
-                    DiagnosticMetric(
-                        title: "Warnings",
-                        value: "\(diagnosticWarningCount)",
-                        systemImage: "exclamationmark.triangle.fill",
-                        color: .orange
-                    )
-                    DiagnosticMetric(
-                        title: "Errors",
-                        value: "\(diagnosticErrorCount)",
-                        systemImage: "xmark.octagon.fill",
-                        color: .red
-                    )
-                    DiagnosticMetric(
-                        title: "Latest Scan",
-                        value: latestScanDuration,
-                        systemImage: "clock",
-                        color: .secondary
-                    )
-                }
-
-                HStack {
-                    HStack(spacing: 7) {
-                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                        TextField("Search entries", text: $store.diagnosticsSearchText)
-                            .textFieldStyle(.plain)
-                        if !store.diagnosticsSearchText.isEmpty {
-                            Button { store.diagnosticsSearchText = "" } label: {
-                                Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
+                Section("Filter") {
+                    TextField("Search diagnostics", text: $store.diagnosticsSearchText)
+                        .textFieldStyle(.roundedBorder)
+                    HStack {
+                        Picker("Level", selection: $store.diagnosticsLevelFilter) {
+                            ForEach(DiagnosticLevelFilter.allCases) { Text($0.title).tag($0) }
+                        }
+                        Picker("Category", selection: $store.diagnosticsCategoryFilter) {
+                            Text("All Categories").tag(nil as DiagnosticCategory?)
+                            ForEach(DiagnosticCategory.allCases) { category in
+                                Label(category.shortTitle, systemImage: category.systemImage)
+                                    .tag(Optional(category))
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Clear diagnostics search")
                         }
                     }
-                    .padding(.horizontal, 9)
-                    .frame(height: 28)
-                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-
-                    Picker("Level", selection: $store.diagnosticsLevelFilter) {
-                        ForEach(DiagnosticLevelFilter.allCases) { Text($0.title).tag($0) }
-                    }
-                    .labelsHidden()
-                    .frame(width: 105)
-
-                    Picker("Category", selection: $store.diagnosticsCategoryFilter) {
-                        Text("All Categories").tag(nil as DiagnosticCategory?)
-                        ForEach(DiagnosticCategory.allCases) { category in
-                            Label(category.shortTitle, systemImage: category.systemImage)
-                                .tag(Optional(category))
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 145)
-
-                    Button { store.refreshDiagnostics() } label: { Image(systemName: "arrow.clockwise") }
-                        .help("Reload diagnostics")
                 }
-                Label(
-                    "Secrets and private paths are redacted. Exports include installed item names, so review them before sharing.",
-                    systemImage: "hand.raised.fill"
-                )
-                .font(.caption).foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 8).padding(.bottom, 14)
+            .formStyle(.grouped)
+            .frame(height: 255)
+
+            HStack(spacing: 8) {
+                Label("Private paths and secrets are redacted", systemImage: "hand.raised")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button { store.refreshDiagnostics() } label: {
+                    Label("Reload", systemImage: "arrow.clockwise")
+                }
+                Button { store.exportDiagnostics() } label: {
+                    Label("Export…", systemImage: "square.and.arrow.up")
+                }
+                Button("Clear", role: .destructive) { store.clearDiagnostics() }
+                    .disabled(store.diagnosticEntries.isEmpty)
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 10)
 
             if filteredDiagnostics.isEmpty {
                 ContentUnavailableView(
@@ -231,8 +205,6 @@ struct SettingsView: View {
             } else {
                 List(filteredDiagnostics) { entry in
                     DiagnosticRow(entry: entry)
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
                 }
                 .listStyle(.inset)
             }
@@ -336,10 +308,12 @@ struct SettingsView: View {
                     }
                 }
             }
-            Section("Display and Versions") {
+            Section {
                 Toggle("Show packages that are already current", isOn: $settings.showCurrentDeveloperPackages)
+            } header: {
+                Text("Display and Versions")
+            } footer: {
                 Text("Prerelease package versions are controlled by the global option in Sources.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -398,6 +372,18 @@ struct SettingsView: View {
         }
     }
 
+    private func diagnosticSummary(_ title: String, _ value: String, _ systemImage: String) -> some View {
+        LabeledContent {
+            Text(value)
+                .fontWeight(.semibold)
+                .monospacedDigit()
+        } label: {
+            Label(title, systemImage: systemImage)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
     private func sourceToggle(_ title: String, _ icon: String, _ binding: Binding<Bool>) -> some View {
         Toggle(isOn: binding) { Label(title, systemImage: icon) }
     }
@@ -408,16 +394,12 @@ private struct DiagnosticRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 11) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(color.opacity(0.12))
-                Image(systemName: icon)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(color)
-            }
-            .frame(width: 30, height: 30)
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(color)
+                .frame(width: 22, height: 22)
 
-            VStack(alignment: .leading, spacing: 9) {
+            VStack(alignment: .leading, spacing: 7) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(entry.message).fontWeight(.semibold)
                     Label(entry.category.shortTitle, systemImage: entry.category.systemImage)
@@ -436,8 +418,8 @@ private struct DiagnosticRow: View {
                     ) {
                         ForEach(orderedMetadata, id: \.key) { pair in
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(pair.key.uppercased())
-                                    .font(.system(size: 9, weight: .semibold))
+                                Text(pair.key)
+                                    .font(.caption2.weight(.semibold))
                                     .foregroundStyle(.tertiary)
                                 Text(diagnosticDisplayValue(pair.value, key: pair.key))
                                     .font(.caption.monospaced())
@@ -446,20 +428,12 @@ private struct DiagnosticRow: View {
                                     .textSelection(.enabled)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 8).padding(.vertical, 6)
-                            .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                         }
                     }
                 }
             }
         }
-        .padding(11)
-        .background(.background.opacity(0.45), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(.quaternary, lineWidth: 1)
-        }
-        .padding(.vertical, 3)
+        .padding(.vertical, 6)
     }
 
     private var orderedMetadata: [(key: String, value: String)] {
@@ -505,27 +479,4 @@ private func diagnosticDisplayValue(_ value: String, key: String) -> String {
     if value == "disabled" { return "Disabled" }
     if value == "failed" { return "Failed" }
     return value
-}
-
-private struct DiagnosticMetric: View {
-    let title: String
-    let value: String
-    let systemImage: String
-    let color: Color
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: systemImage)
-                .foregroundStyle(color)
-                .frame(width: 16)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(value).font(.headline.monospacedDigit()).lineLimit(1)
-                Text(title).font(.caption2).foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 10).padding(.vertical, 8)
-        .frame(maxWidth: .infinity)
-        .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-    }
 }

@@ -17,9 +17,52 @@ struct UpkeepApp: App {
             ContentView()
                 .environmentObject(store)
                 .environmentObject(settings)
-                .frame(minWidth: 1000, minHeight: 560)
+                .frame(minWidth: 760, minHeight: 500)
         }
         .windowToolbarStyle(.unified(showsTitle: true))
+        .defaultSize(width: 1180, height: 720)
+        .commands {
+            InspectorCommands()
+            CommandMenu("Updates") {
+                Button("Check for Updates") {
+                    Task { await store.scan() }
+                }
+                .keyboardShortcut("r", modifiers: .command)
+                .disabled(store.isScanning)
+
+                Button("Show Updates") {
+                    store.searchText = ""
+                    store.selection = .updates
+                }
+                .keyboardShortcut("u", modifiers: [.command, .shift])
+
+                Menu("Filter Updates") {
+                    ForEach(UpdateListFilter.allCases) { filter in
+                        Button {
+                            store.searchText = ""
+                            store.selection = .updates
+                            store.updateListFilter = filter
+                        } label: {
+                            if store.updateListFilter == filter {
+                                Label(filter.rawValue, systemImage: "checkmark")
+                            } else {
+                                Text(filter.rawValue)
+                            }
+                        }
+                    }
+                }
+
+                Divider()
+
+                Button("Review All Updates…") {
+                    store.searchText = ""
+                    store.selection = .updates
+                    store.isShowingBatchReview = true
+                }
+                .keyboardShortcut("u", modifiers: [.command, .option])
+                .disabled(store.availableBatchUpdateItems.isEmpty)
+            }
+        }
 
         Settings {
             SettingsView().environmentObject(settings).environmentObject(store)

@@ -1,22 +1,22 @@
 import SwiftUI
 
 struct ContentView: View {
-    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var store: UpkeepStore
     @EnvironmentObject private var settings: AppSettings
+    @AppStorage("sharedInspectorWidth") private var sharedInspectorWidth = Double(UpkeepLayout.inspectorIdealWidth)
 
     var body: some View {
         NavigationSplitView {
             Sidebar()
                 .navigationSplitViewColumnWidth(min: 215, ideal: 235, max: 300)
         } detail: {
-            detailWithInspector
+            inspectorLayout
                 .toolbar { toolbar }
         }
-        .navigationTitle("Upkeep")
-        .dynamicTypeSize(.xLarge...)
+        .navigationTitle(navigationTitle)
+        .navigationSubtitle(navigationSubtitle)
+        .searchable(text: $store.searchText, placement: .toolbar, prompt: "Search Upkeep")
         .task {
-            AppBrand.applyApplicationIcon(for: colorScheme)
             MenuBarController.shared.configure(store: store, settings: settings)
             await store.start()
             refreshDockBadge()
@@ -35,6 +35,11 @@ struct ContentView: View {
         .onChange(of: settings.showDockBadge) { _, _ in
             refreshDockBadge()
         }
+        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
+            AppBrand.refreshDockPresentationIfNeeded(
+                updateCount: settings.showDockBadge ? store.totalUpdateCount : 0
+            )
+        }
         .onChange(of: store.selection) { _, _ in
             store.selectedApp = nil
             store.updateInspectorSelection = nil
@@ -46,12 +51,7 @@ struct ContentView: View {
                 store.updateInspectorSelection = nil
             }
         }
-        .onChange(of: colorScheme) { _, newColorScheme in
-            AppBrand.applyApplicationIcon(for: newColorScheme)
-            refreshDockBadge()
-        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            AppBrand.applyApplicationIcon(for: colorScheme)
             refreshDockBadge()
         }
         .alert("The operation couldn’t be completed", isPresented: Binding(
@@ -69,7 +69,9 @@ struct ContentView: View {
     }
 
     private func refreshDockBadge() {
-        AppBrand.applyDockBadge(updateCount: settings.showDockBadge ? store.totalUpdateCount : 0)
+        AppBrand.applyDockPresentation(
+            updateCount: settings.showDockBadge ? store.totalUpdateCount : 0
+        )
     }
 
     @ViewBuilder private var detail: some View {
@@ -80,13 +82,29 @@ struct ContentView: View {
         }
     }
 
+    private var inspectorLayout: some View {
+        HStack(spacing: 0) {
+            detail
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if inspectorPresented.wrappedValue {
+                Divider()
+                inspectorContent
+                    .frame(width: CGFloat(clampedInspectorWidth))
+                    .frame(maxHeight: .infinity)
+                    .overlay(alignment: .leading) {
+                        InspectorResizeHandle(width: inspectorWidthBinding)
+                    }
+            }
+        }
+    }
+
     @ViewBuilder private var destinationDetail: some View {
         switch store.selection {
         case .updates: UpdatesView()
         case .allApps: AllAppsView(
             apps: store.filteredApps,
             title: "All Apps",
-            subtitle: "\(store.apps.count) applications scanned",
             systemImage: SidebarDestination.allApps.headerSystemImage
         )
         case .adoptable: AdoptableView()
@@ -100,29 +118,83 @@ struct ContentView: View {
             AllAppsView(
                 apps: store.apps(for: store.selection).filter { store.searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(store.searchText) },
                 title: store.selection.rawValue,
-                subtitle: "\(store.count(for: store.selection)) apps",
                 systemImage: store.selection.headerSystemImage
             )
         }
     }
 
-    @ViewBuilder private var detailWithInspector: some View {
-        if let app = store.selectedApp {
-            HSplitView {
-                detail.frame(minWidth: 390)
+    private var inspectorPresented: Binding<Bool> {
+        Binding(
+            get: {
+                switch store.selection {
+                case .updates:
+                    return store.selectedApp != nil || store.updateInspectorSelection != nil
+                case .homebrewPackages: return selectedHomebrewPackage != nil
+                case .developerPackages: return selectedDeveloperPackage != nil
+                case .localModels: return selectedLocalModel != nil
+                case .macOSUpdates, .history: return false
+                default: return store.selectedApp != nil
+                }
+            },
+            set: { isPresented in
+                if !isPresented {
+                    store.selectedApp = nil
+                    store.updateInspectorSelection = nil
+                    store.selectedPackageID = nil
+                    store.selectedDeveloperPackageID = nil
+                    store.selectedLocalModelID = nil
+                }
+            }
+        )
+    }
+
+    @ViewBuilder private var inspectorContent: some View {
+        switch store.selection {
+        case .homebrewPackages:
+            PackageDetail(package: selectedHomebrewPackage)
+        case .developerPackages:
+            DeveloperPackageDetail(package: selectedDeveloperPackage)
+        case .localModels:
+            LocalModelDetail(model: selectedLocalModel)
+        default:
+            if let app = store.selectedApp {
                 AppDetailView(app: app)
-                    .frame(minWidth: 380, idealWidth: 460, maxWidth: 580)
-            }
-        } else if (store.selection == .updates || !store.searchText.isEmpty),
-                  let inspector = store.updateInspectorSelection {
-            HSplitView {
-                detail.frame(minWidth: 390)
+            } else if let inspector = store.updateInspectorSelection {
                 updateInspector(inspector)
-                    .frame(minWidth: 380, idealWidth: 460, maxWidth: 580)
             }
-        } else {
-            detail
         }
+    }
+
+    private var selectedHomebrewPackage: HomebrewPackage? {
+        guard let id = store.selectedPackageID else { return nil }
+        return store.homebrewPackages.first { $0.id == id }
+    }
+
+    private var selectedDeveloperPackage: DeveloperPackage? {
+        guard let id = store.selectedDeveloperPackageID else { return nil }
+        return store.developerPackages.first { $0.id == id }
+    }
+
+    private var selectedLocalModel: LocalLLMModel? {
+        guard let id = store.selectedLocalModelID else { return nil }
+        return store.localModels.first { $0.id == id }
+    }
+
+    private var clampedInspectorWidth: Double {
+        min(
+            max(sharedInspectorWidth, Double(UpkeepLayout.inspectorMinimumWidth)),
+            Double(UpkeepLayout.inspectorMaximumWidth)
+        )
+    }
+
+    private var inspectorWidthBinding: Binding<Double> {
+        Binding(
+            get: { clampedInspectorWidth },
+            set: { sharedInspectorWidth = min(
+                max($0, Double(UpkeepLayout.inspectorMinimumWidth)),
+                Double(UpkeepLayout.inspectorMaximumWidth)
+            ) }
+        )
     }
 
     @ViewBuilder private func updateInspector(_ selection: UpdateInspectorSelection) -> some View {
@@ -137,17 +209,7 @@ struct ContentView: View {
     }
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
-        ToolbarItemGroup(placement: .primaryAction) {
-            Button { store.selection = .updates } label: {
-                Label(
-                    statusTitle,
-                    systemImage: statusIcon
-                )
-            }
-            .labelStyle(.titleAndIcon)
-            .foregroundStyle(statusColor)
-            .help(statusHelp)
-            .accessibilityLabel(statusTitle)
+        ToolbarItem(placement: .primaryAction) {
             Button { Task { await store.scan() } } label: {
                 if store.isScanning { ProgressView().controlSize(.small) }
                 else { Image(systemName: "arrow.clockwise") }
@@ -155,34 +217,80 @@ struct ContentView: View {
             .accessibilityLabel("Check for Updates")
             .help("Check all sources for updates")
             .disabled(store.isScanning)
-
-            SettingsLink { Image(systemName: "gearshape") }
-                .accessibilityLabel("Settings")
-                .help("Open Upkeep settings")
+        }
+        if #available(macOS 26, *) {
+            ToolbarSpacer(.fixed, placement: .primaryAction)
         }
     }
 
-    private var statusTitle: String {
-        if store.totalUpdateCount > 0 { return "\(store.totalUpdateCount) Updates" }
-        return store.scanWarnings.isEmpty ? "Up to Date" : "Scan Warnings"
+    private var navigationTitle: String {
+        if !store.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Search"
+        }
+        return store.selection == .homebrewApps ? "Homebrew Apps" : store.selection.rawValue
     }
 
-    private var statusIcon: String {
-        if store.totalUpdateCount > 0 { return "arrow.down.circle.fill" }
-        return store.scanWarnings.isEmpty ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+    private var navigationSubtitle: String {
+        if !store.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Results across apps, packages, models, macOS, and history"
+        }
+        switch store.selection {
+        case .updates:
+            if store.isScanning { return "Looking for new versions…" }
+            return store.totalUpdateCount == 1 ? "1 available update" : "\(store.totalUpdateCount) available updates"
+        case .allApps:
+            return "\(store.apps.count) applications scanned"
+        case .adoptable:
+            return "\(store.adoptableApps.count) apps available for Homebrew adoption"
+        case .homebrewPackages:
+            return "\(store.homebrewPackages.count) installed · \(store.outdatedPackageCount) updates"
+        case .developerPackages:
+            return "\(store.developerPackages.count) installed · \(store.outdatedDeveloperPackageCount) updates"
+        case .localModels:
+            return "\(store.localModels.count) installed · \(store.outdatedLocalModelCount) updates"
+        case .macOSUpdates:
+            return "\(store.macOSUpdates.count) available releases"
+        case .history:
+            return "\(store.updateHistory.count) recorded updates"
+        default:
+            let count = store.count(for: store.selection)
+            return count == 1 ? "1 app" : "\(count) apps"
+        }
     }
+}
 
-    private var statusColor: Color {
-        if store.totalUpdateCount > 0 { return .accentColor }
-        return store.scanWarnings.isEmpty ? .green : .orange
-    }
+private struct InspectorResizeHandle: View {
+    @Binding var width: Double
+    @StateObject private var dragState = InspectorResizeState()
 
-    private var statusHelp: String {
-        if store.totalUpdateCount > 0 { return "Open \(store.totalUpdateCount) available updates" }
-        return store.scanWarnings.isEmpty
-            ? "All supported apps and packages are up to date"
-            : "Some update sources could not be checked"
+    var body: some View {
+        Color.clear
+            .frame(width: 10)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        let startingWidth = dragState.startWidth ?? width
+                        dragState.startWidth = startingWidth
+                        width = startingWidth - value.translation.width
+                    }
+                    .onEnded { _ in dragState.startWidth = nil }
+            )
+            .accessibilityElement()
+            .accessibilityLabel("Inspector width")
+            .accessibilityValue("\(Int(width.rounded())) points")
+            .accessibilityAdjustableAction { direction in
+                switch direction {
+                case .increment: width += 20
+                case .decrement: width -= 20
+                @unknown default: break
+                }
+            }
     }
+}
+
+private final class InspectorResizeState: ObservableObject {
+    var startWidth: Double?
 }
 
 extension View {
@@ -207,65 +315,39 @@ private struct Sidebar: View {
     @EnvironmentObject private var store: UpkeepStore
 
     var body: some View {
-        VStack(spacing: 0) {
-            globalSearchField
-            List(selection: $store.selection) {
-                Section("Updates") {
-                    item(.updates)
+        List(selection: $store.selection) {
+            Section("Updates") {
+                item(.updates)
+            }
+            Section("Installed") {
+                item(.allApps)
+                item(.adoptable)
+            }
+            Section("Sources") {
+                item(.appStore)
+                item(.testFlight)
+                item(.setapp)
+                item(.microsoftAutoUpdate)
+                item(.homebrewApps)
+                item(.sparkle)
+                item(.github)
+                item(.noSource)
+            }
+            Section("Packages") {
+                item(.homebrewPackages)
+                if !store.installedDeveloperManagers.isEmpty {
+                    item(.developerPackages)
                 }
-                Section("Installed") {
-                    item(.allApps)
-                    item(.adoptable)
-                }
-                Section("Sources") {
-                    item(.appStore)
-                    item(.testFlight)
-                    item(.setapp)
-                    item(.microsoftAutoUpdate)
-                    item(.homebrewApps)
-                    item(.sparkle)
-                    item(.github)
-                    item(.noSource)
-                }
-                Section("Packages") {
-                    item(.homebrewPackages)
-                    if !store.installedDeveloperManagers.isEmpty {
-                        item(.developerPackages)
-                    }
-                    if !store.localModels.isEmpty {
-                        item(.localModels)
-                    }
-                }
-                Section("System") {
-                    item(.macOSUpdates)
-                    item(.history)
+                if !store.localModels.isEmpty {
+                    item(.localModels)
                 }
             }
-            .listStyle(.sidebar)
-        }
-    }
-
-    private var globalSearchField: some View {
-        HStack(spacing: 7) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
-            TextField("Search everything", text: $store.searchText)
-                .textFieldStyle(.plain)
-            if !store.searchText.isEmpty {
-                Button { store.searchText = "" } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.tertiary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Clear search")
+            Section("System") {
+                item(.macOSUpdates)
+                item(.history)
             }
         }
-        .padding(.horizontal, 9)
-        .frame(height: 28)
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .padding(.horizontal, 10)
-        .padding(.top, 9)
-        .padding(.bottom, 5)
+        .listStyle(.sidebar)
     }
 
     private func item(_ destination: SidebarDestination) -> some View {
@@ -278,7 +360,8 @@ private struct Sidebar: View {
             }
         } icon: {
             Image(systemName: destination.systemImage)
-                .symbolRenderingMode(.hierarchical)
+                .symbolRenderingMode(.monochrome)
+                .foregroundStyle(.secondary)
                 .frame(width: 18)
         }
         .tag(destination)

@@ -5,42 +5,28 @@ struct HomebrewView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HeaderView(
-                title: "Homebrew",
-                subtitle: "\(store.homebrewPackages.count) installed packages · \(store.outdatedPackageCount) updates",
-                systemImage: "terminal.fill"
-            )
-            filterBar
             if HomebrewClient.brewURL == nil {
                 ContentUnavailableView("Homebrew not installed", systemImage: "terminal", description: Text("Install Homebrew to manage packages here."))
             } else {
-                HSplitView {
-                    packageList.frame(minWidth: 390, idealWidth: 500)
-                    PackageDetail(package: selectedPackage).frame(minWidth: 300)
-                }
+                packageList
             }
         }
+        .toolbar { packageToolbar }
     }
 
-    private var filterBar: some View {
-        HStack(spacing: 0) {
-            HStack(spacing: 4) {
-                homebrewSortMenu
-                homebrewFilterMenu
-                ListDensityButton()
-            }
-            .frame(width: 98, alignment: .leading)
-            Spacer()
-            if store.outdatedPackageCount > 0 {
+    @ToolbarContentBuilder private var packageToolbar: some ToolbarContent {
+        ToolbarItemGroup(placement: .secondaryAction) {
+            homebrewSortMenu
+            homebrewFilterMenu
+            ListDensityButton()
+        }
+        if store.outdatedPackageCount > 0 {
+            ToolbarItem(placement: .primaryAction) {
                 Button("Update All") { Task { await store.updateAllPackages() } }
-                    .buttonStyle(.borderless)
-                    .fontWeight(.medium)
+                    .buttonStyle(.borderedProminent)
                     .disabled(store.workingIDs.contains("homebrew-all"))
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 8)
-        .overlay(alignment: .bottom) { Divider() }
     }
 
     private var homebrewSortMenu: some View {
@@ -59,10 +45,7 @@ struct HomebrewView: View {
                 isActive: store.homebrewSortOrder != .recommended
             )
         }
-        .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
-        .frame(width: 30, height: 26)
-        .fixedSize()
         .help("Sort Homebrew packages")
         .accessibilityLabel("Sort Homebrew packages")
     }
@@ -84,10 +67,7 @@ struct HomebrewView: View {
                 isActive: store.homebrewFilter != .all
             )
         }
-        .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
-        .frame(width: 30, height: 26)
-        .fixedSize()
         .help("Filter Homebrew packages")
         .accessibilityLabel("Filter Homebrew packages")
     }
@@ -116,11 +96,6 @@ struct HomebrewView: View {
         .listStyle(.inset)
         .onAppear { ensurePackageSelection() }
         .onChange(of: store.filteredHomebrewPackages.map(\.id)) { _, _ in ensurePackageSelection() }
-    }
-
-    private var selectedPackage: HomebrewPackage? {
-        guard let id = store.selectedPackageID else { return nil }
-        return store.homebrewPackages.first { $0.id == id }
     }
 
     private var sortedPackages: [HomebrewPackage] {
@@ -164,6 +139,10 @@ private struct PackageRow: View {
                 prereleaseIsInstalled: package.prereleaseIsInstalled
             )
         } accessories: {
+            if store.isRefreshing(package) {
+                ProgressView().controlSize(.small)
+                    .accessibilityLabel("Refreshing \(package.displayName)")
+            }
             if store.isUnmapped(package) {
                 Image(systemName: "questionmark.diamond.fill")
                     .foregroundStyle(.orange)
@@ -173,19 +152,30 @@ private struct PackageRow: View {
             packageVersions
             if package.isOutdated && !store.isExcluded(package) {
                 Button("Update") { Task { await store.updatePackage(package) } }
-                    .buttonStyle(.bordered).controlSize(.small)
+                    .listRowPrimaryAction()
                     .disabled(store.workingIDs.contains(package.id))
-                    .frame(width: 120)
             } else {
-                Color.clear.frame(width: 120, height: 1).accessibilityHidden(true)
+                Color.clear.frame(width: 108, height: 1).accessibilityHidden(true)
             }
         }
         .contextMenu {
+            Button("Refresh") { Task { await store.refresh(package) } }
+                .disabled(store.workingIDs.contains("homebrew-refresh-\(package.id)"))
+            Divider()
             if let exclusion = store.exclusion(for: package) {
                 Button("Restore Updates") { store.restore(exclusion) }
             } else {
-                if package.isOutdated { Button("Skip Version \(package.currentVersion)") { store.skip(package) } }
-                Button("Ignore \(package.displayName)") { store.ignore(package) }
+                if package.isOutdated {
+                    Button("Update") { Task { await store.updatePackage(package) } }
+                    Divider()
+                }
+                UpdateExclusionOptions(
+                    skipTitle: "Skip Version \(package.currentVersion)",
+                    ignoreTitle: "Ignore \(package.displayName) Indefinitely",
+                    skip: { store.skip(package) }, ignore: { store.ignore(package) },
+                    skipFor: { store.skip(package, duration: $0) },
+                    ignoreFor: { store.ignore(package, duration: $0) }
+                )
             }
         }
     }
@@ -214,6 +204,7 @@ private struct PackageRow: View {
 
 struct PackageDetail: View {
     @EnvironmentObject private var store: UpkeepStore
+    @StateObject private var inspection = AppSecurityInspectionModel()
     let package: HomebrewPackage?
 
     var body: some View {
@@ -225,21 +216,12 @@ struct PackageDetail: View {
                         Text(package.isOutdated ? "\(package.installedVersion) → \(package.currentVersion)" : package.installedVersion)
                             .font(.title3.monospacedDigit()).foregroundStyle(package.isOutdated ? .blue : .secondary)
                         if let description = package.description { Text(description).foregroundStyle(.secondary) }
+                        ItemCheckStatus(
+                            isRefreshing: store.isRefreshing(package),
+                            lastChecked: store.lastChecked(for: package)
+                        )
                     }
-                    if package.isOutdated {
-                        HStack {
-                            if let exclusion = store.exclusion(for: package) {
-                                Label(exclusion.mode.rawValue, systemImage: exclusion.mode == .ignored ? "eye.slash" : "forward.end").foregroundStyle(.orange)
-                                Button("Restore Updates") { store.restore(exclusion) }
-                            } else {
-                                Button("Update") { Task { await store.updatePackage(package) } }.buttonStyle(.borderedProminent)
-                                Menu("More") {
-                                    Button("Skip Version \(package.currentVersion)") { store.skip(package) }
-                                    Button("Ignore \(package.displayName)") { store.ignore(package) }
-                                }
-                            }
-                        }
-                    }
+                    if package.isOutdated { updateCard(package) }
                     detailCard(package)
                     versionSupport(package)
                     if !package.dependencies.isEmpty {
@@ -250,17 +232,61 @@ struct PackageDetail: View {
                             }
                         }
                     }
+                    if store.homebrewPackageApp(for: package) != nil {
+                        AppPermissionsSection(report: inspection.report)
+                        AppSecuritySection(report: inspection.report)
+                    } else {
+                        PackageSecurityExplanation(manager: "Homebrew")
+                    }
                 }.padding(26).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .task(id: package.id) {
+                if let app = store.homebrewPackageApp(for: package) {
+                    await inspection.load(app)
+                }
             }
         } else {
             ContentUnavailableView("Select a package", systemImage: "shippingbox")
         }
     }
 
+    private func updateCard(_ package: HomebrewPackage) -> some View {
+        InspectorUpdateStatusCard(subtitle: "Available through Homebrew") {
+            if let exclusion = store.exclusion(for: package) {
+                Label(exclusion.mode.rawValue, systemImage: exclusion.mode == .ignored ? "eye.slash" : "forward.end")
+                    .foregroundStyle(.orange)
+                Button("Restore Updates") { store.restore(exclusion) }
+                    .buttonStyle(.borderedProminent)
+            } else {
+                Button("Update") { Task { await store.updatePackage(package) } }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(store.workingIDs.contains(package.id))
+            }
+        } options: {
+            Button("Refresh") { Task { await store.refresh(package) } }
+                .disabled(store.workingIDs.contains("homebrew-refresh-\(package.id)"))
+            Divider()
+            if let exclusion = store.exclusion(for: package) {
+                Button("Restore Updates") { store.restore(exclusion) }
+            } else {
+                UpdateExclusionOptions(
+                    skipTitle: "Skip Version \(package.currentVersion)",
+                    ignoreTitle: "Ignore \(package.displayName) Indefinitely",
+                    skip: { store.skip(package) }, ignore: { store.ignore(package) },
+                    skipFor: { store.skip(package, duration: $0) },
+                    ignoreFor: { store.ignore(package, duration: $0) }
+                )
+            }
+        }
+    }
+
     private func detailCard(_ package: HomebrewPackage) -> some View {
         Grid(alignment: .leading, horizontalSpacing: 35, verticalSpacing: 12) {
-            GridRow { label("Install Type"); Text(package.isDependency ? "Dependency" : package.kind.rawValue) }
-            GridRow { label("Version"); Text(package.currentVersion).monospacedDigit() }
+            GridRow { label("Token"); Text(package.token).textSelection(.enabled) }
+            GridRow { label("Install Type"); Text(package.isDependency ? "\(package.kind.rawValue) · Dependency" : package.kind.rawValue) }
+            GridRow { label("Installed"); Text(package.installedVersion).monospacedDigit() }
+            GridRow { label("Latest"); Text(package.currentVersion).monospacedDigit() }
+            GridRow { label("Update status"); Text(package.isOutdated ? "Update available" : "Current") }
             if let license = package.license { GridRow { label("License"); Text(license) } }
             if let homepage = package.homepage { GridRow { label("Homepage"); Link(homepage.host() ?? homepage.absoluteString, destination: homepage) } }
         }.padding(18).background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 14))

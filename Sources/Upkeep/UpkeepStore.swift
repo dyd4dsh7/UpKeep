@@ -16,7 +16,6 @@ enum HomebrewFilter: String, CaseIterable, Identifiable {
 enum AppListFilter: String, CaseIterable, Identifiable {
     case all = "All Apps"
     case updates = "Updates"
-    case warnings = "Warnings"
     case unmapped = "Unmapped"
     var id: Self { self }
 }
@@ -29,7 +28,6 @@ enum AppSortOrder: String, CaseIterable, Identifiable {
     case availableVersion = "Available Version"
     case installDate = "Install Date"
     case recentlyUpdated = "Recently Updated"
-    case warningSeverity = "Warning Severity"
     var id: Self { self }
 }
 
@@ -49,7 +47,6 @@ enum UpdateListFilter: String, CaseIterable, Identifiable {
     case macOS = "macOS"
     case developer = "Developer"
     case models = "AI Models"
-    case warnings = "Warnings"
     var id: Self { self }
 }
 
@@ -163,7 +160,6 @@ final class UpkeepStore: ObservableObject {
     @Published private(set) var nextScheduledCheck: Date?
     @Published var errorMessage: String?
     @Published var scanWarnings: [ScanWarning] = []
-    @Published var scanWarningsHidden = false
     @Published var workingIDs = Set<String>()
     @Published var pendingRevert: UpdateRecord?
     @Published var pendingRunningAppConfirmation: RunningAppConfirmation?
@@ -310,8 +306,14 @@ final class UpkeepStore: ObservableObject {
         developerPackages = mergedDeveloperPackages(from: report)
         installedDeveloperManagers = report.installedDeveloperManagers
         localModels = mergedLocalModels(from: report)
+        settings.recordChecks(
+            for: report.apps.map(exclusionKey(for:))
+                + report.homebrewPackages.map(exclusionKey(for:))
+                + report.developerPackages.map(exclusionKey(for:))
+                + report.localModels.map(exclusionKey(for:)),
+            at: report.checkedAt
+        )
         scanWarnings = report.warnings
-        scanWarningsHidden = false
         if developerManagerFilter != "all", !installedDeveloperManagers.contains(where: { $0.rawValue == developerManagerFilter }) {
             developerManagerFilter = "all"
         }
@@ -329,6 +331,133 @@ final class UpkeepStore: ObservableObject {
         refreshDiagnostics()
         notifyIfNeeded(previousCount: previousCount)
         if didStart { scheduleNextRefresh() }
+    }
+
+    func refresh(_ app: InstalledApp) async {
+        let operationID = "app-refresh-\(app.id)"
+        guard !workingIDs.contains(operationID) else { return }
+        workingIDs.insert(operationID)
+        defer { workingIDs.remove(operationID) }
+
+        let refreshedApp = await AppDiscovery.discover(at: app.url) ?? app
+        if let index = apps.firstIndex(where: { $0.id == app.id }) { apps[index] = refreshedApp }
+        if selectedApp?.id == app.id { selectedApp = refreshedApp }
+
+        let report = await UpdateScanner().scan(app: refreshedApp, settings: settings.scanSettings)
+        var candidates = updates.first(where: { $0.app.id == app.id })?.candidates ?? []
+        let enabledSources = enabledUpdateSources(for: refreshedApp)
+        candidates.removeAll { candidate in
+            candidate.source != .homebrew
+                && enabledSources.contains(candidate.source)
+                && !report.failedSources.contains(candidate.source)
+        }
+        candidates.append(contentsOf: report.updates.flatMap(\.candidates))
+
+        if let existingPackage = homebrewPackage(for: refreshedApp), settings.checkHomebrew {
+            do {
+                if let refreshedPackage = try await HomebrewClient().package(
+                    token: existingPackage.token,
+                    kind: existingPackage.kind,
+                    includePrereleases: settings.includePrereleaseUpdates
+                ) {
+                    replaceHomebrewPackage(refreshedPackage)
+                    candidates.removeAll { $0.source == .homebrew && !$0.requiresHomebrewAdoption }
+                    if refreshedPackage.isOutdated {
+                        candidates.append(UpdateCandidate(
+                            availableVersion: refreshedPackage.currentVersion,
+                            source: .homebrew,
+                            releaseNotes: nil,
+                            actionURL: nil,
+                            homebrewToken: refreshedPackage.token,
+                            sourcePrereleaseChannel: nil,
+                            requiresHomebrewAdoption: false
+                        ))
+                    }
+                }
+            } catch {
+                errorMessage = "Could not refresh \(existingPackage.displayName): \(error.localizedDescription)"
+            }
+        }
+
+        candidates = candidates.filter {
+            !$0.requiresHomebrewAdoption || !settings.isHomebrewAdoptionIgnored(key: exclusionKey(for: refreshedApp))
+        }
+        updates.removeAll { $0.app.id == app.id }
+        if !candidates.isEmpty { updates.append(AvailableUpdate(app: refreshedApp, candidates: candidates)) }
+        updates.sort { $0.app.name.localizedStandardCompare($1.app.name) == .orderedAscending }
+
+        let affectedSources = Set(enabledSources.map { source in
+            switch source {
+            case .appStore: ScanWarningSource.appStore.rawValue
+            case .sparkle: ScanWarningSource.sparkle.rawValue
+            case .github: ScanWarningSource.github.rawValue
+            case .homebrew: ScanWarningSource.homebrew.rawValue
+            }
+        })
+        scanWarnings.removeAll { warning in
+            affectedSources.contains(warning.source.rawValue) && warning.itemNames.contains(app.name)
+        }
+        scanWarnings.append(contentsOf: report.warnings)
+        lastChecked = Date()
+        settings.lastCompletedScanDate = lastChecked
+        settings.recordCheck(for: exclusionKey(for: refreshedApp), at: lastChecked ?? Date())
+        refreshDiagnostics()
+    }
+
+    func refresh(_ package: HomebrewPackage) async {
+        let operationID = "homebrew-refresh-\(package.id)"
+        guard !workingIDs.contains(operationID) else { return }
+        workingIDs.insert(operationID)
+        defer { workingIDs.remove(operationID) }
+        do {
+            guard let refreshed = try await HomebrewClient().package(
+                token: package.token,
+                kind: package.kind,
+                includePrereleases: settings.includePrereleaseUpdates
+            ) else {
+                errorMessage = "Homebrew no longer reports \(package.displayName) as installed."
+                return
+            }
+            replaceHomebrewPackage(refreshed)
+            if let app = homebrewPackageApp(for: refreshed) { await refresh(app) }
+            lastChecked = Date()
+            settings.lastCompletedScanDate = lastChecked
+            settings.recordCheck(for: exclusionKey(for: refreshed), at: lastChecked ?? Date())
+            refreshDiagnostics()
+        } catch {
+            errorMessage = "Could not refresh \(package.displayName): \(error.localizedDescription)"
+        }
+    }
+
+    func refresh(_ package: DeveloperPackage) async {
+        let operationID = "developer-refresh-\(package.id)"
+        guard !workingIDs.contains(operationID) else { return }
+        workingIDs.insert(operationID)
+        defer { workingIDs.remove(operationID) }
+        let versions = await DeveloperPackageClient().availableVersions(
+            for: package,
+            includePrereleases: settings.includePrereleaseUpdates
+        )
+        guard let latest = versions.first else {
+            errorMessage = "No published versions were returned for \(package.name)."
+            return
+        }
+        let refreshed = DeveloperPackage(
+            name: package.name,
+            currentVersion: package.currentVersion,
+            latestVersion: latest,
+            manager: package.manager,
+            executablePath: package.executablePath
+        )
+        if let index = developerPackages.firstIndex(where: { $0.id == package.id }) {
+            developerPackages[index] = refreshed
+        }
+        availableDeveloperVersions = versions
+        selectedDeveloperVersion = latest
+        lastChecked = Date()
+        settings.lastCompletedScanDate = lastChecked
+        settings.recordCheck(for: exclusionKey(for: refreshed), at: lastChecked ?? Date())
+        refreshDiagnostics()
     }
 
     func start() async {
@@ -378,7 +507,6 @@ final class UpkeepStore: ObservableObject {
         )
         let warnings = report.warnings.map { ScanWarning(source: .developerPackages, message: $0) }
         scanWarnings = (scanWarnings.filter { $0.source != .developerPackages } + warnings)
-        scanWarningsHidden = false
         if let manager {
             guard !report.failedManagers.contains(manager) else { return }
             developerPackages.removeAll { $0.manager == manager }
@@ -703,7 +831,6 @@ final class UpkeepStore: ObservableObject {
         localModels = merged.values.sorted(by: localModelOrder)
         scanWarnings = scanWarnings.filter { $0.source != .localModels }
             + report.warnings.map { ScanWarning(source: .localModels, message: $0) }
-        scanWarningsHidden = false
         if selectedLocalModelID == nil || !localModels.contains(where: { $0.id == selectedLocalModelID }) {
             selectedLocalModelID = localModels.first?.id
         }
@@ -968,6 +1095,20 @@ final class UpkeepStore: ObservableObject {
         objectWillChange.send()
     }
 
+    func isHomebrewAdoptionIgnored(_ app: InstalledApp) -> Bool {
+        settings.isHomebrewAdoptionIgnored(key: exclusionKey(for: app))
+    }
+
+    func ignoreHomebrewAdoption(_ app: InstalledApp) {
+        settings.setHomebrewAdoptionIgnored(true, key: exclusionKey(for: app))
+        removeIgnoredHomebrewAdoptionCandidates(for: app)
+    }
+
+    func restoreHomebrewAdoption(_ app: InstalledApp) {
+        settings.setHomebrewAdoptionIgnored(false, key: exclusionKey(for: app))
+        objectWillChange.send()
+    }
+
     func prepareMacOSUpdate(_ update: MacOSUpdate) async {
         do {
             try await UpdateHistoryStore.shared.addMacOSPlan(update: update)
@@ -1140,9 +1281,8 @@ final class UpkeepStore: ObservableObject {
     }
 
     private func matchingApp(for package: HomebrewPackage) -> InstalledApp? {
-        let packageName = normalize(package.displayName)
-        let token = normalize(package.token)
-        return apps.first { normalize($0.name) == packageName || normalize($0.name) == token }
+        let packageNames = productNameVariants(package.displayName).union(productNameVariants(package.token))
+        return apps.first { !productNameVariants($0.name).isDisjoint(with: packageNames) }
     }
 
     func isUnmapped(_ package: HomebrewPackage) -> Bool {
@@ -1150,12 +1290,41 @@ final class UpkeepStore: ObservableObject {
     }
 
     func homebrewPackage(for app: InstalledApp) -> HomebrewPackage? {
-        let name = normalize(app.name)
-        return homebrewPackages.first { $0.kind == .cask && (normalize($0.displayName) == name || normalize($0.token) == name) }
+        let appNames = productNameVariants(app.name)
+        return homebrewPackages.first {
+            $0.kind == .cask && !appNames.isDisjoint(
+                with: productNameVariants($0.displayName).union(productNameVariants($0.token))
+            )
+        }
     }
 
     func homebrewPackageApp(for package: HomebrewPackage) -> InstalledApp? {
         matchingApp(for: package)
+    }
+
+    func isRefreshing(_ app: InstalledApp) -> Bool {
+        workingIDs.contains("app-refresh-\(app.id)")
+    }
+
+    func isRefreshing(_ package: HomebrewPackage) -> Bool {
+        workingIDs.contains("homebrew-refresh-\(package.id)")
+            || homebrewPackageApp(for: package).map(isRefreshing) == true
+    }
+
+    func isRefreshing(_ package: DeveloperPackage) -> Bool {
+        workingIDs.contains("developer-refresh-\(package.id)")
+    }
+
+    func lastChecked(for app: InstalledApp) -> Date? {
+        settings.lastChecked(for: exclusionKey(for: app))
+    }
+
+    func lastChecked(for package: HomebrewPackage) -> Date? {
+        settings.lastChecked(for: exclusionKey(for: package))
+    }
+
+    func lastChecked(for package: DeveloperPackage) -> Date? {
+        settings.lastChecked(for: exclusionKey(for: package))
     }
 
     private func queueRunningAppConfirmation(for apps: [InstalledApp], action: RunningAppConfirmation.Action) -> Bool {
@@ -1206,6 +1375,34 @@ final class UpkeepStore: ObservableObject {
     }
 
     private func normalize(_ value: String) -> String { value.lowercased().filter(\.isLetter) }
+
+    private func productNameVariants(_ value: String) -> Set<String> {
+        let normalized = normalize(value)
+        var values: Set<String> = [normalized]
+        for suffix in ["desktop", "app"] where normalized.hasSuffix(suffix) && normalized.count > suffix.count {
+            values.insert(String(normalized.dropLast(suffix.count)))
+        }
+        return values
+    }
+
+    private func enabledUpdateSources(for app: InstalledApp) -> Set<UpdateSource> {
+        var sources = Set<UpdateSource>()
+        if settings.checkAppStore, app.updateManagement == .appStore { sources.insert(.appStore) }
+        if settings.checkSparkle, app.sparkleFeedURL != nil { sources.insert(.sparkle) }
+        if settings.checkGitHub, app.githubRepository != nil { sources.insert(.github) }
+        return sources
+    }
+
+    private func replaceHomebrewPackage(_ package: HomebrewPackage) {
+        if let index = homebrewPackages.firstIndex(where: { $0.id == package.id }) {
+            homebrewPackages[index] = package
+        } else {
+            homebrewPackages.append(package)
+        }
+        homebrewPackages.sort {
+            $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+        }
+    }
 
     private func diagnosticDuration(since date: Date) -> String {
         String(format: "%.0f ms", Date().timeIntervalSince(date) * 1_000)
@@ -1260,7 +1457,21 @@ final class UpkeepStore: ObservableObject {
             }
         }
 
-        return merged.values.sorted { $0.app.name.localizedStandardCompare($1.app.name) == .orderedAscending }
+        return merged.values.compactMap { update in
+            let candidates = update.candidates.filter {
+                !$0.requiresHomebrewAdoption || !settings.isHomebrewAdoptionIgnored(key: exclusionKey(for: update.app))
+            }
+            return candidates.isEmpty ? nil : AvailableUpdate(app: update.app, candidates: candidates)
+        }
+        .sorted { $0.app.name.localizedStandardCompare($1.app.name) == .orderedAscending }
+    }
+
+    private func removeIgnoredHomebrewAdoptionCandidates(for app: InstalledApp) {
+        updates = updates.compactMap { update in
+            guard update.app.id == app.id else { return update }
+            let candidates = update.candidates.filter { !$0.requiresHomebrewAdoption }
+            return candidates.isEmpty ? nil : AvailableUpdate(app: update.app, candidates: candidates)
+        }
     }
 
     static func retainableCandidates(
@@ -1320,7 +1531,7 @@ final class UpkeepStore: ObservableObject {
             return
         }
         if scanWarnings.contains(where: { $0.source == .homebrew }) {
-            errorMessage = "Homebrew completed the update for \(name), but Upkeep could not fully refresh Homebrew data. Check the scan warning and refresh again."
+            errorMessage = "Homebrew completed the update for \(name), but Upkeep could not fully refresh Homebrew data. Review Diagnostics and refresh again."
         }
     }
 }

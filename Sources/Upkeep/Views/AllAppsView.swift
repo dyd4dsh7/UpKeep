@@ -5,14 +5,10 @@ struct AllAppsView: View {
     @EnvironmentObject private var store: UpkeepStore
     let apps: [InstalledApp]
     let title: String
-    let subtitle: String
     let systemImage: String
 
     var body: some View {
         VStack(spacing: 0) {
-            HeaderView(title: title, subtitle: subtitle, systemImage: systemImage)
-            listControls
-
             if displayedApps.isEmpty {
                 emptyState
             } else {
@@ -29,49 +25,74 @@ struct AllAppsView: View {
                             prereleaseIsInstalled: update(for: app)?.prereleaseIsInstalled ?? (app.prereleaseChannel != nil)
                         )
                     } accessories: {
-                        if !issues(for: app).isEmpty {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.orange)
-                                .help(issues(for: app).joined(separator: "\n"))
-                                .accessibilityLabel("Warnings: " + issues(for: app).joined(separator: ", "))
+                        if store.isRefreshing(app) {
+                            ProgressView().controlSize(.small)
+                                .accessibilityLabel("Refreshing \(app.name)")
                         }
                         versions(for: app)
                     }
                     .tag(app.id)
                     .contentShape(Rectangle())
                     .contextMenu {
-                        Button("View Details") { store.selectedApp = app }
-                        Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([app.url]) }
+                        if let update = store.updates.first(where: { $0.app.id == app.id }) {
+                            Button(update.actionTitle) { Task { await store.performUpdate(update) } }
+                                .disabled(store.workingIDs.contains(update.id))
+                        }
+                        Button("Refresh") { Task { await store.refresh(app) } }
+                            .disabled(store.workingIDs.contains("app-refresh-\(app.id)"))
                         Divider()
                         if let exclusion = activeExclusion(for: app) {
                             Button("Restore Updates") { store.restore(exclusion) }
                         } else {
                             if let update = store.updates.first(where: { $0.app.id == app.id }) {
-                                Button("Skip Version \(update.availableVersion)") { store.skip(update) }
+                                UpdateExclusionOptions(
+                                    skipTitle: "Skip Version \(update.availableVersion)",
+                                    ignoreTitle: "Ignore \(app.name) Indefinitely",
+                                    skip: { store.skip(update) }, ignore: { store.ignore(app) },
+                                    skipFor: { store.skip(update, duration: $0) },
+                                    ignoreFor: { store.ignore(app, duration: $0) }
+                                )
+                            } else {
+                                Menu("Ignore") {
+                                    Button("Ignore \(app.name) Indefinitely") { store.ignore(app) }
+                                    Divider()
+                                    ForEach(UpdateExclusionDuration.allCases) { duration in
+                                        Button("For \(duration.title)") { store.ignore(app, duration: duration) }
+                                    }
+                                }
                             }
-                            Button("Ignore \(app.name)") { store.ignore(app) }
                         }
+                        if hasHomebrewAdoptionOption(for: app) {
+                            if store.isHomebrewAdoptionIgnored(app) {
+                                Button("Restore Homebrew Adoption") { store.restoreHomebrewAdoption(app) }
+                            } else {
+                                Button("Ignore Homebrew Adoption") { store.ignoreHomebrewAdoption(app) }
+                            }
+                        }
+                        Divider()
+                        Button("Open") { NSWorkspace.shared.open(app.url) }
+                        Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([app.url]) }
+                        Button("View Details") { store.selectedApp = app }
                     }
                     }
                 }
                 .listStyle(.inset)
             }
         }
+        .toolbar { listToolbar }
     }
 
-    private var listControls: some View {
-        HStack(spacing: 0) {
-            HStack(spacing: 4) {
-                appSortMenu
-                appFilterMenu
-                ListDensityButton()
-            }
-            .frame(width: 98, alignment: .leading)
-            Spacer()
+    private func hasHomebrewAdoptionOption(for app: InstalledApp) -> Bool {
+        store.adoptableApps.contains { $0.app.id == app.id } ||
+            store.updates.first(where: { $0.app.id == app.id })?.candidates.contains(where: \.requiresHomebrewAdoption) == true
+    }
+
+    @ToolbarContentBuilder private var listToolbar: some ToolbarContent {
+        ToolbarItemGroup(placement: .secondaryAction) {
+            appSortMenu
+            appFilterMenu
+            ListDensityButton()
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 8)
-        .overlay(alignment: .bottom) { Divider() }
     }
 
     private var appSortMenu: some View {
@@ -85,7 +106,6 @@ struct AllAppsView: View {
                 appSortButton("Update Source", order: .source)
                 appSortButton("Installed Version", order: .installedVersion)
                 appSortButton("Available Version", order: .availableVersion)
-                appSortButton("Warning Severity", order: .warningSeverity, ascending: false)
             }
         } label: {
             ListControlLabel(
@@ -93,10 +113,7 @@ struct AllAppsView: View {
                 isActive: store.appSortOrder != .recommended
             )
         }
-        .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
-        .frame(width: 30, height: 26)
-        .fixedSize()
         .help("Sort apps")
         .accessibilityLabel("Sort apps")
     }
@@ -118,10 +135,7 @@ struct AllAppsView: View {
                 isActive: store.appListFilter != .all
             )
         }
-        .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
-        .frame(width: 30, height: 26)
-        .fixedSize()
         .help("Filter apps")
         .accessibilityLabel("Filter apps")
     }
@@ -157,7 +171,6 @@ struct AllAppsView: View {
     }
 
     private var emptyTitle: String {
-        if store.appListFilter == .warnings { return "No App Warnings" }
         if store.appListFilter == .unmapped { return "Every App Is Mapped" }
         if store.appListFilter == .updates { return "No App Updates" }
         if !store.searchText.isEmpty { return "No Matching Apps" }
@@ -171,7 +184,6 @@ struct AllAppsView: View {
     }
 
     private var emptyDescription: String {
-        if store.appListFilter == .warnings { return "No app-specific source failures or version issues were found in this list." }
         if store.appListFilter == .unmapped { return "Every app in this list has a supported source or external update manager." }
         if store.appListFilter == .updates { return "No apps in this list currently have an available update." }
         if !store.searchText.isEmpty {
@@ -187,7 +199,6 @@ struct AllAppsView: View {
     }
 
     private var emptySystemImage: String {
-        if store.appListFilter == .warnings { return "exclamationmark.triangle" }
         if store.appListFilter == .unmapped { return "link.badge.plus" }
         return title == "No Source" ? "checkmark.seal" : systemImage
     }
@@ -216,11 +227,6 @@ struct AllAppsView: View {
                 comparison = compareDate(left.installedAt, right.installedAt, leftName: left.name, rightName: right.name)
             case .recentlyUpdated:
                 comparison = compareDate(left.modifiedAt, right.modifiedAt, leftName: left.name, rightName: right.name)
-            case .warningSeverity:
-                let leftCount = issues(for: left).count
-                let rightCount = issues(for: right).count
-                if leftCount != rightCount { comparison = leftCount < rightCount ? .orderedAscending : .orderedDescending }
-                else { comparison = left.name.localizedStandardCompare(right.name) }
             }
             return store.appSortAscending ? comparison == .orderedAscending : comparison == .orderedDescending
         }
@@ -248,24 +254,12 @@ struct AllAppsView: View {
         switch store.appListFilter {
         case .all: true
         case .updates: update(for: app) != nil
-        case .warnings: !issues(for: app).isEmpty
         case .unmapped: isUnmapped(app)
         }
     }
 
     private func isUnmapped(_ app: InstalledApp) -> Bool {
         store.sources(for: app).isEmpty && !app.updateManagement.isExternallyManaged
-    }
-
-    private func issues(for app: InstalledApp) -> [String] {
-        var messages = store.scanWarnings.compactMap { warning in
-            warning.itemNames.contains(app.name) ? "\(warning.source.rawValue): \(warning.message)" : nil
-        }
-        if isUnmapped(app) { messages.append("No supported update source") }
-        if app.installedVersion.localizedCaseInsensitiveCompare("unknown") == .orderedSame {
-            messages.append("Installed version could not be read")
-        }
-        return messages
     }
 
     private var selectedAppID: Binding<String?> {
@@ -317,6 +311,7 @@ struct AllAppsView: View {
 
 struct AppDetailView: View {
     @EnvironmentObject private var store: UpkeepStore
+    @StateObject private var inspection = AppSecurityInspectionModel()
     let app: InstalledApp
 
     private var update: AvailableUpdate? { store.updates.first { $0.app.id == app.id } }
@@ -343,6 +338,8 @@ struct AppDetailView: View {
                     releaseNotes
                     homebrewManagement
                     technicalDetails
+                    AppPermissionsSection(report: inspection.report)
+                    AppSecuritySection(report: inspection.report)
                 }
                 .padding(20)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -353,6 +350,9 @@ struct AppDetailView: View {
             get: { store.errorMessage != nil }, set: { if !$0 { store.errorMessage = nil } }
         )) { Button("OK", role: .cancel) {} } message: { Text(store.errorMessage ?? "Unknown error") }
         .upkeepRunningAppConfirmationAlert(store)
+        .task(id: app.id) {
+            await inspection.load(app)
+        }
     }
 
     private var header: some View {
@@ -391,6 +391,10 @@ struct AppDetailView: View {
                             .foregroundStyle(.orange)
                     }
                 }
+                ItemCheckStatus(
+                    isRefreshing: store.isRefreshing(app),
+                    lastChecked: store.lastChecked(for: app)
+                )
             }
             Spacer()
             Button { store.selectedApp = nil } label: {
@@ -405,7 +409,6 @@ struct AppDetailView: View {
             .keyboardShortcut(.cancelAction)
         }
         .padding(20)
-        .background(.bar)
     }
 
     @ViewBuilder
@@ -484,6 +487,7 @@ struct AppDetailView: View {
                     }
                 }
                 Spacer()
+                updateOptionsMenu
             }
             Divider()
             actionGrid
@@ -525,7 +529,7 @@ struct AppDetailView: View {
 
     @ViewBuilder
     private var homebrewManagement: some View {
-        if let adoptableItem, !adoptionHandledByUpdate {
+        if let adoptableItem, !adoptionHandledByUpdate, !homebrewAdoptionIgnored {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Homebrew").font(.title2.weight(.semibold))
                 HStack(spacing: 16) {
@@ -563,6 +567,13 @@ struct AppDetailView: View {
                 GridRow { detailLabel("Location"); Text(app.url.path).lineLimit(2).textSelection(.enabled) }
                 GridRow { detailLabel("Installed version"); Text(app.installedVersion).monospacedDigit() }
                 if let build = app.buildVersion { GridRow { detailLabel("Build"); Text(build).monospacedDigit() } }
+                if let size = inspection.report?.fileSize { GridRow { detailLabel("Size on disk"); Text(ByteCountFormatter.string(fromByteCount: size, countStyle: .file)) } }
+                if let minimum = inspection.report?.minimumSystemVersion { GridRow { detailLabel("Minimum macOS"); Text(minimum).monospacedDigit() } }
+                if let installedAt = app.installedAt { GridRow { detailLabel("Installed"); Text(installedAt.formatted(date: .abbreviated, time: .shortened)) } }
+                if let modifiedAt = app.modifiedAt { GridRow { detailLabel("Modified"); Text(modifiedAt.formatted(date: .abbreviated, time: .shortened)) } }
+                if let architectures = inspection.report?.architectures, !architectures.isEmpty {
+                    GridRow { detailLabel("Architectures"); Text(architectures.joined(separator: ", ")) }
+                }
                 GridRow {
                     detailLabel("Update sources")
                     Text(sourceNames)
@@ -628,20 +639,6 @@ struct AppDetailView: View {
                 }
                 .buttonStyle(.bordered)
             }
-            if let update, exclusion == nil {
-                Button { store.skip(update) } label: {
-                    Label("Skip \(update.availableVersion)", systemImage: "forward.end")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-            }
-            if exclusion == nil {
-                Button { store.ignore(app) } label: {
-                    Label("Ignore Updates", systemImage: "eye.slash")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-            }
         }
         .controlSize(.large)
         .buttonBorderShape(.capsule)
@@ -650,6 +647,54 @@ struct AppDetailView: View {
     private var primaryActionTitle: String {
         update?.actionTitle ?? "Update"
     }
+
+    @ViewBuilder
+    private var updateOptionsMenu: some View {
+        Menu { updateOptionCommands } label: { Text("Options") }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Refresh, update, exclusion, and app options")
+            .accessibilityLabel("App options")
+    }
+
+    @ViewBuilder
+    private var updateOptionCommands: some View {
+        if let update {
+            Button(update.actionTitle) { Task { await store.performUpdate(update) } }
+                .disabled(store.workingIDs.contains(update.id))
+        }
+        Button("Refresh") { Task { await store.refresh(app) } }
+            .disabled(store.workingIDs.contains("app-refresh-\(app.id)"))
+        Divider()
+        if let exclusion {
+            Button("Restore Updates") { store.restore(exclusion) }
+        } else if let update {
+                UpdateExclusionOptions(
+                    skipTitle: "Skip Version \(update.availableVersion)",
+                    ignoreTitle: "Ignore Updates Indefinitely",
+                    skip: { store.skip(update) },
+                    ignore: { store.ignore(app) },
+                    skipFor: { store.skip(update, duration: $0) },
+                    ignoreFor: { store.ignore(app, duration: $0) }
+                )
+        }
+        if hasHomebrewAdoptionOption {
+            if homebrewAdoptionIgnored {
+                Button("Restore Homebrew Adoption") { store.restoreHomebrewAdoption(app) }
+            } else {
+                Button("Ignore Homebrew Adoption") { store.ignoreHomebrewAdoption(app) }
+            }
+        }
+        Divider()
+        Button("Open") { NSWorkspace.shared.open(app.url) }
+        Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([app.url]) }
+    }
+
+    private var hasHomebrewAdoptionOption: Bool {
+        adoptableItem != nil || update?.candidates.contains(where: \.requiresHomebrewAdoption) == true
+    }
+
+    private var homebrewAdoptionIgnored: Bool { store.isHomebrewAdoptionIgnored(app) }
 
     private func candidateActionTitle(_ candidate: UpdateCandidate) -> String {
         candidate.actionTitle
@@ -730,34 +775,6 @@ struct AppDetailView: View {
         return names.isEmpty ? (app.updateManagement.isExternallyManaged ? app.updateManagement.rawValue : "No source") : names
     }
     private func detailLabel(_ text: String) -> some View { Text(text).foregroundStyle(.secondary) }
-}
-
-struct HeaderView: View {
-    let title: String
-    let subtitle: String
-    let systemImage: String
-
-    var body: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(Color.accentColor.opacity(0.13))
-                Image(systemName: systemImage)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(.tint)
-                    .symbolRenderingMode(.hierarchical)
-            }
-            .frame(width: 38, height: 38)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.title2.weight(.semibold))
-                Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 18)
-        .padding(.bottom, 12)
-    }
 }
 
 struct AppIcon: View {

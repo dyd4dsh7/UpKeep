@@ -45,6 +45,26 @@ struct HomebrewClient: Sendable {
         }.value
     }
 
+    /// Reads metadata for one installed token instead of loading the full Homebrew inventory.
+    func package(
+        token: String,
+        kind: HomebrewPackageKind,
+        includePrereleases: Bool = false
+    ) async throws -> HomebrewPackage? {
+        guard let brew = Self.brewURL else { return nil }
+        return try await Task.detached(priority: .utility) {
+            var arguments = ["info", "--json=v2"]
+            if kind == .cask { arguments.append("--cask") }
+            arguments.append(token)
+            let data = try await runWithRetry(brew, arguments)
+            let response: InfoResponse
+            do { response = try JSONDecoder().decode(InfoResponse.self, from: data) }
+            catch { throw BrewError.failed("Homebrew package data could not be read: \(error.localizedDescription)") }
+            return packages(from: response, includePrereleases: includePrereleases)
+                .first { $0.kind == kind && $0.token == token }
+        }.value
+    }
+
     func adoptableApps(from apps: [InstalledApp], excluding packages: [HomebrewPackage]) async throws -> [AdoptableApp] {
         guard Self.brewURL != nil, let catalogURL = URL(string: "https://formulae.brew.sh/api/cask.json") else { return [] }
         do {
@@ -215,3 +235,40 @@ private struct FlexibleString: Decodable {
 }
 private struct CatalogCask: Decodable { let token: String; let name: [String]; let version: String }
 private func normalize(_ value: String) -> String { value.lowercased().filter(\.isLetter) }
+
+private func packages(from response: InfoResponse, includePrereleases: Bool) -> [HomebrewPackage] {
+    let formulae = response.formulae.compactMap { formula -> HomebrewPackage? in
+        guard let installed = formula.installed.last else { return nil }
+        let current = formula.versions.stable ?? installed.version
+        return HomebrewPackage(
+            token: formula.name,
+            displayName: formula.name,
+            description: formula.desc,
+            homepage: formula.homepage.flatMap(URL.init(string:)),
+            license: formula.license,
+            installedVersion: installed.version,
+            currentVersion: current,
+            kind: .formula,
+            isOutdated: formula.outdated && (includePrereleases || !VersionComparator.isPrerelease(current)),
+            isDependency: !installed.installedOnRequest,
+            dependencies: formula.dependencies
+        )
+    }
+    let casks = response.casks.compactMap { cask -> HomebrewPackage? in
+        guard let installed = cask.installedVersion else { return nil }
+        return HomebrewPackage(
+            token: cask.token,
+            displayName: cask.name.first ?? cask.token,
+            description: cask.desc,
+            homepage: cask.homepage.flatMap(URL.init(string:)),
+            license: nil,
+            installedVersion: installed,
+            currentVersion: cask.version,
+            kind: .cask,
+            isOutdated: cask.outdated && (includePrereleases || !VersionComparator.isPrerelease(cask.version)),
+            isDependency: false,
+            dependencies: []
+        )
+    }
+    return formulae + casks
+}

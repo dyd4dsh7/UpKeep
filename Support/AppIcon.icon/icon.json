@@ -1,0 +1,76 @@
+{
+  "fill-specializations": [
+    {
+      "value": {
+        "solid": "srgb:0.98039,0.97647,0.96863,1.00000"
+      }
+    },
+    {
+      "appearance": "dark",
+      "value": {
+        "solid": "srgb:0.09020,0.09804,0.11373,1.00000"
+      }
+    }
+  ],
+  "groups": [
+    {
+      "layers": [
+        {
+          "fill-specializations": [
+            {
+              "appearance": "tinted",
+              "value": {
+                "solid": "srgb:1.00000,1.00000,1.00000,1.00000"
+              }
+            }
+          ],
+          "glass": true,
+          "image-name": "01-loop-arrow.svg",
+          "name": "Loop Arrow"
+        }
+      ],
+      "lighting": "individual",
+      "name": "Loop Arrow",
+      "shadow": {
+        "kind": "layer-color",
+        "opacity": 0.3
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.18
+      }
+    },
+    {
+      "layers": [
+        {
+          "fill-specializations": [
+            {
+              "appearance": "tinted",
+              "value": {
+                "solid": "srgb:0.76078,0.83529,1.00000,1.00000"
+              }
+            }
+          ],
+          "glass": true,
+          "image-name": "02-down-arrow.svg",
+          "name": "Down Arrow"
+        }
+      ],
+      "lighting": "individual",
+      "name": "Down Arrow",
+      "shadow": {
+        "kind": "layer-color",
+        "opacity": 0.24
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.12
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": [
+      "macOS"
+    ]
+  }
+}
