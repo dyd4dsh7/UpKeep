@@ -2,6 +2,7 @@ import SwiftUI
 
 struct HomebrewView: View {
     @EnvironmentObject private var store: UpkeepStore
+    @EnvironmentObject private var settings: AppSettings
 
     var body: some View {
         VStack(spacing: 0) {
@@ -15,17 +16,11 @@ struct HomebrewView: View {
     }
 
     @ToolbarContentBuilder private var packageToolbar: some ToolbarContent {
-        ToolbarItemGroup(placement: .secondaryAction) {
+        ToolbarItemGroup(placement: .primaryAction) {
             homebrewSortMenu
             homebrewFilterMenu
             ListDensityButton()
-        }
-        if store.outdatedPackageCount > 0 {
-            ToolbarItem(placement: .primaryAction) {
-                Button("Update All") { Task { await store.updateAllPackages() } }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(store.workingIDs.contains("homebrew-all"))
-            }
+            ScanToolbarButton()
         }
     }
 
@@ -46,14 +41,13 @@ struct HomebrewView: View {
             )
         }
         .menuIndicator(.hidden)
-        .help("Sort Homebrew packages")
-        .accessibilityLabel("Sort Homebrew packages")
+        .toolbarControlLabel("Sort Homebrew packages")
     }
 
     private var homebrewFilterMenu: some View {
         Menu {
             Section("Filter") {
-                ForEach(HomebrewFilter.allCases) { filter in
+                ForEach(visibleHomebrewFilters) { filter in
                     Button {
                         store.homebrewFilter = filter
                     } label: {
@@ -68,8 +62,7 @@ struct HomebrewView: View {
             )
         }
         .menuIndicator(.hidden)
-        .help("Filter Homebrew packages")
-        .accessibilityLabel("Filter Homebrew packages")
+        .toolbarControlLabel("Filter Homebrew packages")
     }
 
     private func homebrewSortButton(
@@ -94,12 +87,16 @@ struct HomebrewView: View {
             PackageRow(package: package).tag(package.id)
         }
         .listStyle(.inset)
-        .onAppear { ensurePackageSelection() }
-        .onChange(of: store.filteredHomebrewPackages.map(\.id)) { _, _ in ensurePackageSelection() }
+        .onAppear { normalizeBasicFilter(); ensurePackageSelection() }
+        .onChange(of: visiblePackages.map(\.id)) { _, _ in ensurePackageSelection() }
+        .onChange(of: settings.sidebarViewMode) { _, _ in
+            normalizeBasicFilter()
+            ensurePackageSelection()
+        }
     }
 
     private var sortedPackages: [HomebrewPackage] {
-        store.filteredHomebrewPackages.sorted { left, right in
+        visiblePackages.sorted { left, right in
             let comparison: ComparisonResult
             switch store.homebrewSortOrder {
             case .recommended:
@@ -118,9 +115,27 @@ struct HomebrewView: View {
         }
     }
 
+    private var visiblePackages: [HomebrewPackage] {
+        store.filteredHomebrewPackages.filter {
+            settings.sidebarViewMode == .advanced || !$0.isDependency
+        }
+    }
+
+    private var visibleHomebrewFilters: [HomebrewFilter] {
+        HomebrewFilter.allCases.filter {
+            settings.sidebarViewMode == .advanced || !$0.requiresAdvancedView
+        }
+    }
+
+    private func normalizeBasicFilter() {
+        if settings.sidebarViewMode == .basic, store.homebrewFilter.requiresAdvancedView {
+            store.homebrewFilter = .all
+        }
+    }
+
     private func ensurePackageSelection() {
-        guard !store.filteredHomebrewPackages.contains(where: { $0.id == store.selectedPackageID }) else { return }
-        store.selectedPackageID = store.filteredHomebrewPackages.first?.id
+        guard !visiblePackages.contains(where: { $0.id == store.selectedPackageID }) else { return }
+        store.selectedPackageID = visiblePackages.first?.id
     }
 }
 
@@ -204,6 +219,7 @@ private struct PackageRow: View {
 
 struct PackageDetail: View {
     @EnvironmentObject private var store: UpkeepStore
+    @EnvironmentObject private var settings: AppSettings
     @StateObject private var inspection = AppSecurityInspectionModel()
     let package: HomebrewPackage?
 
@@ -223,8 +239,10 @@ struct PackageDetail: View {
                     }
                     if package.isOutdated { updateCard(package) }
                     detailCard(package)
-                    versionSupport(package)
-                    if !package.dependencies.isEmpty {
+                    if settings.sidebarViewMode == .advanced {
+                        versionSupport(package)
+                    }
+                    if settings.sidebarViewMode == .advanced, !package.dependencies.isEmpty {
                         VStack(alignment: .leading, spacing: 10) {
                             Text("Dependencies").font(.title2.bold())
                             FlowLayout(spacing: 7) {

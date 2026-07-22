@@ -3,24 +3,43 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject private var store: UpkeepStore
     @EnvironmentObject private var settings: AppSettings
-    @AppStorage("sharedInspectorWidth") private var sharedInspectorWidth = Double(UpkeepLayout.inspectorIdealWidth)
 
     var body: some View {
         NavigationSplitView {
-            Sidebar()
+            UpkeepSidebarView()
                 .navigationSplitViewColumnWidth(min: 215, ideal: 235, max: 300)
         } detail: {
-            inspectorLayout
-                .toolbar { toolbar }
+            detail
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .inspector(isPresented: inspectorPresented) {
+                    inspectorContent
+                        .inspectorColumnWidth(
+                            min: UpkeepLayout.inspectorMinimumWidth,
+                            ideal: UpkeepLayout.inspectorIdealWidth,
+                            max: UpkeepLayout.inspectorMaximumWidth
+                        )
+                }
         }
         .navigationTitle(navigationTitle)
         .navigationSubtitle(navigationSubtitle)
         .searchable(text: $store.searchText, placement: .toolbar, prompt: "Search Upkeep")
+        .sheet(isPresented: Binding(
+            get: { !settings.hasCompletedSetup },
+            set: { _ in }
+        )) {
+            SetupView()
+                .environmentObject(settings)
+                .interactiveDismissDisabled()
+        }
         .task {
             MenuBarController.shared.configure(store: store, settings: settings)
-            await store.start()
+            if settings.hasCompletedSetup { await store.start() }
             refreshDockBadge()
             refreshMenuBar()
+        }
+        .onChange(of: settings.hasCompletedSetup) { _, completed in
+            guard completed else { return }
+            Task { await store.start() }
         }
         .onChange(of: store.totalUpdateCount, initial: true) { _, _ in
             refreshDockBadge()
@@ -34,6 +53,11 @@ struct ContentView: View {
         }
         .onChange(of: settings.showDockBadge) { _, _ in
             refreshDockBadge()
+        }
+        .onChange(of: settings.sidebarViewMode) { _, mode in
+            if mode == .basic, !basicSidebarDestinations.contains(store.selection) {
+                store.selection = .allApps
+            }
         }
         .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
             AppBrand.refreshDockPresentationIfNeeded(
@@ -74,28 +98,15 @@ struct ContentView: View {
         )
     }
 
+    private var basicSidebarDestinations: Set<SidebarDestination> {
+        [.updates, .allApps, .homebrewPackages, .macOSUpdates, .history]
+    }
+
     @ViewBuilder private var detail: some View {
         if !store.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             GlobalSearchView()
         } else {
             destinationDetail
-        }
-    }
-
-    private var inspectorLayout: some View {
-        HStack(spacing: 0) {
-            detail
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            if inspectorPresented.wrappedValue {
-                Divider()
-                inspectorContent
-                    .frame(width: CGFloat(clampedInspectorWidth))
-                    .frame(maxHeight: .infinity)
-                    .overlay(alignment: .leading) {
-                        InspectorResizeHandle(width: inspectorWidthBinding)
-                    }
-            }
         }
     }
 
@@ -180,23 +191,6 @@ struct ContentView: View {
         return store.localModels.first { $0.id == id }
     }
 
-    private var clampedInspectorWidth: Double {
-        min(
-            max(sharedInspectorWidth, Double(UpkeepLayout.inspectorMinimumWidth)),
-            Double(UpkeepLayout.inspectorMaximumWidth)
-        )
-    }
-
-    private var inspectorWidthBinding: Binding<Double> {
-        Binding(
-            get: { clampedInspectorWidth },
-            set: { sharedInspectorWidth = min(
-                max($0, Double(UpkeepLayout.inspectorMinimumWidth)),
-                Double(UpkeepLayout.inspectorMaximumWidth)
-            ) }
-        )
-    }
-
     @ViewBuilder private func updateInspector(_ selection: UpdateInspectorSelection) -> some View {
         switch selection {
         case let .homebrew(id):
@@ -205,21 +199,6 @@ struct ContentView: View {
             DeveloperPackageDetail(package: store.developerPackages.first { $0.id == id })
         case let .model(id):
             LocalModelDetail(model: store.localModels.first { $0.id == id })
-        }
-    }
-
-    @ToolbarContentBuilder private var toolbar: some ToolbarContent {
-        ToolbarItem(placement: .primaryAction) {
-            Button { Task { await store.scan() } } label: {
-                if store.isScanning { ProgressView().controlSize(.small) }
-                else { Image(systemName: "arrow.clockwise") }
-            }
-            .accessibilityLabel("Check for Updates")
-            .help("Check all sources for updates")
-            .disabled(store.isScanning)
-        }
-        if #available(macOS 26, *) {
-            ToolbarSpacer(.fixed, placement: .primaryAction)
         }
     }
 
@@ -259,40 +238,6 @@ struct ContentView: View {
     }
 }
 
-private struct InspectorResizeHandle: View {
-    @Binding var width: Double
-    @StateObject private var dragState = InspectorResizeState()
-
-    var body: some View {
-        Color.clear
-            .frame(width: 10)
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        let startingWidth = dragState.startWidth ?? width
-                        dragState.startWidth = startingWidth
-                        width = startingWidth - value.translation.width
-                    }
-                    .onEnded { _ in dragState.startWidth = nil }
-            )
-            .accessibilityElement()
-            .accessibilityLabel("Inspector width")
-            .accessibilityValue("\(Int(width.rounded())) points")
-            .accessibilityAdjustableAction { direction in
-                switch direction {
-                case .increment: width += 20
-                case .decrement: width -= 20
-                @unknown default: break
-                }
-            }
-    }
-}
-
-private final class InspectorResizeState: ObservableObject {
-    var startWidth: Double?
-}
-
 extension View {
     func upkeepRunningAppConfirmationAlert(_ store: UpkeepStore) -> some View {
         alert(item: Binding(
@@ -309,66 +254,4 @@ extension View {
             )
         }
     }
-}
-
-private struct Sidebar: View {
-    @EnvironmentObject private var store: UpkeepStore
-
-    var body: some View {
-        List(selection: $store.selection) {
-            Section("Updates") {
-                item(.updates)
-            }
-            Section("Installed") {
-                item(.allApps)
-                item(.adoptable)
-            }
-            Section("Sources") {
-                item(.appStore)
-                item(.testFlight)
-                item(.setapp)
-                item(.microsoftAutoUpdate)
-                item(.homebrewApps)
-                item(.sparkle)
-                item(.github)
-                item(.noSource)
-            }
-            Section("Packages") {
-                item(.homebrewPackages)
-                if !store.installedDeveloperManagers.isEmpty {
-                    item(.developerPackages)
-                }
-                if !store.localModels.isEmpty {
-                    item(.localModels)
-                }
-            }
-            Section("System") {
-                item(.macOSUpdates)
-                item(.history)
-            }
-        }
-        .listStyle(.sidebar)
-    }
-
-    private func item(_ destination: SidebarDestination) -> some View {
-        sidebarLabel(destination)
-            .tag(destination)
-    }
-
-    private func sidebarLabel(_ destination: SidebarDestination) -> some View {
-        Label {
-            HStack {
-                Text(destination == .homebrewApps ? "Homebrew" : destination.rawValue)
-                Spacer()
-                let count = store.count(for: destination)
-                if count > 0 { Text("\(count)").font(.caption).foregroundStyle(.secondary).monospacedDigit() }
-            }
-        } icon: {
-            Image(systemName: destination.systemImage)
-                .symbolRenderingMode(.monochrome)
-                .foregroundStyle(.secondary)
-                .frame(width: 18)
-        }
-    }
-
 }

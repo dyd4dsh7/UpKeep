@@ -7,7 +7,7 @@ struct SettingsView: View {
 
     var body: some View {
         TabView(selection: $settings.selectedSection) {
-            ForEach(SettingsSection.allCases) { section in
+            ForEach(visibleSettingsSections) { section in
                 settingsContent(for: section)
                     .tabItem {
                         Label(section.rawValue, systemImage: icon(for: section))
@@ -16,6 +16,11 @@ struct SettingsView: View {
             }
         }
         .frame(width: 860, height: 620)
+        .onChange(of: settings.sidebarViewMode) { _, mode in
+            if mode == .basic, settings.selectedSection.requiresAdvancedView {
+                settings.selectedSection = .general
+            }
+        }
         .alert("Include prerelease updates?", isPresented: $settings.confirmingPrereleaseUpdates) {
             Button("Cancel", role: .cancel) {}
             Button("Include Prereleases", role: .destructive) {
@@ -42,55 +47,116 @@ struct SettingsView: View {
     private var general: some View {
         Form {
             Section {
-                Toggle("Check for updates when Upkeep opens", isOn: $settings.checkOnLaunch)
-                Picker("Background check", selection: $settings.refreshInterval) {
-                    ForEach(RefreshInterval.allCases) { Text($0.title).tag($0) }
-                }
-                .onChange(of: settings.refreshInterval) { _, _ in store.scheduleNextRefresh() }
-                if settings.refreshInterval == .daily {
-                    DatePicker(
-                        "Check at",
-                        selection: dailyRefreshTime,
-                        displayedComponents: .hourAndMinute
-                    )
-                    .onChange(of: settings.dailyRefreshTimeMinutes) { _, _ in store.scheduleNextRefresh() }
-                }
-                if let nextCheck = store.nextScheduledCheck, settings.refreshInterval != .never {
-                    LabeledContent("Next check") {
-                        Text(nextCheck, format: .dateTime.weekday(.abbreviated).hour().minute())
-                            .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 14) {
+                    appearanceHeading("Navigation")
+                    HStack(spacing: 10) {
+                        ForEach(SidebarViewMode.allCases) { mode in
+                            AppearanceOptionButton(
+                                title: mode.title,
+                                detail: mode.detail,
+                                systemImage: mode.systemImage,
+                                isSelected: settings.sidebarViewMode == mode
+                            ) {
+                                settings.sidebarViewMode = mode
+                            }
+                        }
+                    }
+
+                    Divider()
+
+                    appearanceHeading("List Density")
+                    HStack(spacing: 10) {
+                        ForEach(ListDensity.allCases) { density in
+                            AppearanceOptionButton(
+                                title: density.title,
+                                detail: density.detail,
+                                systemImage: density.systemImage,
+                                isSelected: settings.listDensity == density
+                            ) {
+                                settings.listDensity = density
+                            }
+                        }
                     }
                 }
-                Toggle("Notify me when the available count changes", isOn: $settings.notificationsEnabled)
+                .padding(.vertical, 4)
+            } header: {
+                Text("Appearance")
+            }
+            Section {
+                SettingsOptionRow(
+                    title: "Check when Upkeep opens",
+                    systemImage: "arrow.clockwise.circle"
+                ) {
+                    Toggle("Check when Upkeep opens", isOn: $settings.checkOnLaunch)
+                        .labelsHidden()
+                }
+
+                SettingsOptionRow(
+                    title: "Background checks",
+                    detail: backgroundCheckDetail,
+                    systemImage: "clock.arrow.circlepath"
+                ) {
+                    Picker("Background checks", selection: $settings.refreshInterval) {
+                        ForEach(RefreshInterval.allCases) { Text($0.title).tag($0) }
+                    }
+                    .labelsHidden()
+                    .frame(width: 150)
+                    .onChange(of: settings.refreshInterval) { _, _ in store.scheduleNextRefresh() }
+                }
+
+                if settings.refreshInterval == .daily {
+                    SettingsOptionRow(
+                        title: "Daily check time",
+                        systemImage: "calendar.badge.clock"
+                    ) {
+                        DatePicker(
+                            "Daily check time",
+                            selection: dailyRefreshTime,
+                            displayedComponents: .hourAndMinute
+                        )
+                        .labelsHidden()
+                        .onChange(of: settings.dailyRefreshTimeMinutes) { _, _ in store.scheduleNextRefresh() }
+                    }
+                }
+
+                SettingsOptionRow(
+                    title: "Notify when update count changes",
+                    systemImage: "bell.badge"
+                ) {
+                    Toggle("Update notifications", isOn: $settings.notificationsEnabled)
+                        .labelsHidden()
+                }
                     .onChange(of: settings.notificationsEnabled) { _, enabled in
                         if enabled { Task { _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) } }
                     }
             } header: {
                 Text("Automatic Checking")
-            } footer: {
-                Text("Upkeep schedules checks while it is running and reports when the available update count changes.")
             }
             Section {
-                Toggle("Show Upkeep in the menu bar", isOn: $settings.showMenuBarItem)
-                Toggle("Show the available update count", isOn: $settings.showMenuBarCount)
+                SettingsOptionRow(
+                    title: "Show Upkeep in the menu bar",
+                    systemImage: "menubar.rectangle"
+                ) {
+                    Toggle("Menu bar item", isOn: $settings.showMenuBarItem)
+                        .labelsHidden()
+                }
+                SettingsOptionRow(
+                    title: "Show update count in menu bar",
+                    systemImage: "number.circle"
+                ) {
+                    Toggle("Menu bar count", isOn: $settings.showMenuBarCount)
+                        .labelsHidden()
+                }
                     .disabled(!settings.showMenuBarItem)
-                Toggle("Show the available update count on the Dock icon", isOn: $settings.showDockBadge)
+                SettingsOptionRow(
+                    title: "Show update count on Dock icon",
+                    systemImage: "dock.rectangle"
+                ) {
+                    Toggle("Dock badge", isOn: $settings.showDockBadge)
+                        .labelsHidden()
+                }
             } header: {
                 Text("Menu Bar and Dock")
-            } footer: {
-                Text("The menu-bar item provides quick access to scans, Settings, and the main window.")
-            }
-            Section {
-                Picker("List density", selection: $settings.listDensity) {
-                    ForEach(ListDensity.allCases) { density in
-                        Label(density.title, systemImage: density.systemImage).tag(density)
-                    }
-                }
-                .pickerStyle(.segmented)
-            } header: {
-                Text("Appearance")
-            } footer: {
-                Text("Compact rows fit more apps and packages on screen without hiding status information.")
             }
         }
         .formStyle(.grouped)
@@ -99,40 +165,69 @@ struct SettingsView: View {
     private var sources: some View {
         Form {
             Section {
-                sourceToggle("Mac App Store", "bag", $settings.checkAppStore)
-                sourceToggle("Sparkle feeds", "sparkles", $settings.checkSparkle)
-                sourceToggle("Homebrew apps and packages", "shippingbox", $settings.checkHomebrew)
-                sourceToggle("GitHub Releases", "chevron.left.forwardslash.chevron.right", $settings.checkGitHub)
-                sourceToggle("Local LLM models", "brain.head.profile", $settings.checkLocalModels)
+                sourceToggle(
+                    "Mac App Store", "Installed app updates from Apple.",
+                    "bag", $settings.checkAppStore
+                )
+                sourceToggle(
+                    "Sparkle", "In-app update feeds published by developers.",
+                    "sparkles", $settings.checkSparkle
+                )
+                sourceToggle(
+                    "Homebrew", "Installed apps and requested packages.",
+                    "shippingbox", $settings.checkHomebrew
+                )
+                sourceToggle(
+                    "GitHub Releases", "Releases for apps linked to GitHub.",
+                    "chevron.left.forwardslash.chevron.right", $settings.checkGitHub
+                )
+                if settings.sidebarViewMode == .advanced {
+                    sourceToggle(
+                        "Local AI models", "Installed model revisions from upstream registries.",
+                        "brain.head.profile", $settings.checkLocalModels
+                    )
+                }
             } header: {
                 Text("Application Sources")
-            } footer: {
-                Text("Model files are checked directly against upstream registries, so Ollama and LM Studio can remain closed.")
             }
-            Section {
-                Toggle("Include prerelease updates for all apps and packages", isOn: Binding(
-                    get: { settings.includePrereleaseUpdates },
-                    set: { enabled in
-                        if enabled { settings.confirmingPrereleaseUpdates = true }
-                        else {
-                            settings.includePrereleaseUpdates = false
-                            Task { await store.scan() }
-                        }
+            if settings.sidebarViewMode == .advanced {
+                Section {
+                    SettingsOptionRow(
+                        title: "Include prereleases",
+                        detail: "Alpha, beta, preview, release-candidate, and nightly builds.",
+                        systemImage: "testtube.2",
+                        tint: .purple
+                    ) {
+                        Toggle("Include prereleases", isOn: Binding(
+                            get: { settings.includePrereleaseUpdates },
+                            set: { enabled in
+                                if enabled { settings.confirmingPrereleaseUpdates = true }
+                                else {
+                                    settings.includePrereleaseUpdates = false
+                                    Task { await store.scan() }
+                                }
+                            }
+                        ))
+                        .labelsHidden()
                     }
-                ))
-                Label(
-                    "Warning: prerelease software may be unstable, incompatible, or unsafe for important data.",
-                    systemImage: "exclamationmark.triangle.fill"
-                )
-                .font(.callout.weight(.medium))
-                .foregroundStyle(.orange)
-            } header: {
-                Text("Prerelease Updates")
-            } footer: {
-                Text("Applies to Sparkle, GitHub, Homebrew, developer packages, and macOS updates. The Mac App Store only exposes releases from its public update service.")
+                    Label(
+                        "Prerelease software may be unstable, incompatible, or unsafe for important data.",
+                        systemImage: "exclamationmark.triangle.fill"
+                    )
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(.orange)
+                } header: {
+                    Text("Prerelease Updates")
+                }
             }
             Section {
-                sourceToggle("Software Update and full installers", "apple.logo", $settings.checkMacOS)
+                sourceToggle(
+                    "macOS updates",
+                    settings.sidebarViewMode == .advanced
+                        ? "Software updates and full installers."
+                        : "Stable software updates.",
+                    "apple.logo", $settings.checkMacOS
+                )
             } header: {
                 Text("macOS")
             }
@@ -142,6 +237,12 @@ struct SettingsView: View {
 
     private var changelog: some View {
         ChangelogView(compact: true)
+    }
+
+    private var visibleSettingsSections: [SettingsSection] {
+        SettingsSection.allCases.filter {
+            settings.sidebarViewMode == .advanced || !$0.requiresAdvancedView
+        }
     }
 
     private var diagnostics: some View {
@@ -300,16 +401,23 @@ struct SettingsView: View {
         Form {
             Section("Package Managers") {
                 ForEach(DeveloperPackageManager.allCases) { manager in
-                    Toggle(isOn: Binding(
-                        get: { settings.isManagerEnabled(manager) },
-                        set: { settings.setManager(manager, enabled: $0) }
-                    )) {
-                        HStack { PackageManagerIcon(manager: manager, size: 24); Text(manager.rawValue) }
-                    }
+                    DeveloperManagerSettingsRow(
+                        manager: manager,
+                        isEnabled: Binding(
+                            get: { settings.isManagerEnabled(manager) },
+                            set: { settings.setManager(manager, enabled: $0) }
+                        )
+                    )
                 }
             }
             Section {
-                Toggle("Show packages that are already current", isOn: $settings.showCurrentDeveloperPackages)
+                SettingsOptionRow(
+                    title: "Show packages that are already current",
+                    systemImage: "checkmark.circle"
+                ) {
+                    Toggle("Show current packages", isOn: $settings.showCurrentDeveloperPackages)
+                        .labelsHidden()
+                }
             } header: {
                 Text("Display and Versions")
             } footer: {
@@ -360,6 +468,16 @@ struct SettingsView: View {
         )
     }
 
+    private var backgroundCheckDetail: String {
+        guard settings.refreshInterval != .never else {
+            return "Automatic checks are disabled. You can still scan manually."
+        }
+        guard let nextCheck = store.nextScheduledCheck else {
+            return "Schedule update checks while Upkeep is running."
+        }
+        return "Next check: \(nextCheck.formatted(.dateTime.weekday(.abbreviated).hour().minute()))."
+    }
+
     private func icon(for section: SettingsSection) -> String {
         switch section {
         case .general: "gearshape"
@@ -384,8 +502,132 @@ struct SettingsView: View {
         .frame(maxWidth: .infinity)
     }
 
-    private func sourceToggle(_ title: String, _ icon: String, _ binding: Binding<Bool>) -> some View {
-        Toggle(isOn: binding) { Label(title, systemImage: icon) }
+    private func sourceToggle(
+        _ title: String,
+        _ detail: String,
+        _ icon: String,
+        _ binding: Binding<Bool>
+    ) -> some View {
+        SettingsOptionRow(title: title, detail: detail, systemImage: icon) {
+            Toggle(title, isOn: binding)
+                .labelsHidden()
+        }
+    }
+
+    private func appearanceHeading(_ title: String) -> some View {
+        Text(title)
+            .font(.headline)
+    }
+}
+
+private struct SettingsOptionRow<Control: View>: View {
+    let title: String
+    let detail: String?
+    let systemImage: String
+    let tint: Color
+    let control: Control
+
+    init(
+        title: String,
+        detail: String? = nil,
+        systemImage: String,
+        tint: Color = .accentColor,
+        @ViewBuilder control: () -> Control
+    ) {
+        self.title = title
+        self.detail = detail
+        self.systemImage = systemImage
+        self.tint = tint
+        self.control = control()
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 30, height: 30)
+                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .fontWeight(.medium)
+                if let detail {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 16)
+            control
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct DeveloperManagerSettingsRow: View {
+    let manager: DeveloperPackageManager
+    @Binding var isEnabled: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            PackageManagerIcon(manager: manager, size: 30)
+                .frame(width: 30, height: 30)
+            Text(manager.rawValue)
+                .fontWeight(.medium)
+            Spacer(minLength: 16)
+            Toggle(manager.rawValue, isOn: $isEnabled)
+                .labelsHidden()
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct AppearanceOptionButton: View {
+    let title: String
+    let detail: String
+    let systemImage: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Image(systemName: systemImage)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    Spacer()
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                }
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(2)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, minHeight: 108, alignment: .topLeading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(
+            isSelected ? Color.accentColor.opacity(0.10) : Color.secondary.opacity(0.06),
+            in: RoundedRectangle(cornerRadius: 11)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 11)
+                .stroke(
+                    isSelected ? Color.accentColor.opacity(0.75) : Color.secondary.opacity(0.16),
+                    lineWidth: isSelected ? 1.5 : 1
+                )
+        }
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 

@@ -45,6 +45,11 @@ struct AdoptableView: View {
                 }.listStyle(.inset)
             }
         }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                ScanToolbarButton()
+            }
+        }
     }
 
     private var selectedAppID: Binding<String?> {

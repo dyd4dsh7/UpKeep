@@ -88,10 +88,11 @@ struct AllAppsView: View {
     }
 
     @ToolbarContentBuilder private var listToolbar: some ToolbarContent {
-        ToolbarItemGroup(placement: .secondaryAction) {
+        ToolbarItemGroup(placement: .primaryAction) {
             appSortMenu
             appFilterMenu
             ListDensityButton()
+            ScanToolbarButton()
         }
     }
 
@@ -114,20 +115,25 @@ struct AllAppsView: View {
             )
         }
         .menuIndicator(.hidden)
-        .help("Sort apps")
-        .accessibilityLabel("Sort apps")
+        .toolbarControlLabel("Sort applications")
     }
 
     private var appFilterMenu: some View {
         Menu {
-            Section("Filter") {
-                ForEach(AppListFilter.allCases) { filter in
-                    Button {
-                        store.appListFilter = filter
-                    } label: {
-                        MenuSelectionLabel(title: filter.rawValue, isSelected: store.appListFilter == filter)
-                    }
-                }
+            Section("Status") {
+                appFilterButton(.all)
+                appFilterButton(.updates)
+                appFilterButton(.adoptable)
+                appFilterButton(.unmapped)
+            }
+            Section("Update Source") {
+                appFilterButton(.appStore)
+                appFilterButton(.testFlight)
+                appFilterButton(.setapp)
+                appFilterButton(.microsoftAutoUpdate)
+                appFilterButton(.homebrew)
+                appFilterButton(.sparkle)
+                appFilterButton(.github)
             }
         } label: {
             ListControlLabel(
@@ -136,8 +142,15 @@ struct AllAppsView: View {
             )
         }
         .menuIndicator(.hidden)
-        .help("Filter apps")
-        .accessibilityLabel("Filter apps")
+        .toolbarControlLabel("Filter applications")
+    }
+
+    private func appFilterButton(_ filter: AppListFilter) -> some View {
+        Button {
+            store.appListFilter = filter
+        } label: {
+            MenuSelectionLabel(title: filter.rawValue, isSelected: store.appListFilter == filter)
+        }
     }
 
     private func appSortButton(_ title: String, order: AppSortOrder, ascending: Bool = true) -> some View {
@@ -173,6 +186,7 @@ struct AllAppsView: View {
     private var emptyTitle: String {
         if store.appListFilter == .unmapped { return "Every App Is Mapped" }
         if store.appListFilter == .updates { return "No App Updates" }
+        if store.appListFilter == .adoptable { return "No Homebrew Suggestions" }
         if !store.searchText.isEmpty { return "No Matching Apps" }
         return switch title {
         case "Setapp": "No Setapp Apps"
@@ -186,6 +200,7 @@ struct AllAppsView: View {
     private var emptyDescription: String {
         if store.appListFilter == .unmapped { return "Every app in this list has a supported source or external update manager." }
         if store.appListFilter == .updates { return "No apps in this list currently have an available update." }
+        if store.appListFilter == .adoptable { return "No installed apps can currently be moved under Homebrew management." }
         if !store.searchText.isEmpty {
             return "No apps in \(title) match “\(store.searchText)”."
         }
@@ -254,6 +269,14 @@ struct AllAppsView: View {
         switch store.appListFilter {
         case .all: true
         case .updates: update(for: app) != nil
+        case .adoptable: store.adoptableApps.contains { $0.app.id == app.id }
+        case .appStore: app.updateManagement == .appStore
+        case .testFlight: app.updateManagement == .testFlight
+        case .setapp: app.updateManagement == .setapp
+        case .microsoftAutoUpdate: app.updateManagement == .microsoftAutoUpdate
+        case .homebrew: store.homebrewPackage(for: app) != nil
+        case .sparkle: app.sparkleFeedURL != nil
+        case .github: app.githubRepository != nil
         case .unmapped: isUnmapped(app)
         }
     }
@@ -311,7 +334,9 @@ struct AllAppsView: View {
 
 struct AppDetailView: View {
     @EnvironmentObject private var store: UpkeepStore
+    @EnvironmentObject private var settings: AppSettings
     @StateObject private var inspection = AppSecurityInspectionModel()
+    @StateObject private var detailState = AppDetailState()
     let app: InstalledApp
 
     private var update: AvailableUpdate? { store.updates.first { $0.app.id == app.id } }
@@ -334,12 +359,14 @@ struct AppDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     updateStatus
-                    updateSources
+                    if settings.sidebarViewMode == .advanced {
+                        updateSources
+                    }
                     releaseNotes
                     homebrewManagement
-                    technicalDetails
-                    AppPermissionsSection(report: inspection.report)
-                    AppSecuritySection(report: inspection.report)
+                    if settings.sidebarViewMode == .advanced {
+                        technicalDisclosure
+                    }
                 }
                 .padding(20)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -350,14 +377,15 @@ struct AppDetailView: View {
             get: { store.errorMessage != nil }, set: { if !$0 { store.errorMessage = nil } }
         )) { Button("OK", role: .cancel) {} } message: { Text(store.errorMessage ?? "Unknown error") }
         .upkeepRunningAppConfirmationAlert(store)
-        .task(id: app.id) {
+        .task(id: detailState.showsTechnicalDetails ? app.id : nil) {
+            guard detailState.showsTechnicalDetails else { return }
             await inspection.load(app)
         }
     }
 
     private var header: some View {
         HStack(alignment: .top, spacing: 16) {
-            AppIcon(url: app.url, size: 72)
+            AppIcon(url: app.url, size: 58)
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 9) {
                     Text(app.name).font(.title.weight(.semibold)).lineLimit(2)
@@ -408,7 +436,28 @@ struct AppDetailView: View {
             .accessibilityLabel("Close app details")
             .keyboardShortcut(.cancelAction)
         }
-        .padding(20)
+        .padding(16)
+    }
+
+    private var technicalDisclosure: some View {
+        DisclosureGroup(isExpanded: $detailState.showsTechnicalDetails) {
+            VStack(alignment: .leading, spacing: 20) {
+                technicalDetails
+                AppPermissionsSection(report: inspection.report)
+                AppSecuritySection(report: inspection.report)
+            }
+            .padding(.top, 14)
+        } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                Label("Technical Details", systemImage: "info.circle")
+                    .font(.headline)
+                Text("Bundle metadata, declared permissions, signing, and Gatekeeper status")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(14)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
     }
 
     @ViewBuilder
@@ -775,6 +824,11 @@ struct AppDetailView: View {
         return names.isEmpty ? (app.updateManagement.isExternallyManaged ? app.updateManagement.rawValue : "No source") : names
     }
     private func detailLabel(_ text: String) -> some View { Text(text).foregroundStyle(.secondary) }
+}
+
+@MainActor
+private final class AppDetailState: ObservableObject {
+    @Published var showsTechnicalDetails = false
 }
 
 struct AppIcon: View {

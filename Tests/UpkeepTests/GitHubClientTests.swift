@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import Upkeep
 
@@ -28,4 +29,51 @@ import Testing
     )
 
     #expect(release.prereleaseChannel == .prerelease)
+}
+
+@Test func githubReleaseSelectionRejectsTagsForAnotherProduct() {
+    let app = InstalledApp(
+        name: "TablePro",
+        bundleIdentifier: "com.tablepro.app",
+        installedVersion: "0.58.0",
+        buildVersion: nil,
+        url: URL(fileURLWithPath: "/Applications/TablePro.app"),
+        sparkleFeedURL: nil,
+        githubRepository: "TablePlus/TablePro",
+        hasAppStoreReceipt: false
+    )
+    let releases = [
+        GitHubClient.Release(
+            tagName: "plugin-oracle-v1.2.17", htmlUrl: "https://example.com/plugin", body: nil,
+            prerelease: false, draft: false
+        ),
+        GitHubClient.Release(
+            tagName: "v0.59.0", htmlUrl: "https://example.com/app", body: nil,
+            prerelease: false, draft: false
+        ),
+        GitHubClient.Release(
+            tagName: "v0.60.0-beta.1", htmlUrl: "https://example.com/beta", body: nil,
+            prerelease: false, draft: false
+        )
+    ]
+
+    #expect(GitHubClient.version(from: releases[0].tagName, matching: app) == nil)
+    #expect(GitHubClient.newestRelease(in: releases, matching: app, includePrereleases: false)?.tagName == "v0.59.0")
+    #expect(GitHubClient.newestRelease(in: releases, matching: app, includePrereleases: true)?.tagName == "v0.60.0-beta.1")
+}
+
+@Test func githubReleaseSelectionAcceptsAppQualifiedTags() {
+    let app = InstalledApp(
+        name: "Example App",
+        bundleIdentifier: "com.example.app",
+        installedVersion: "1.0.0",
+        buildVersion: nil,
+        url: URL(fileURLWithPath: "/Applications/Example App.app"),
+        sparkleFeedURL: nil,
+        githubRepository: "example/example-app",
+        hasAppStoreReceipt: false
+    )
+
+    #expect(GitHubClient.version(from: "example-app-v1.2.0", matching: app) == "1.2.0")
+    #expect(GitHubClient.version(from: "release-1.2.0", matching: app) == "1.2.0")
 }

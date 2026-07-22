@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MacOSUpdatesView: View {
     @EnvironmentObject private var store: UpkeepStore
+    @EnvironmentObject private var settings: AppSettings
 
     var body: some View {
         VStack(spacing: 0) {
@@ -9,7 +10,9 @@ struct MacOSUpdatesView: View {
                 ContentUnavailableView(
                     "Your Mac is up to date",
                     systemImage: "checkmark.seal.fill",
-                    description: Text("Enable a beta channel with Beta Updates if you want prerelease builds.")
+                    description: Text(settings.sidebarViewMode == .advanced
+                        ? "Enable a beta channel with Beta Updates if you want prerelease builds."
+                        : "Upkeep will show new macOS updates here when Apple makes them available.")
                 ).frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
@@ -18,7 +21,7 @@ struct MacOSUpdatesView: View {
                             ForEach(availableUpdates) { update in systemRow(update) }
                         }
                     }
-                    if !installers.isEmpty {
+                    if settings.sidebarViewMode == .advanced, !installers.isEmpty {
                         Section {
                             ForEach(installers) { update in systemRow(update) }
                         } header: {
@@ -32,13 +35,15 @@ struct MacOSUpdatesView: View {
             }
         }
         .toolbar {
-            ToolbarItemGroup(placement: .secondaryAction) {
-                Button("Beta Updates…") { store.openBetaSettings() }
-                    .help("Choose a beta channel in Apple’s Software Update settings")
+            ToolbarItemGroup(placement: .primaryAction) {
+                if settings.sidebarViewMode == .advanced {
+                    Button("Beta Updates…") { store.openBetaSettings() }
+                        .toolbarControlLabel("Choose macOS beta updates")
+                }
                 Button { Task { await store.scan() } } label: {
                     Label("Check Again", systemImage: "arrow.clockwise")
                 }
-                .help("Check Apple Software Update")
+                .toolbarControlLabel("Check for macOS updates")
                 .disabled(store.isScanning)
             }
         }

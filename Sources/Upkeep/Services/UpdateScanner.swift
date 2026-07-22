@@ -27,20 +27,25 @@ struct UpdateScanner: Sendable {
             "GitHub": settings.checkGitHub.description,
             "macOS": settings.checkMacOS.description,
             "AI models": settings.checkLocalModels.description,
-            "Prereleases": settings.includePrereleaseUpdates.description
+            "Prereleases": settings.includePrereleaseUpdates.description,
+            "Advanced sources": settings.includeAdvancedSources.description
         ])
         async let installedApps = AppDiscovery.discover()
         async let brewInventory = scopedResult(enabled: settings.checkHomebrew) {
             try await HomebrewClient().inventory(includePrereleases: settings.includePrereleaseUpdates)
         }
-        async let brewCatalog = scopedResult(enabled: settings.checkHomebrew) {
+        async let brewCatalog = scopedResult(enabled: settings.checkHomebrew && settings.includeAdvancedSources) {
             try await HomebrewClient().caskCatalog()
         }
-        async let macOSReport = settings.checkMacOS ? MacOSUpdateClient().scan() : MacOSUpdateClient.Report.empty
-        async let developerReport = DeveloperPackageClient().scan(
-            enabledManagers: settings.enabledDeveloperManagers,
-            includePrereleases: settings.includePrereleaseUpdates
-        )
+        async let macOSReport = settings.checkMacOS
+            ? MacOSUpdateClient().scan(includeInstallers: settings.includeAdvancedSources)
+            : MacOSUpdateClient.Report.empty
+        async let developerReport = settings.enabledDeveloperManagers.isEmpty
+            ? DeveloperPackageClient.Report.empty
+            : DeveloperPackageClient().scan(
+                enabledManagers: settings.enabledDeveloperManagers,
+                includePrereleases: settings.includePrereleaseUpdates
+            )
         async let localModels = settings.checkLocalModels ? LocalModelClient().scan() : LocalModelClient.Report.empty
 
         // App source checks only depend on discovery, so do not hold them behind
@@ -102,7 +107,7 @@ struct UpdateScanner: Sendable {
         switch catalogResult {
         case .disabled:
             adoptable = []
-            homebrewCatalogStatus = settings.checkHomebrew ? .failed : .disabled
+            homebrewCatalogStatus = .disabled
         case let .success(catalog):
             if homebrewInventoryStatus == .failed {
                 adoptable = []

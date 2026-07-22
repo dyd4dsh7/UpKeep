@@ -65,3 +65,36 @@ import Testing
     #expect(summary.openedCount == 1)
     #expect(summary.failedCount == 1)
 }
+
+@Test func batchPlanSelectsOnlyStableDirectUpdatesByDefault() {
+    let app = InstalledApp(
+        name: "Example", bundleIdentifier: "com.example.app", installedVersion: "1.0.0",
+        buildVersion: nil, url: URL(fileURLWithPath: "/Applications/Example.app"),
+        sparkleFeedURL: nil, githubRepository: nil, hasAppStoreReceipt: false
+    )
+    let automatic = BatchUpdateItem.application(AvailableUpdate(
+        app: app, availableVersion: "1.1.0", source: .homebrew,
+        releaseNotes: nil, actionURL: nil, homebrewToken: "example"
+    ))
+    let manual = BatchUpdateItem.application(AvailableUpdate(
+        app: app, availableVersion: "1.1.0", source: .github,
+        releaseNotes: nil, actionURL: URL(string: "https://example.com/release"), homebrewToken: nil
+    ))
+    let major = BatchUpdateItem.application(AvailableUpdate(
+        app: app, availableVersion: "2.0.0", source: .homebrew,
+        releaseNotes: nil, actionURL: nil, homebrewToken: "example"
+    ))
+    let prerelease = BatchUpdateItem.application(AvailableUpdate(
+        app: app, availableVersion: "1.1.0-beta.1", source: .homebrew,
+        releaseNotes: nil, actionURL: nil, homebrewToken: "example"
+    ))
+
+    #expect(automatic.riskGroup == .automatic)
+    #expect(automatic.isRecommendedByDefault)
+    #expect(manual.riskGroup == .manual)
+    #expect(major.riskGroup == .major)
+    #expect(prerelease.riskGroup == .prerelease)
+    #expect(!manual.isRecommendedByDefault)
+    #expect(!major.isRecommendedByDefault)
+    #expect(!prerelease.isRecommendedByDefault)
+}

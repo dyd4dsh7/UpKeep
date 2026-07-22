@@ -2,8 +2,8 @@ import SwiftUI
 
 enum UpkeepLayout {
     static let inspectorMinimumWidth: CGFloat = 320
-    static let inspectorIdealWidth: CGFloat = 430
-    static let inspectorMaximumWidth: CGFloat = 560
+    static let inspectorIdealWidth: CGFloat = 380
+    static let inspectorMaximumWidth: CGFloat = 500
 }
 
 struct StandardItemRow<Icon: View, Content: View, Accessories: View>: View {
@@ -93,8 +93,33 @@ struct ListDensityButton: View {
                 isActive: settings.listDensity == .compact
             )
         }
-        .help(settings.listDensity == .compact ? "Use comfortable rows" : "Use compact rows")
-        .accessibilityLabel(settings.listDensity == .compact ? "Use comfortable rows" : "Use compact rows")
+        .toolbarControlLabel(settings.listDensity == .compact ? "Use comfortable rows" : "Use compact rows")
+    }
+}
+
+struct ScanToolbarButton: View {
+    @EnvironmentObject private var store: UpkeepStore
+
+    var body: some View {
+        Button {
+            Task { await store.scan() }
+        } label: {
+            if store.isScanning {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: "arrow.clockwise")
+            }
+        }
+        .toolbarControlLabel("Check for updates")
+        .disabled(store.isScanning)
+    }
+}
+
+extension View {
+    func toolbarControlLabel(_ label: String) -> some View {
+        accessibilityLabel(label)
+            .help(label)
     }
 }
 

@@ -7,6 +7,40 @@ enum ListDensity: String, CaseIterable, Identifiable, Sendable {
     var id: Self { self }
     var title: String { self == .comfortable ? "Comfortable" : "Compact" }
     var systemImage: String { self == .comfortable ? "rectangle.grid.1x2" : "list.bullet" }
+    var detail: String {
+        switch self {
+        case .comfortable: "More breathing room for names, versions, and status."
+        case .compact: "Fits more apps and packages on screen at once."
+        }
+    }
+}
+
+enum SidebarViewMode: String, CaseIterable, Identifiable, Sendable {
+    case basic
+    case advanced
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .basic: "Basic"
+        case .advanced: "Advanced"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .basic: "Focused navigation, stable updates, and essential controls."
+        case .advanced: "Adds developer tools, diagnostics, prereleases, dependencies, and technical details."
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .basic: "sidebar.left"
+        case .advanced: "sidebar.squares.leading"
+        }
+    }
 }
 
 enum RefreshInterval: Int, CaseIterable, Identifiable, Sendable {
@@ -59,11 +93,47 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     case general = "General"
     case sources = "Sources"
     case developer = "Developer"
+    case ignored = "Ignored"
     case diagnostics = "Diagnostics"
     case changelog = "Changelog"
-    case ignored = "Ignored"
     case about = "About"
     var id: Self { self }
+
+    var requiresAdvancedView: Bool {
+        self == .developer || self == .diagnostics
+    }
+}
+
+enum SetupProfile: String, CaseIterable, Identifiable, Sendable {
+    case applications
+    case homebrew
+    case advanced
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .applications: "Applications only"
+        case .homebrew: "Applications + Homebrew"
+        case .advanced: "Advanced developer environment"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .applications: "App Store, Sparkle, GitHub, and stable macOS updates."
+        case .homebrew: "Applications plus Homebrew apps and requested packages."
+        case .advanced: "Applications, Homebrew, developer tools, package managers, and local AI models."
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .applications: "macwindow"
+        case .homebrew: "shippingbox"
+        case .advanced: "terminal"
+        }
+    }
 }
 
 enum UpdateExclusionMode: String, Codable, Sendable {
@@ -137,6 +207,7 @@ struct ScanSettings: Sendable {
     let checkLocalModels: Bool
     let includePrereleaseUpdates: Bool
     let enabledDeveloperManagers: Set<DeveloperPackageManager>
+    let includeAdvancedSources: Bool
 }
 
 @MainActor
@@ -151,6 +222,7 @@ final class AppSettings: ObservableObject {
     @Published var showDockBadge: Bool { didSet { save(showDockBadge, "showDockBadge") } }
     @Published var notificationsEnabled: Bool { didSet { save(notificationsEnabled, "notificationsEnabled") } }
     @Published var listDensity: ListDensity { didSet { save(listDensity.rawValue, "listDensity") } }
+    @Published var sidebarViewMode: SidebarViewMode { didSet { save(sidebarViewMode.rawValue, "sidebarViewMode") } }
     @Published var showCurrentDeveloperPackages: Bool { didSet { save(showCurrentDeveloperPackages, "showCurrentDeveloperPackages") } }
     @Published var checkAppStore: Bool { didSet { save(checkAppStore, "checkAppStore") } }
     @Published var checkSparkle: Bool { didSet { save(checkSparkle, "checkSparkle") } }
@@ -159,6 +231,7 @@ final class AppSettings: ObservableObject {
     @Published var checkMacOS: Bool { didSet { save(checkMacOS, "checkMacOS") } }
     @Published var checkLocalModels: Bool { didSet { save(checkLocalModels, "checkLocalModels") } }
     @Published var includePrereleaseUpdates: Bool { didSet { save(includePrereleaseUpdates, "includePrereleaseUpdates") } }
+    @Published private(set) var hasCompletedSetup: Bool
     @Published var lastCompletedScanDate: Date? {
         didSet {
             if let lastCompletedScanDate { save(lastCompletedScanDate, "lastCompletedScanDate") }
@@ -184,6 +257,7 @@ final class AppSettings: ObservableObject {
             "showDockBadge": true,
             "notificationsEnabled": false,
             "listDensity": ListDensity.comfortable.rawValue,
+            "sidebarViewMode": SidebarViewMode.basic.rawValue,
             "showCurrentDeveloperPackages": true,
             "checkAppStore": true,
             "checkSparkle": true,
@@ -193,6 +267,10 @@ final class AppSettings: ObservableObject {
             "checkLocalModels": true,
             "includePrereleaseUpdates": false
         ])
+        let completedSetup = defaults.object(forKey: "hasCompletedSetup") != nil
+            ? defaults.bool(forKey: "hasCompletedSetup")
+            : (defaults.object(forKey: "lastCompletedScanDate") != nil)
+        hasCompletedSetup = completedSetup
         if !defaults.bool(forKey: "didRestoreSwiftUIMenuBarItem") {
             defaults.set(true, forKey: "showMenuBarItem")
             defaults.set(true, forKey: "didRestoreSwiftUIMenuBarItem")
@@ -205,6 +283,7 @@ final class AppSettings: ObservableObject {
         showDockBadge = defaults.bool(forKey: "showDockBadge")
         notificationsEnabled = defaults.bool(forKey: "notificationsEnabled")
         listDensity = ListDensity(rawValue: defaults.string(forKey: "listDensity") ?? "") ?? .comfortable
+        sidebarViewMode = SidebarViewMode(rawValue: defaults.string(forKey: "sidebarViewMode") ?? "") ?? .basic
         showCurrentDeveloperPackages = defaults.bool(forKey: "showCurrentDeveloperPackages")
         checkAppStore = defaults.bool(forKey: "checkAppStore")
         checkSparkle = defaults.bool(forKey: "checkSparkle")
@@ -215,7 +294,9 @@ final class AppSettings: ObservableObject {
         includePrereleaseUpdates = defaults.bool(forKey: "includePrereleaseUpdates")
         lastCompletedScanDate = defaults.object(forKey: "lastCompletedScanDate") as? Date
         let disabled = Set(defaults.stringArray(forKey: "disabledDeveloperManagers") ?? [])
-        enabledDeveloperManagers = Set(DeveloperPackageManager.allCases.filter { !disabled.contains($0.rawValue) })
+        enabledDeveloperManagers = completedSetup
+            ? Set(DeveloperPackageManager.allCases.filter { !disabled.contains($0.rawValue) })
+            : []
         updateExclusions = (defaults.data(forKey: "updateExclusions")
             .flatMap { try? JSONDecoder().decode([UpdateExclusion].self, from: $0) } ?? [])
             .filter { $0.isActive() }
@@ -235,6 +316,41 @@ final class AppSettings: ObservableObject {
         else { enabledDeveloperManagers.remove(manager) }
         objectWillChange.send()
         let disabled = DeveloperPackageManager.allCases.filter { !enabledDeveloperManagers.contains($0) }.map(\.rawValue)
+        defaults.set(disabled, forKey: "disabledDeveloperManagers")
+    }
+
+    func completeSetup(_ profile: SetupProfile, sidebarViewMode: SidebarViewMode = .basic) {
+        self.sidebarViewMode = sidebarViewMode
+        checkAppStore = true
+        checkSparkle = true
+        checkGitHub = true
+        checkMacOS = true
+        includePrereleaseUpdates = false
+
+        switch profile {
+        case .applications:
+            checkHomebrew = false
+            checkLocalModels = false
+            setEnabledManagers([])
+        case .homebrew:
+            checkHomebrew = true
+            checkLocalModels = false
+            setEnabledManagers([])
+        case .advanced:
+            checkHomebrew = true
+            checkLocalModels = true
+            setEnabledManagers(Set(DeveloperPackageManager.allCases))
+        }
+
+        hasCompletedSetup = true
+        defaults.set(true, forKey: "hasCompletedSetup")
+    }
+
+    private func setEnabledManagers(_ managers: Set<DeveloperPackageManager>) {
+        enabledDeveloperManagers = managers
+        let disabled = DeveloperPackageManager.allCases
+            .filter { !managers.contains($0) }
+            .map(\.rawValue)
         defaults.set(disabled, forKey: "disabledDeveloperManagers")
     }
 
@@ -347,12 +463,15 @@ final class AppSettings: ObservableObject {
     }
 
     var scanSettings: ScanSettings {
-        ScanSettings(
+        let includeAdvancedSources = sidebarViewMode == .advanced
+        return ScanSettings(
             checkAppStore: checkAppStore, checkSparkle: checkSparkle,
             checkHomebrew: checkHomebrew, checkGitHub: checkGitHub,
-            checkMacOS: checkMacOS, checkLocalModels: checkLocalModels,
-            includePrereleaseUpdates: includePrereleaseUpdates,
-            enabledDeveloperManagers: enabledDeveloperManagers
+            checkMacOS: checkMacOS,
+            checkLocalModels: includeAdvancedSources && checkLocalModels,
+            includePrereleaseUpdates: includeAdvancedSources && includePrereleaseUpdates,
+            enabledDeveloperManagers: includeAdvancedSources ? enabledDeveloperManagers : [],
+            includeAdvancedSources: includeAdvancedSources
         )
     }
 

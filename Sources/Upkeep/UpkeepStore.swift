@@ -3,108 +3,6 @@ import Foundation
 import UniformTypeIdentifiers
 import UserNotifications
 
-enum HomebrewFilter: String, CaseIterable, Identifiable {
-    case all = "All"
-    case updates = "Updates"
-    case requested = "Requested"
-    case dependencies = "Dependencies"
-    case casks = "Casks"
-    case unmapped = "Unmapped"
-    var id: Self { self }
-}
-
-enum AppListFilter: String, CaseIterable, Identifiable {
-    case all = "All Apps"
-    case updates = "Updates"
-    case unmapped = "Unmapped"
-    var id: Self { self }
-}
-
-enum AppSortOrder: String, CaseIterable, Identifiable {
-    case recommended = "Recommended"
-    case name = "Name"
-    case source = "Update Source"
-    case installedVersion = "Installed Version"
-    case availableVersion = "Available Version"
-    case installDate = "Install Date"
-    case recentlyUpdated = "Recently Updated"
-    var id: Self { self }
-}
-
-enum HomebrewSortOrder: String, CaseIterable, Identifiable {
-    case recommended = "Recommended"
-    case name = "Name"
-    case installedVersion = "Installed Version"
-    case availableVersion = "Available Version"
-    case kind = "Package Type"
-    var id: Self { self }
-}
-
-enum UpdateListFilter: String, CaseIterable, Identifiable {
-    case all = "All Updates"
-    case applications = "Applications"
-    case homebrew = "Homebrew"
-    case macOS = "macOS"
-    case developer = "Developer"
-    case models = "AI Models"
-    var id: Self { self }
-}
-
-enum UpdateSortOrder: String, CaseIterable, Identifiable {
-    case recommended = "Recommended"
-    case name = "Name"
-    case source = "Source"
-    case installedVersion = "Installed Version"
-    case availableVersion = "Available Version"
-    case installDate = "Install Date"
-    case recentlyUpdated = "Recently Updated"
-    var id: Self { self }
-}
-
-enum DeveloperManagerFilter: Hashable {
-    case all
-    case javaScript
-    case manager(DeveloperPackageManager)
-
-    var title: String {
-        switch self {
-        case .all: "All"
-        case .javaScript: "JavaScript"
-        case let .manager(manager): manager.rawValue
-        }
-    }
-
-    func includes(_ manager: DeveloperPackageManager) -> Bool {
-        switch self {
-        case .all: true
-        case .javaScript: manager.belongsToJavaScriptEcosystem
-        case let .manager(selected): manager == selected
-        }
-    }
-
-    func isAvailable(in managers: [DeveloperPackageManager]) -> Bool {
-        switch self {
-        case .all: true
-        case .javaScript: managers.contains(where: \.belongsToJavaScriptEcosystem)
-        case let .manager(manager): managers.contains(manager)
-        }
-    }
-}
-
-enum UpdateInspectorSelection: Equatable {
-    case homebrew(String)
-    case developer(String)
-    case model(String)
-
-    var listID: String {
-        switch self {
-        case let .homebrew(id): "homebrew:\(id)"
-        case let .developer(id): "developer:\(id)"
-        case let .model(id): "model:\(id)"
-        }
-    }
-}
-
 struct RunningAppConfirmation: Identifiable {
     enum Action {
         case update(AvailableUpdate)
@@ -219,9 +117,7 @@ final class UpkeepStore: ObservableObject {
     var outdatedPackageCount: Int { homebrewPackages.count { $0.isOutdated && !isExcluded($0) } }
     var outdatedDeveloperPackageCount: Int { developerPackages.count { $0.isOutdated && !isExcluded($0) } }
     var outdatedLocalModelCount: Int { localModels.count { $0.isOutdated && !isExcluded($0) } }
-    var totalUpdateCount: Int {
-        visibleUpdates.count + outdatedPackageCount + macOSUpdates.count(where: { !$0.isFullInstaller }) + outdatedDeveloperPackageCount + outdatedLocalModelCount
-    }
+    var totalUpdateCount: Int { updatePlan.primaryUpdateCount }
     var filteredDeveloperPackages: [DeveloperPackage] {
         matching(developerPackages.filter {
             (settings.showCurrentDeveloperPackages || $0.isOutdated) &&
@@ -233,16 +129,20 @@ final class UpkeepStore: ObservableObject {
         localModels.filter { $0.isOutdated && !isExcluded($0) }
     }
 
-    var availableBatchUpdateItems: [BatchUpdateItem] {
-        let appUpdates = visibleUpdates
-        let representedCaskTokens = Set(appUpdates.flatMap { $0.candidates.compactMap(\.homebrewToken) })
-        let packages = homebrewPackages.filter {
-            $0.isOutdated && !isExcluded($0) && !representedCaskTokens.contains($0.token)
-        }
-        return appUpdates.map(BatchUpdateItem.application)
-            + packages.map(BatchUpdateItem.homebrew)
-            + developerPackages.filter { $0.isOutdated && $0.canUpdateAutomatically && !isExcluded($0) }.map(BatchUpdateItem.developer)
-            + visibleOutdatedLocalModels.map(BatchUpdateItem.model)
+    var availableBatchUpdateItems: [BatchUpdateItem] { updatePlan.batchItems }
+
+    var recommendedBatchUpdateItems: [BatchUpdateItem] { updatePlan.recommendedBatchItems }
+
+    var updatePlan: UpdatePlan {
+        UpdatePlan(
+            applicationUpdates: visibleUpdates,
+            homebrewUpdates: homebrewPackages.filter { $0.isOutdated && !isExcluded($0) },
+            macOSUpdates: macOSUpdates,
+            developerUpdates: developerPackages.filter {
+                $0.isOutdated && $0.canUpdateAutomatically && !isExcluded($0)
+            },
+            modelUpdates: visibleOutdatedLocalModels
+        )
     }
 
     var filteredHomebrewPackages: [HomebrewPackage] {

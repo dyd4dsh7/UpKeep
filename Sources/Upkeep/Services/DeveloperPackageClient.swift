@@ -7,6 +7,11 @@ struct DeveloperPackageClient: Sendable {
         let warnings: [String]
         let failedManagers: Set<DeveloperPackageManager>
         let failedExecutablePaths: Set<String>
+
+        static let empty = Report(
+            packages: [], installedManagers: [], warnings: [],
+            failedManagers: [], failedExecutablePaths: []
+        )
     }
 
     func scan(

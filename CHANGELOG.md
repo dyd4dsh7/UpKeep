@@ -4,6 +4,19 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+- Added first-run profiles that default to focused application management and make Homebrew, global developer tooling, and local models explicit opt-ins.
+- Redesigned onboarding with clearer source profiles, a recommended starting point, and card-based Basic or Advanced view selection.
+- Added persistent Basic and Advanced views across onboarding, Settings, the sidebar, inspectors, Homebrew, macOS updates, and batch review; technical details, prereleases, dependencies, diagnostics, and developer tooling remain available in Advanced.
+- Made Basic scans skip hidden advanced work such as developer managers, local AI models, prereleases, Homebrew adoption cataloguing, and full macOS installer discovery while preserving enabled app, Homebrew, and stable system updates.
+- Reorganized Settings around appearance, checking behavior, and secondary surfaces; shortened redundant copy and tailored Sources to the selected view.
+- Consolidated toolbar controls beside search with consistent tooltips, removed the Homebrew-specific Update All action, and kept bulk updates in the review workflow.
+- Redesigned Review Updates with collapsible risk groups, aligned checkboxes, running-app indicators beside app names, and a focused summary of selected actions.
+- Simplified the sidebar to task-level destinations and moved update-source and Homebrew-adoption browsing into the Applications filter.
+- Focused the shared update count on applications, requested Homebrew packages, and macOS while keeping developer packages and dependencies in dedicated workspaces.
+- Grouped batch actions by risk and now preselect only stable updates Upkeep can complete directly; major versions, prereleases, dependencies, developer tools, and external actions require an explicit choice.
+- Rejected unrelated GitHub release tags from multi-product repositories and added regression coverage for repository tags such as TablePro's plug-in releases.
+- Reduced inspector width and moved bundle, permission, signing, and Gatekeeper information into lazy-loaded Technical Details.
+- Extracted update planning, workspace models, and sidebar composition from the central store and root view.
 - Added fast, detection-based update scans for every NVM installation, VS Code and Cursor extensions, uv and pipx tools, uv-managed Python runtimes, Rustup toolchains, GitHub CLI extensions, Go tools and runtimes, Composer packages, .NET global tools, MacPorts, Nix profiles, mise, asdf, Volta, and fnm.
 - Added global-package discovery for Bun and Yarn, plus npm, pnpm, and Yarn discovery across NVM, fnm, Volta, asdf, and mise installations.
 - Kept duplicate packages from separate runtime installations distinct, retained healthy results when one installation fails, and prevented non-default Node updates from changing the NVM default alias.

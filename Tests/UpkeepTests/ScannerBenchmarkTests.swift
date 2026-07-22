@@ -70,7 +70,8 @@ import Testing
         checkMacOS: true,
         checkLocalModels: true,
         includePrereleaseUpdates: false,
-        enabledDeveloperManagers: Set(DeveloperPackageManager.allCases)
+        enabledDeveloperManagers: Set(DeveloperPackageManager.allCases),
+        includeAdvancedSources: true
     )
     let clock = ContinuousClock()
     for iteration in 1...2 {

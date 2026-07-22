@@ -437,7 +437,7 @@ struct ScanWarning: Identifiable, Hashable, Codable, Sendable {
 
 enum SidebarDestination: String, CaseIterable, Identifiable {
     case updates = "Updates"
-    case allApps = "All Apps"
+    case allApps = "Applications"
     case adoptable = "Adoptable"
     case appStore = "App Store"
     case testFlight = "TestFlight"

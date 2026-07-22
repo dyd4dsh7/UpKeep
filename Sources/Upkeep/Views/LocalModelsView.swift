@@ -15,7 +15,7 @@ struct LocalModelsView: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .secondaryAction) {
+            ToolbarItem(placement: .primaryAction) {
                 Button { Task { await store.scanLocalModels() } } label: {
                     if store.workingIDs.contains("local-model-scan") {
                         ProgressView().controlSize(.small)
@@ -23,7 +23,7 @@ struct LocalModelsView: View {
                         Label("Check Models", systemImage: "arrow.clockwise")
                     }
                 }
-                .help("Check Ollama and LM Studio models")
+                .toolbarControlLabel("Check local models")
                 .disabled(store.workingIDs.contains("local-model-scan"))
             }
         }

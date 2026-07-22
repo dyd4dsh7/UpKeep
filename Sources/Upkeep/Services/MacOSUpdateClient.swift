@@ -16,11 +16,13 @@ struct MacOSUpdateClient: Sendable {
         )
     }
 
-    func scan() async -> Report {
+    func scan(includeInstallers: Bool = true) async -> Report {
         await Task.detached(priority: .utility) {
             var warnings: [String] = []
             let updatesResult = commandResult(URL(fileURLWithPath: "/usr/sbin/softwareupdate"), ["--list", "--product-types", "macOS"])
-            let installersResult = commandResult(URL(fileURLWithPath: "/usr/sbin/softwareupdate"), ["--list-full-installers"])
+            let installersResult: (data: Data?, error: Error?) = includeInstallers
+                ? commandResult(URL(fileURLWithPath: "/usr/sbin/softwareupdate"), ["--list-full-installers"])
+                : (Data(), nil)
             if let error = updatesResult.error { warnings.append("Available updates: \(error.localizedDescription)") }
             if let error = installersResult.error { warnings.append("Full installers: \(error.localizedDescription)") }
             let updatesOutput = updatesResult.data ?? Data()

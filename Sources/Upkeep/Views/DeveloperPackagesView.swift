@@ -19,7 +19,7 @@ struct DeveloperPackagesView: View {
     }
 
     @ToolbarContentBuilder private var packageToolbar: some ToolbarContent {
-        ToolbarItem(placement: .principal) {
+        ToolbarItemGroup(placement: .primaryAction) {
             Menu {
                 ForEach(developerFilters, id: \.self) { filter in
                     Button {
@@ -37,10 +37,7 @@ struct DeveloperPackagesView: View {
                     .lineLimit(1)
             }
             .fixedSize()
-            .accessibilityLabel("Filter Developer packages")
-            .help("Show \(store.developerManagerFilter.title) packages")
-        }
-        ToolbarItem(placement: .secondaryAction) {
+            .toolbarControlLabel("Filter developer packages")
             Menu {
                 Button("Check All Managers") { Task { await store.scanDeveloperPackages(manager: nil) } }
                 Divider()
@@ -62,7 +59,7 @@ struct DeveloperPackagesView: View {
                     Label("Check Packages", systemImage: "arrow.clockwise")
                 }
             }
-            .help("Check installed package managers")
+            .toolbarControlLabel("Check developer packages")
             .disabled(isCheckingDeveloperPackages)
         }
     }
