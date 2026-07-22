@@ -61,6 +61,36 @@ enum UpdateSortOrder: String, CaseIterable, Identifiable {
     var id: Self { self }
 }
 
+enum DeveloperManagerFilter: Hashable {
+    case all
+    case javaScript
+    case manager(DeveloperPackageManager)
+
+    var title: String {
+        switch self {
+        case .all: "All"
+        case .javaScript: "JavaScript"
+        case let .manager(manager): manager.rawValue
+        }
+    }
+
+    func includes(_ manager: DeveloperPackageManager) -> Bool {
+        switch self {
+        case .all: true
+        case .javaScript: manager.belongsToJavaScriptEcosystem
+        case let .manager(selected): manager == selected
+        }
+    }
+
+    func isAvailable(in managers: [DeveloperPackageManager]) -> Bool {
+        switch self {
+        case .all: true
+        case .javaScript: managers.contains(where: \.belongsToJavaScriptEcosystem)
+        case let .manager(manager): managers.contains(manager)
+        }
+    }
+}
+
 enum UpdateInspectorSelection: Equatable {
     case homebrew(String)
     case developer(String)
@@ -133,7 +163,7 @@ final class UpkeepStore: ObservableObject {
     @Published var macOSUpdates: [MacOSUpdate] = []
     @Published var updateHistory: [UpdateRecord] = []
     @Published var developerPackages: [DeveloperPackage] = []
-    @Published var developerManagerFilter = "all"
+    @Published var developerManagerFilter: DeveloperManagerFilter = .all
     @Published var installedDeveloperManagers: [DeveloperPackageManager] = []
     @Published var localModels: [LocalLLMModel] = []
     @Published var selection: SidebarDestination = .updates
@@ -195,7 +225,7 @@ final class UpkeepStore: ObservableObject {
     var filteredDeveloperPackages: [DeveloperPackage] {
         matching(developerPackages.filter {
             (settings.showCurrentDeveloperPackages || $0.isOutdated) &&
-            (developerManagerFilter == "all" || $0.manager.rawValue == developerManagerFilter)
+            developerManagerFilter.includes($0.manager)
         }, name: { $0.name })
     }
 
@@ -211,7 +241,7 @@ final class UpkeepStore: ObservableObject {
         }
         return appUpdates.map(BatchUpdateItem.application)
             + packages.map(BatchUpdateItem.homebrew)
-            + developerPackages.filter { $0.isOutdated && !isExcluded($0) }.map(BatchUpdateItem.developer)
+            + developerPackages.filter { $0.isOutdated && $0.canUpdateAutomatically && !isExcluded($0) }.map(BatchUpdateItem.developer)
             + visibleOutdatedLocalModels.map(BatchUpdateItem.model)
     }
 
@@ -314,8 +344,8 @@ final class UpkeepStore: ObservableObject {
             at: report.checkedAt
         )
         scanWarnings = report.warnings
-        if developerManagerFilter != "all", !installedDeveloperManagers.contains(where: { $0.rawValue == developerManagerFilter }) {
-            developerManagerFilter = "all"
+        if !developerManagerFilter.isAvailable(in: installedDeveloperManagers) {
+            developerManagerFilter = .all
         }
         lastChecked = report.checkedAt
         settings.lastCompletedScanDate = report.checkedAt
@@ -447,7 +477,10 @@ final class UpkeepStore: ObservableObject {
             currentVersion: package.currentVersion,
             latestVersion: latest,
             manager: package.manager,
-            executablePath: package.executablePath
+            executablePath: package.executablePath,
+            registryIdentifier: package.registryIdentifier,
+            installationContext: package.installationContext,
+            canUpdateAutomatically: package.canUpdateAutomatically
         )
         if let index = developerPackages.firstIndex(where: { $0.id == package.id }) {
             developerPackages[index] = refreshed
@@ -509,8 +542,11 @@ final class UpkeepStore: ObservableObject {
         scanWarnings = (scanWarnings.filter { $0.source != .developerPackages } + warnings)
         if let manager {
             guard !report.failedManagers.contains(manager) else { return }
-            developerPackages.removeAll { $0.manager == manager }
+            developerPackages.removeAll {
+                $0.manager == manager && !report.failedExecutablePaths.contains($0.executablePath)
+            }
             developerPackages.append(contentsOf: report.packages)
+            developerPackages = Array(Dictionary(grouping: developerPackages, by: \.id).compactMap { $0.value.first })
             developerPackages.sort { $0.manager.rawValue == $1.manager.rawValue ? $0.name.localizedStandardCompare($1.name) == .orderedAscending : $0.manager.rawValue < $1.manager.rawValue }
             if !installedDeveloperManagers.contains(manager), report.installedManagers.contains(manager) { installedDeveloperManagers.append(manager) }
             versionCache = versionCache.filter { !$0.key.hasPrefix("\(manager.rawValue):") }
@@ -790,10 +826,20 @@ final class UpkeepStore: ObservableObject {
     }
 
     func updateDeveloperPackage(_ package: DeveloperPackage) async {
+        guard package.canUpdateAutomatically else {
+            if let url = package.manager.homepage { NSWorkspace.shared.open(url) }
+            else { errorMessage = "\(package.name) must be updated with \(package.manager.rawValue)." }
+            return
+        }
         await installDeveloperPackage(package, version: package.latestVersion)
     }
 
     func installDeveloperPackage(_ package: DeveloperPackage, version: String) async {
+        guard package.canUpdateAutomatically else {
+            if let url = package.manager.homepage { NSWorkspace.shared.open(url) }
+            else { errorMessage = "\(package.name) must be updated with \(package.manager.rawValue)." }
+            return
+        }
         let selectedVersion = version.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !selectedVersion.isEmpty else {
             errorMessage = "Enter a version to install."
@@ -1498,9 +1544,12 @@ final class UpkeepStore: ObservableObject {
     }
 
     private func mergedDeveloperPackages(from report: ScanReport) -> [DeveloperPackage] {
-        let retained = developerPackages.filter { report.failedDeveloperManagers.contains($0.manager) }
-        let fresh = report.developerPackages.filter { !report.failedDeveloperManagers.contains($0.manager) }
-        return (fresh + retained).sorted(by: developerPackageOrder)
+        mergeDeveloperPackageResults(
+            fresh: report.developerPackages,
+            previous: developerPackages,
+            failedManagers: report.failedDeveloperManagers,
+            failedExecutablePaths: report.failedDeveloperExecutablePaths
+        ).sorted(by: developerPackageOrder)
     }
 
     private func mergedLocalModels(from report: ScanReport) -> [LocalLLMModel] {
@@ -1515,7 +1564,9 @@ final class UpkeepStore: ObservableObject {
 
     private func developerPackageOrder(_ lhs: DeveloperPackage, _ rhs: DeveloperPackage) -> Bool {
         if lhs.manager != rhs.manager { return lhs.manager.rawValue < rhs.manager.rawValue }
-        return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+        let nameOrder = lhs.name.localizedStandardCompare(rhs.name)
+        if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
+        return (lhs.installationContext ?? lhs.executablePath).localizedStandardCompare(rhs.installationContext ?? rhs.executablePath) == .orderedAscending
     }
 
     private func localModelOrder(_ lhs: LocalLLMModel, _ rhs: LocalLLMModel) -> Bool {
@@ -1534,4 +1585,17 @@ final class UpkeepStore: ObservableObject {
             errorMessage = "Homebrew completed the update for \(name), but Upkeep could not fully refresh Homebrew data. Review Diagnostics and refresh again."
         }
     }
+}
+
+func mergeDeveloperPackageResults(
+    fresh: [DeveloperPackage],
+    previous: [DeveloperPackage],
+    failedManagers: Set<DeveloperPackageManager>,
+    failedExecutablePaths: Set<String>
+) -> [DeveloperPackage] {
+    let retained = previous.filter {
+        failedManagers.contains($0.manager) || failedExecutablePaths.contains($0.executablePath)
+    }
+    let acceptedFresh = fresh.filter { !failedManagers.contains($0.manager) }
+    return Dictionary(grouping: retained + acceptedFresh, by: \.id).compactMap { $0.value.first }
 }

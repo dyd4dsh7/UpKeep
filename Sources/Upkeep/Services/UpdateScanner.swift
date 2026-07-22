@@ -33,13 +33,21 @@ struct UpdateScanner: Sendable {
         async let brewInventory = scopedResult(enabled: settings.checkHomebrew) {
             try await HomebrewClient().inventory(includePrereleases: settings.includePrereleaseUpdates)
         }
+        async let brewCatalog = scopedResult(enabled: settings.checkHomebrew) {
+            try await HomebrewClient().caskCatalog()
+        }
         async let macOSReport = settings.checkMacOS ? MacOSUpdateClient().scan() : MacOSUpdateClient.Report.empty
         async let developerReport = DeveloperPackageClient().scan(
             enabledManagers: settings.enabledDeveloperManagers,
             includePrereleases: settings.includePrereleaseUpdates
         )
         async let localModels = settings.checkLocalModels ? LocalModelClient().scan() : LocalModelClient.Report.empty
-        let (apps, brewResult, systemReport, devReport, modelReport) = await (installedApps, brewInventory, macOSReport, developerReport, localModels)
+
+        // App source checks only depend on discovery, so do not hold them behind
+        // Homebrew, softwareupdate, developer-manager, or model scans.
+        let apps = await installedApps
+        async let appChecks = checkApps(apps, settings: settings)
+        let brewResult = await brewInventory
 
         var warnings: [ScanWarning] = []
         let packages: [HomebrewPackage]
@@ -66,20 +74,12 @@ struct UpdateScanner: Sendable {
             "Applications": "\(apps.count)"
         ])
 
-        var updates: [AvailableUpdate] = []
-        var failedAppSources: [String: Set<UpdateSource>] = [:]
-        await withTaskGroup(of: AppCheckResult.self) { group in
-            for app in apps {
-                group.addTask { await checkApp(app, settings: settings) }
-            }
-            for await check in group {
-                updates.append(contentsOf: check.updates)
-                if !check.failedSources.isEmpty {
-                    failedAppSources[check.appID] = check.failedSources
-                }
-                warnings.append(contentsOf: check.warnings)
-            }
-        }
+        let (applicationResult, catalogResult, systemReport, devReport, modelReport) = await (
+            appChecks, brewCatalog, macOSReport, developerReport, localModels
+        )
+        var updates = applicationResult.updates
+        let failedAppSources = applicationResult.failedSources
+        warnings.append(contentsOf: applicationResult.warnings)
 
         let normalizedApps = Dictionary(grouping: apps) { normalize($0.name) }
         for package in packages where package.kind == .cask && package.isOutdated {
@@ -99,24 +99,28 @@ struct UpdateScanner: Sendable {
 
         let adoptable: [AdoptableApp]
         let homebrewCatalogStatus: ScanStatus
-        if !settings.checkHomebrew {
+        switch catalogResult {
+        case .disabled:
             adoptable = []
-            homebrewCatalogStatus = .disabled
-        } else if homebrewInventoryStatus == .failed {
-            adoptable = []
-            homebrewCatalogStatus = .failed
-        } else {
-            do {
-                adoptable = try await HomebrewClient().adoptableApps(
+            homebrewCatalogStatus = settings.checkHomebrew ? .failed : .disabled
+        case let .success(catalog):
+            if homebrewInventoryStatus == .failed {
+                adoptable = []
+                homebrewCatalogStatus = .failed
+            } else {
+                adoptable = HomebrewClient.adoptableApps(
                     from: apps.filter { !$0.updateManagement.isExternallyManaged },
+                    catalog: catalog,
                     excluding: packages
                 ).filter {
                     settings.includePrereleaseUpdates || !VersionComparator.isPrerelease($0.caskVersion)
                 }
                 homebrewCatalogStatus = .succeeded
-            } catch {
-                adoptable = []
-                homebrewCatalogStatus = .failed
+            }
+        case let .failure(error):
+            adoptable = []
+            homebrewCatalogStatus = .failed
+            if homebrewInventoryStatus != .failed {
                 warnings.append(scanWarning(.homebrew, error: error, prefix: "Cask catalog: "))
             }
         }
@@ -205,6 +209,7 @@ struct UpdateScanner: Sendable {
             macOSUpdatesStatus: status(enabled: settings.checkMacOS, succeeded: systemReport.updatesSucceeded),
             macOSInstallersStatus: status(enabled: settings.checkMacOS, succeeded: systemReport.installersSucceeded),
             failedDeveloperManagers: devReport.failedManagers,
+            failedDeveloperExecutablePaths: devReport.failedExecutablePaths,
             localModelsStatus: settings.checkLocalModels ? .succeeded : .disabled,
             failedLocalModelIDs: modelReport.failedModelIDs,
             failedLocalModelRuntimes: modelReport.failedRuntimes,
@@ -251,57 +256,132 @@ struct UpdateScanner: Sendable {
         let warnings: [ScanWarning]
     }
 
+    private struct ApplicationCheckResults: Sendable {
+        let updates: [AvailableUpdate]
+        let failedSources: [String: Set<UpdateSource>]
+        let warnings: [ScanWarning]
+    }
+
+    private struct AppSourceCheckResult: Sendable {
+        let appID: String
+        let source: UpdateSource
+        let update: AvailableUpdate?
+        let warning: ScanWarning?
+    }
+
+    private enum AppUpdateSource: Sendable {
+        case appStore
+        case sparkle
+        case github
+
+        var source: UpdateSource {
+            switch self {
+            case .appStore: .appStore
+            case .sparkle: .sparkle
+            case .github: .github
+            }
+        }
+    }
+
+    private func checkApps(_ apps: [InstalledApp], settings: ScanSettings) async -> ApplicationCheckResults {
+        await withTaskGroup(of: AppSourceCheckResult.self) { group in
+            for app in apps {
+                for source in enabledSources(for: app, settings: settings) {
+                    group.addTask {
+                        await checkSource(
+                            app: app,
+                            appSource: source,
+                            includePrereleases: settings.includePrereleaseUpdates
+                        )
+                    }
+                }
+            }
+            var updates: [AvailableUpdate] = []
+            var failedSources: [String: Set<UpdateSource>] = [:]
+            var warnings: [ScanWarning] = []
+            for await result in group {
+                if let update = result.update { updates.append(update) }
+                if let warning = result.warning {
+                    failedSources[result.appID, default: []].insert(result.source)
+                    warnings.append(warning)
+                }
+            }
+            return ApplicationCheckResults(
+                updates: updates,
+                failedSources: failedSources,
+                warnings: warnings
+            )
+        }
+    }
+
     private func checkApp(_ app: InstalledApp, settings: ScanSettings) async -> AppCheckResult {
         var updates: [AvailableUpdate] = []
         var failedSources = Set<UpdateSource>()
         var warnings: [ScanWarning] = []
-        guard !app.updateManagement.isExternallyManaged else {
-            return AppCheckResult(appID: app.id, updates: [], failedSources: [], warnings: [])
-        }
-        if settings.checkAppStore, app.updateManagement == .appStore {
-            let startedAt = Date()
-            do {
-                if let update = try await AppStoreClient().update(for: app) {
-                    updates.append(update)
+        await withTaskGroup(of: AppSourceCheckResult.self) { group in
+            for source in enabledSources(for: app, settings: settings) {
+                group.addTask {
+                    await checkSource(
+                        app: app,
+                        appSource: source,
+                        includePrereleases: settings.includePrereleaseUpdates
+                    )
                 }
-                recordAppSourceCheck(app: app, source: .appStore, update: updates.last(where: { $0.source == .appStore }), startedAt: startedAt)
-            } catch {
-                failedSources.insert(.appStore)
-                warnings.append(scanWarning(.appStore, error: error, itemName: app.name))
-                recordAppSourceFailure(app: app, source: .appStore, error: error, startedAt: startedAt)
             }
-        }
-        if settings.checkSparkle, app.sparkleFeedURL != nil {
-            let startedAt = Date()
-            do {
-                if let update = try await SparkleClient().update(
-                    for: app, includePrereleases: settings.includePrereleaseUpdates
-                ) {
-                    updates.append(update)
+            for await result in group {
+                if let update = result.update { updates.append(update) }
+                if let warning = result.warning {
+                    failedSources.insert(result.source)
+                    warnings.append(warning)
                 }
-                recordAppSourceCheck(app: app, source: .sparkle, update: updates.last(where: { $0.source == .sparkle }), startedAt: startedAt)
-            } catch {
-                failedSources.insert(.sparkle)
-                warnings.append(scanWarning(.sparkle, error: error, itemName: app.name))
-                recordAppSourceFailure(app: app, source: .sparkle, error: error, startedAt: startedAt)
-            }
-        }
-        if settings.checkGitHub, app.githubRepository != nil {
-            let startedAt = Date()
-            do {
-                if let update = try await GitHubClient().update(
-                    for: app, includePrereleases: settings.includePrereleaseUpdates
-                ) {
-                    updates.append(update)
-                }
-                recordAppSourceCheck(app: app, source: .github, update: updates.last(where: { $0.source == .github }), startedAt: startedAt)
-            } catch {
-                failedSources.insert(.github)
-                warnings.append(scanWarning(.github, error: error, itemName: app.name))
-                recordAppSourceFailure(app: app, source: .github, error: error, startedAt: startedAt)
             }
         }
         return AppCheckResult(appID: app.id, updates: updates, failedSources: failedSources, warnings: warnings)
+    }
+
+    private func enabledSources(for app: InstalledApp, settings: ScanSettings) -> [AppUpdateSource] {
+        guard !app.updateManagement.isExternallyManaged else { return [] }
+        var sources: [AppUpdateSource] = []
+        if settings.checkAppStore, app.updateManagement == .appStore { sources.append(.appStore) }
+        if settings.checkSparkle, app.sparkleFeedURL != nil { sources.append(.sparkle) }
+        if settings.checkGitHub, app.githubRepository != nil { sources.append(.github) }
+        return sources
+    }
+
+    private func checkSource(
+        app: InstalledApp,
+        appSource: AppUpdateSource,
+        includePrereleases: Bool
+    ) async -> AppSourceCheckResult {
+        let source = appSource.source
+        let startedAt = Date()
+        do {
+            let update: AvailableUpdate?
+            switch appSource {
+            case .appStore:
+                update = try await AppStoreClient().update(for: app)
+            case .sparkle:
+                update = try await SparkleClient().update(
+                    for: app,
+                    includePrereleases: includePrereleases
+                )
+            case .github:
+                update = try await GitHubClient().update(
+                    for: app,
+                    includePrereleases: includePrereleases
+                )
+            }
+            recordAppSourceCheck(app: app, source: source, update: update, startedAt: startedAt)
+            return AppSourceCheckResult(appID: app.id, source: source, update: update, warning: nil)
+        } catch {
+            recordAppSourceFailure(app: app, source: source, error: error, startedAt: startedAt)
+            return AppSourceCheckResult(
+                appID: app.id,
+                source: source,
+                update: nil,
+                warning: scanWarning(source.warningSource, error: error, itemName: app.name)
+            )
+        }
     }
 
     private func normalize(_ value: String) -> String {
@@ -328,6 +408,17 @@ struct UpdateScanner: Sendable {
               let installedBuild = app.buildVersion
         else { return false }
         return VersionComparator.isNewer(parts[1], than: installedBuild)
+    }
+}
+
+private extension UpdateSource {
+    var warningSource: ScanWarningSource {
+        switch self {
+        case .appStore: .appStore
+        case .sparkle: .sparkle
+        case .homebrew: .homebrew
+        case .github: .github
+        }
     }
 }
 

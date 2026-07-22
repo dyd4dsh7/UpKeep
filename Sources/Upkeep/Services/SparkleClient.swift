@@ -121,12 +121,17 @@ final class SparkleFeedParser: NSObject, XMLParserDelegate {
         guard inItem, elementName == "enclosure" else { return }
         let shortVersion = attributeDict["sparkle:shortVersionString"]
             ?? attributeDict["shortVersionString"]
-        buildVersion = attributeDict["sparkle:version"] ?? attributeDict["version"]
+        let enclosureBuildVersion = attributeDict["sparkle:version"] ?? attributeDict["version"]
+        if let enclosureBuildVersion { buildVersion = enclosureBuildVersion }
         if let channel = attributeDict["sparkle:channel"] ?? attributeDict["channel"] {
             sourcePrereleaseChannel = VersionComparator.prereleaseChannel(for: channel)
         }
-        version = shortVersion ?? buildVersion
-        hasMarketingVersion = shortVersion != nil
+        if let shortVersion {
+            version = shortVersion
+            hasMarketingVersion = true
+        } else if version == nil, let enclosureBuildVersion {
+            version = enclosureBuildVersion
+        }
         if let urlString = attributeDict["url"] {
             downloadURL = URL(string: urlString, relativeTo: baseURL)?.absoluteURL
         }

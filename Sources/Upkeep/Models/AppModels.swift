@@ -380,6 +380,7 @@ struct ScanReport: Sendable {
     let macOSUpdatesStatus: ScanStatus
     let macOSInstallersStatus: ScanStatus
     let failedDeveloperManagers: Set<DeveloperPackageManager>
+    let failedDeveloperExecutablePaths: Set<String>
     let localModelsStatus: ScanStatus
     let failedLocalModelIDs: Set<String>
     let failedLocalModelRuntimes: Set<LocalModelRuntime>
@@ -611,47 +612,147 @@ struct UpdateRecord: Identifiable, Codable, Hashable, Sendable {
 }
 
 enum DeveloperPackageManager: String, Codable, CaseIterable, Identifiable, Sendable {
+    case node = "Node.js"
+    case bun = "Bun"
+    case deno = "Deno"
     case npm = "npm"
     case pnpm = "pnpm"
+    case yarn = "Yarn"
+    case vsCode = "VS Code Extensions"
+    case uv = "uv"
+    case pipx = "pipx"
     case python = "Python"
     case rubyGems = "RubyGems"
+    case rustup = "Rustup"
     case cargo = "Cargo"
+    case githubCLI = "GitHub CLI"
+    case go = "Go Tools"
+    case composer = "Composer"
+    case dotnet = ".NET Tools"
+    case macPorts = "MacPorts"
+    case nix = "Nix"
+    case mise = "mise"
+    case asdf = "asdf"
+    case volta = "Volta"
+    case fnm = "fnm"
     var id: Self { self }
+    var belongsToJavaScriptEcosystem: Bool {
+        switch self {
+        case .node, .bun, .deno, .npm, .pnpm, .yarn, .volta, .fnm: true
+        case .vsCode, .uv, .pipx, .python, .rubyGems, .rustup, .cargo,
+             .githubCLI, .go, .composer, .dotnet, .macPorts, .nix, .mise, .asdf: false
+        }
+    }
     var assetName: String {
         switch self {
+        case .node: "node"
+        case .bun: "bun"
+        case .deno: "deno"
         case .npm: "npm"
         case .pnpm: "pnpm"
+        case .yarn: "yarn"
+        case .vsCode: "vscode"
+        case .uv: "uv"
+        case .pipx: "pipx"
         case .python: "python"
         case .rubyGems: "rubygems"
+        case .rustup: "rustup"
         case .cargo: "cargo"
+        case .githubCLI: "github"
+        case .go: "go"
+        case .composer: "composer"
+        case .dotnet: "dotnet"
+        case .macPorts: "macports"
+        case .nix: "nix"
+        case .mise: "mise"
+        case .asdf: "asdf"
+        case .volta: "volta"
+        case .fnm: "fnm"
         }
     }
     var packageLabel: String {
         switch self {
+        case .node: "JavaScript runtime"
+        case .bun: "JavaScript runtime and toolkit"
+        case .deno: "JavaScript runtime"
         case .npm, .pnpm: "JavaScript package"
+        case .yarn: "JavaScript package manager"
+        case .vsCode: "Editor extension"
+        case .uv: "uv-managed Python tool"
+        case .pipx: "pipx-managed Python tool"
         case .python: "Python package"
         case .rubyGems: "Ruby gem"
+        case .rustup: "Rust toolchain"
         case .cargo: "Rust crate"
+        case .githubCLI: "GitHub CLI extension"
+        case .go: "Go command"
+        case .composer: "Composer package"
+        case .dotnet: ".NET global tool"
+        case .macPorts: "MacPorts port"
+        case .nix: "Nix profile package"
+        case .mise, .asdf: "Managed developer tool"
+        case .volta, .fnm: "Managed JavaScript runtime"
         }
     }
     var homepage: URL? {
         switch self {
+        case .node: URL(string: "https://nodejs.org")
+        case .bun: URL(string: "https://bun.com")
+        case .deno: URL(string: "https://deno.com")
         case .npm: URL(string: "https://www.npmjs.com")
         case .pnpm: URL(string: "https://pnpm.io")
+        case .yarn: URL(string: "https://yarnpkg.com")
+        case .vsCode: URL(string: "https://marketplace.visualstudio.com/vscode")
+        case .uv: URL(string: "https://docs.astral.sh/uv")
+        case .pipx: URL(string: "https://pipx.pypa.io")
         case .python: URL(string: "https://pypi.org")
         case .rubyGems: URL(string: "https://rubygems.org")
+        case .rustup: URL(string: "https://rustup.rs")
         case .cargo: URL(string: "https://crates.io")
+        case .githubCLI: URL(string: "https://cli.github.com/manual/gh_extension")
+        case .go: URL(string: "https://pkg.go.dev")
+        case .composer: URL(string: "https://packagist.org")
+        case .dotnet: URL(string: "https://www.nuget.org")
+        case .macPorts: URL(string: "https://www.macports.org")
+        case .nix: URL(string: "https://nixos.org")
+        case .mise: URL(string: "https://mise.jdx.dev")
+        case .asdf: URL(string: "https://asdf-vm.com")
+        case .volta: URL(string: "https://volta.sh")
+        case .fnm: URL(string: "https://github.com/Schniz/fnm")
         }
     }
 }
 
 struct DeveloperPackage: Identifiable, Hashable, Sendable {
-    var id: String { "\(manager.rawValue):\(name)" }
+    var id: String { "\(manager.rawValue):\(name):\(installationContext ?? executablePath)" }
     let name: String
     let currentVersion: String
     let latestVersion: String
     let manager: DeveloperPackageManager
     let executablePath: String
+    let registryIdentifier: String?
+    let installationContext: String?
+    let canUpdateAutomatically: Bool
+
+    init(
+        name: String,
+        currentVersion: String,
+        latestVersion: String,
+        manager: DeveloperPackageManager,
+        executablePath: String,
+        registryIdentifier: String? = nil,
+        installationContext: String? = nil,
+        canUpdateAutomatically: Bool = true
+    ) {
+        self.name = name
+        self.currentVersion = currentVersion
+        self.latestVersion = latestVersion
+        self.manager = manager
+        self.executablePath = executablePath
+        self.registryIdentifier = registryIdentifier
+        self.installationContext = installationContext
+        self.canUpdateAutomatically = canUpdateAutomatically
+    }
     var isOutdated: Bool { VersionComparator.isNewer(latestVersion, than: currentVersion) }
     var availablePrereleaseChannel: PrereleaseChannel? {
         VersionComparator.prereleaseChannel(for: latestVersion)

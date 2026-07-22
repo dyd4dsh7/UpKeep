@@ -351,6 +351,11 @@ private struct Sidebar: View {
     }
 
     private func item(_ destination: SidebarDestination) -> some View {
+        sidebarLabel(destination)
+            .tag(destination)
+    }
+
+    private func sidebarLabel(_ destination: SidebarDestination) -> some View {
         Label {
             HStack {
                 Text(destination == .homebrewApps ? "Homebrew" : destination.rawValue)
@@ -364,6 +369,6 @@ private struct Sidebar: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 18)
         }
-        .tag(destination)
     }
+
 }

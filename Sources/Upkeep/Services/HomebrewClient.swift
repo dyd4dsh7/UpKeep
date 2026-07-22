@@ -65,11 +65,13 @@ struct HomebrewClient: Sendable {
         }.value
     }
 
-    func adoptableApps(from apps: [InstalledApp], excluding packages: [HomebrewPackage]) async throws -> [AdoptableApp] {
+    func caskCatalog() async throws -> [CatalogCask] {
         guard Self.brewURL != nil, let catalogURL = URL(string: "https://formulae.brew.sh/api/cask.json") else { return [] }
+        if let cached = cachedCaskCatalog(maximumAge: 6 * 60 * 60) { return cached }
         do {
             var request = URLRequest(url: catalogURL)
             request.timeoutInterval = 30
+            request.cachePolicy = .returnCacheDataElseLoad
             request.setValue("Upkeep/0.2", forHTTPHeaderField: "User-Agent")
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse else { throw UpdateSourceError.invalidResponse }
@@ -77,18 +79,37 @@ struct HomebrewClient: Sendable {
             let catalog: [CatalogCask]
             do { catalog = try JSONDecoder().decode([CatalogCask].self, from: data) }
             catch { throw UpdateSourceError.malformedData(error.localizedDescription) }
-            let installedTokens = Set(packages.filter { $0.kind == .cask }.map(\.token))
-            var matches: [AdoptableApp] = []
-            for app in apps {
-                let appName = normalize(app.name)
-                guard let cask = catalog.first(where: {
-                    !installedTokens.contains($0.token) && !$0.token.hasPrefix("font-") &&
-                    ($0.name.contains(where: { normalize($0) == appName }) || normalize($0.token) == appName)
-                }) else { continue }
-                matches.append(AdoptableApp(app: app, caskToken: cask.token, caskVersion: cask.version))
+            cacheCaskCatalog(data)
+            return catalog
+        } catch {
+            if let stale = cachedCaskCatalog(maximumAge: .infinity) { return stale }
+            throw UpdateSourceError(error)
+        }
+    }
+
+    static func adoptableApps(
+        from apps: [InstalledApp],
+        catalog: [CatalogCask],
+        excluding packages: [HomebrewPackage]
+    ) -> [AdoptableApp] {
+        let installedTokens = Set(packages.lazy.filter { $0.kind == .cask }.map(\.token))
+        var catalogIndexByName: [String: Int] = [:]
+        catalogIndexByName.reserveCapacity(catalog.count * 2)
+        for (index, cask) in catalog.enumerated() {
+            guard !installedTokens.contains(cask.token), !cask.token.hasPrefix("font-") else { continue }
+            // Preserve the API's first-match behavior when aliases collide.
+            for name in cask.name {
+                let key = normalize(name)
+                if catalogIndexByName[key] == nil { catalogIndexByName[key] = index }
             }
-            return matches.sorted { $0.app.name.localizedStandardCompare($1.app.name) == .orderedAscending }
-        } catch { throw UpdateSourceError(error) }
+            let tokenKey = normalize(cask.token)
+            if catalogIndexByName[tokenKey] == nil { catalogIndexByName[tokenKey] = index }
+        }
+        return apps.compactMap { app in
+            guard let index = catalogIndexByName[normalize(app.name)] else { return nil }
+            let cask = catalog[index]
+            return AdoptableApp(app: app, caskToken: cask.token, caskVersion: cask.version)
+        }.sorted { $0.app.name.localizedStandardCompare($1.app.name) == .orderedAscending }
     }
 
     func upgrade(_ package: HomebrewPackage) async throws {
@@ -142,6 +163,31 @@ struct HomebrewClient: Sendable {
                 || value.contains("could not acquire a lock")
                 || value.contains("lock is held")
         }
+    }
+}
+
+private func caskCatalogCacheURL() -> URL? {
+    FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+        .appendingPathComponent("Upkeep/Homebrew", isDirectory: true)
+        .appendingPathComponent("cask-catalog.json")
+}
+
+private func cachedCaskCatalog(maximumAge: TimeInterval) -> [CatalogCask]? {
+    guard let url = caskCatalogCacheURL(),
+          let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+          let modified = attributes[.modificationDate] as? Date,
+          Date().timeIntervalSince(modified) <= maximumAge,
+          let data = try? Data(contentsOf: url) else { return nil }
+    return try? JSONDecoder().decode([CatalogCask].self, from: data)
+}
+
+private func cacheCaskCatalog(_ data: Data) {
+    guard let url = caskCatalogCacheURL() else { return }
+    do {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: url, options: .atomic)
+    } catch {
+        // Catalog caching is an optimization; the fresh result remains usable.
     }
 }
 
@@ -233,7 +279,7 @@ private struct FlexibleString: Decodable {
         throw DecodingError.typeMismatch(String.self, .init(codingPath: decoder.codingPath, debugDescription: "Expected string"))
     }
 }
-private struct CatalogCask: Decodable { let token: String; let name: [String]; let version: String }
+struct CatalogCask: Decodable, Sendable { let token: String; let name: [String]; let version: String }
 private func normalize(_ value: String) -> String { value.lowercased().filter(\.isLetter) }
 
 private func packages(from response: InfoResponse, includePrereleases: Bool) -> [HomebrewPackage] {

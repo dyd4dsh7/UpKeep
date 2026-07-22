@@ -250,28 +250,52 @@ private func parseOllamaList(_ output: String) -> [OllamaRow] {
 private func ollamaManifest(for model: String) async -> OllamaManifest? {
     let parsed = ollamaReference(model)
     guard let url = URL(string: "https://registry.ollama.ai/v2/\(parsed.repository)/manifests/\(parsed.tag)") else { return nil }
-    let scope = "repository:\(parsed.repository):pull"
-    var tokenComponents = URLComponents(string: "https://auth.ollama.com/token")
-    tokenComponents?.queryItems = [
-        URLQueryItem(name: "service", value: "registry.ollama.ai"),
-        URLQueryItem(name: "scope", value: scope)
-    ]
-    guard let tokenURL = tokenComponents?.url,
-          let (tokenData, tokenResponse) = try? await URLSession.shared.data(from: tokenURL),
-          (tokenResponse as? HTTPURLResponse)?.statusCode == 200,
-          let token = (try? JSONDecoder().decode(OllamaToken.self, from: tokenData))?.token
-    else { return nil }
     var request = URLRequest(url: url)
     request.timeoutInterval = 20
-    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     request.setValue("application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json", forHTTPHeaderField: "Accept")
-    guard let (data, response) = try? await URLSession.shared.data(for: request),
-          let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else { return nil }
+    guard var (data, response) = try? await URLSession.shared.data(for: request),
+          var http = response as? HTTPURLResponse else { return nil }
+
+    if http.statusCode == 401,
+       let challenge = http.value(forHTTPHeaderField: "WWW-Authenticate"),
+       let tokenURL = ollamaTokenURL(from: challenge, repository: parsed.repository),
+       let (tokenData, tokenResponse) = try? await URLSession.shared.data(from: tokenURL),
+       (tokenResponse as? HTTPURLResponse)?.statusCode == 200,
+       let token = (try? JSONDecoder().decode(OllamaToken.self, from: tokenData))?.token {
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        guard let authenticated = try? await URLSession.shared.data(for: request),
+              let authenticatedHTTP = authenticated.1 as? HTTPURLResponse else { return nil }
+        (data, response) = authenticated
+        http = authenticatedHTTP
+    }
+
+    guard 200..<300 ~= http.statusCode else { return nil }
     let digest = http.value(forHTTPHeaderField: "Docker-Content-Digest") ?? "sha256:" + SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     return OllamaManifest(digest: digest)
 }
 
 private struct OllamaToken: Decodable { let token: String }
+
+func ollamaTokenURL(from challenge: String, repository: String) -> URL? {
+    guard challenge.lowercased().hasPrefix("bearer ") else { return nil }
+    let parameters = challenge.dropFirst("Bearer ".count).split(separator: ",").reduce(into: [String: String]()) { result, field in
+        let pair = field.split(separator: "=", maxSplits: 1).map(String.init)
+        guard pair.count == 2 else { return }
+        result[pair[0].trimmingCharacters(in: .whitespaces).lowercased()] = pair[1]
+            .trimmingCharacters(in: CharacterSet(charactersIn: " \""))
+    }
+    guard let realm = parameters["realm"], var components = URLComponents(string: realm) else { return nil }
+    var queryItems = components.queryItems ?? []
+    if let service = parameters["service"] {
+        queryItems.append(URLQueryItem(name: "service", value: service))
+    }
+    queryItems.append(URLQueryItem(
+        name: "scope",
+        value: parameters["scope"] ?? "repository:\(repository):pull"
+    ))
+    components.queryItems = queryItems
+    return components.url
+}
 
 private func ollamaReference(_ value: String) -> (repository: String, tag: String) {
     var reference = value

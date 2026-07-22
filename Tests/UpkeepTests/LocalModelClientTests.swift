@@ -47,3 +47,16 @@ import Testing
 
     #expect(models.map(\.name) == ["acme/research/model:latest"])
 }
+
+@Test func buildsOllamaTokenURLFromRegistryChallenge() throws {
+    let challenge = #"Bearer realm="https://auth.example.com/token",service="registry.example.com",scope="repository:library/gemma4:pull""#
+
+    let url = try #require(ollamaTokenURL(from: challenge, repository: "library/gemma4"))
+    let components = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false))
+    let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value) })
+
+    #expect(components.scheme == "https")
+    #expect(components.host == "auth.example.com")
+    #expect(query["service"] == "registry.example.com")
+    #expect(query["scope"] == "repository:library/gemma4:pull")
+}

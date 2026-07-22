@@ -23,6 +23,30 @@ import Testing
     #expect(item.installationType == .application)
 }
 
+@Test func preservesVersionsDeclaredBeforeEnclosure() throws {
+    let xml = """
+    <?xml version="1.0" encoding="utf-8"?>
+    <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+      <channel>
+        <item>
+          <sparkle:version>9727</sparkle:version>
+          <sparkle:shortVersionString>2.4.2</sparkle:shortVersionString>
+          <enclosure url="https://example.com/app.zip" />
+        </item>
+      </channel>
+    </rss>
+    """
+    let parser = SparkleFeedParser(
+        data: try #require(xml.data(using: .utf8)),
+        baseURL: try #require(URL(string: "https://example.com/appcast.xml"))
+    )
+
+    let item = try #require(parser.parse())
+    #expect(item.version == "2.4.2")
+    #expect(item.buildVersion == "9727")
+    #expect(item.downloadURL?.absoluteString == "https://example.com/app.zip")
+}
+
 @Test func recognizesSparklePackageInstallers() throws {
     let xml = """
     <?xml version="1.0" encoding="utf-8"?>

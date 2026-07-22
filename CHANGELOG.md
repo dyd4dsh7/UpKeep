@@ -4,6 +4,12 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+- Added fast, detection-based update scans for every NVM installation, VS Code and Cursor extensions, uv and pipx tools, uv-managed Python runtimes, Rustup toolchains, GitHub CLI extensions, Go tools and runtimes, Composer packages, .NET global tools, MacPorts, Nix profiles, mise, asdf, Volta, and fnm.
+- Added global-package discovery for Bun and Yarn, plus npm, pnpm, and Yarn discovery across NVM, fnm, Volta, asdf, and mise installations.
+- Kept duplicate packages from separate runtime installations distinct, retained healthy results when one installation fails, and prevented non-default Node updates from changing the NVM default alias.
+- Parallelized scan sources, cached Homebrew catalog data, batched registry lookups by package identity, and coalesced identical requests, reducing repeated full scans from about 18 seconds to roughly 2–3 seconds in local benchmarks.
+- Added official project artwork for every new developer manager and manual-update handling for sources that require an external privileged installer.
+- Replaced the overflowing Developer manager selector with a compact, single-level toolbar filter that lists every detected ecosystem without nested menus.
 - Adopted the macOS Liquid Glass structure with system toolbar search, native inspectors, dynamic navigation titles, and contextual toolbar controls.
 - Removed custom page chrome and in-content command strips so macOS can manage glass grouping, scroll-edge treatment, and window hierarchy.
 - Improved narrow-window behavior, restored the user’s preferred Dynamic Type size, and added update, filter, inspector, and batch-review menu commands.

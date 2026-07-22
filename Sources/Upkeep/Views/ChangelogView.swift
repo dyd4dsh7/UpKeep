@@ -45,6 +45,12 @@ private struct UpkeepRelease: Identifiable {
 
     static let all = [
         UpkeepRelease(version: "0.23.1", date: "22 July 2026", changes: [
+            "Scans every NVM installation, editor extensions, Python tool environments, Rust toolchains, GitHub CLI extensions, Go tools, Composer, .NET, MacPorts, Nix, mise, asdf, Volta, and fnm only when they are detected.",
+            "Finds Bun and Yarn global packages and keeps packages from separate Node installations distinct.",
+            "Parallelizes source work, caches Homebrew catalog data, and coalesces registry requests, reducing repeated full scans from about 18 seconds to roughly 2–3 seconds in local benchmarks.",
+            "Includes recognizable artwork and safe manual-update handoffs for every newly supported manager.",
+            "Groups Node.js, Bun, Deno, Yarn, npm, and pnpm in one JavaScript workspace with runtime and global-tool update checks.",
+            "Moves Developer manager filtering into a compact, single-level toolbar menu that lists every detected ecosystem.",
             "Drops stale update candidates when an app has already been updated outside Upkeep.",
             "Prevents Homebrew from replacing TestFlight, Setapp, or Microsoft AutoUpdate-managed apps.",
             "Treats stable platform-qualified versions correctly while preserving genuine prerelease channels.",

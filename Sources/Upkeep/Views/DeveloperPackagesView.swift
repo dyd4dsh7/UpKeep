@@ -20,20 +20,39 @@ struct DeveloperPackagesView: View {
 
     @ToolbarContentBuilder private var packageToolbar: some ToolbarContent {
         ToolbarItem(placement: .principal) {
-            Picker("Manager", selection: $store.developerManagerFilter) {
-                Text("All").tag("all")
-                ForEach(store.installedDeveloperManagers) { manager in
-                    Text(manager.rawValue).tag(manager.rawValue)
+            Menu {
+                ForEach(developerFilters, id: \.self) { filter in
+                    Button {
+                        store.developerManagerFilter = filter
+                    } label: {
+                        if filter == store.developerManagerFilter {
+                            Label(filter.title, systemImage: "checkmark")
+                        } else {
+                            Text(filter.title)
+                        }
+                    }
                 }
+            } label: {
+                Label(store.developerManagerFilter.title, systemImage: "line.3.horizontal.decrease.circle")
+                    .lineLimit(1)
             }
-            .pickerStyle(.segmented)
-            .frame(minWidth: 260, idealWidth: 420, maxWidth: 520)
+            .fixedSize()
+            .accessibilityLabel("Filter Developer packages")
+            .help("Show \(store.developerManagerFilter.title) packages")
         }
         ToolbarItem(placement: .secondaryAction) {
             Menu {
                 Button("Check All Managers") { Task { await store.scanDeveloperPackages(manager: nil) } }
                 Divider()
-                ForEach(store.installedDeveloperManagers) { manager in
+                let javaScriptManagers = store.installedDeveloperManagers.filter(\.belongsToJavaScriptEcosystem)
+                if !javaScriptManagers.isEmpty {
+                    Button("Check JavaScript") {
+                        Task {
+                            for manager in javaScriptManagers { await store.scanDeveloperPackages(manager: manager) }
+                        }
+                    }
+                }
+                ForEach(store.installedDeveloperManagers.filter { !$0.belongsToJavaScriptEcosystem }) { manager in
                     Button("Check \(manager.rawValue)") { Task { await store.scanDeveloperPackages(manager: manager) } }
                 }
             } label: {
@@ -65,7 +84,9 @@ struct DeveloperPackagesView: View {
     private var sortedPackages: [DeveloperPackage] {
         store.filteredDeveloperPackages.sorted { left, right in
             if left.isOutdated != right.isOutdated { return left.isOutdated }
-            return left.name.localizedStandardCompare(right.name) == .orderedAscending
+            let nameOrder = left.name.localizedStandardCompare(right.name)
+            if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
+            return (left.installationContext ?? left.executablePath).localizedStandardCompare(right.installationContext ?? right.executablePath) == .orderedAscending
         }
     }
 
@@ -76,6 +97,17 @@ struct DeveloperPackagesView: View {
 
     private var isCheckingDeveloperPackages: Bool {
         store.workingIDs.contains { $0.hasPrefix("developer-scan-") }
+    }
+
+    private var developerFilters: [DeveloperManagerFilter] {
+        var filters: [DeveloperManagerFilter] = [.all]
+        if store.installedDeveloperManagers.contains(where: \.belongsToJavaScriptEcosystem) {
+            filters.append(.javaScript)
+        }
+        filters.append(contentsOf: store.installedDeveloperManagers
+            .filter { !$0.belongsToJavaScriptEcosystem }
+            .map(DeveloperManagerFilter.manager))
+        return filters
     }
 }
 
@@ -95,7 +127,7 @@ struct BundledPackageIcon: View {
 
     var body: some View {
         Group {
-            if let url = Bundle.module.url(forResource: name, withExtension: "png"),
+            if let url = bundledPackageAssetURL(named: name),
                let image = NSImage(contentsOf: url) {
                 Image(nsImage: image).resizable().scaledToFit()
             } else {
@@ -105,6 +137,11 @@ struct BundledPackageIcon: View {
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: size * 0.2))
     }
+}
+
+func bundledPackageAssetURL(named name: String) -> URL? {
+    Bundle.module.url(forResource: name, withExtension: "png")
+        ?? Bundle.module.url(forResource: name, withExtension: "svg")
 }
 
 private struct DeveloperPackageRow: View {
@@ -128,7 +165,7 @@ private struct DeveloperPackageRow: View {
             }
             packageVersions
             if package.isOutdated && !store.isExcluded(package) {
-                Button("Update") { Task { await store.updateDeveloperPackage(package) } }
+                Button(package.canUpdateAutomatically ? "Update" : "View Update") { Task { await store.updateDeveloperPackage(package) } }
                     .listRowPrimaryAction()
                     .disabled(store.workingIDs.contains(package.id))
             } else {
@@ -144,7 +181,7 @@ private struct DeveloperPackageRow: View {
                 Button("Restore Updates") { store.restore(exclusion) }
             } else {
                 if package.isOutdated {
-                    Button("Update") { Task { await store.updateDeveloperPackage(package) } }
+                    Button(package.canUpdateAutomatically ? "Update" : "View Update") { Task { await store.updateDeveloperPackage(package) } }
                     Divider()
                 }
                 UpdateExclusionOptions(
@@ -159,7 +196,9 @@ private struct DeveloperPackageRow: View {
     }
 
     private var rowDetail: String {
-        package.manager.rawValue
+        [package.manager.rawValue, package.installationContext]
+            .compactMap { $0 }
+            .joined(separator: " · ")
     }
 
     @ViewBuilder private var packageVersions: some View {
@@ -217,12 +256,13 @@ private struct DeveloperPackageDetailContent: View {
                     GridRow { label("Installed"); Text(package.currentVersion).monospacedDigit() }
                     GridRow { label("Latest"); Text(package.latestVersion).monospacedDigit().foregroundStyle(package.isOutdated ? .blue : .primary) }
                     GridRow { label("Manager"); Text(package.manager.rawValue) }
+                    if let context = package.installationContext { GridRow { label("Installation"); Text(context) } }
                     GridRow { label("Executable"); Text(package.executablePath).lineLimit(2).textSelection(.enabled) }
                     if let homepage = package.manager.homepage { GridRow { label("Registry"); Link(homepage.host() ?? homepage.absoluteString, destination: packageURL ?? homepage) } }
                 }
                 .padding(18).background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 14))
 
-                VStack(alignment: .leading, spacing: 10) {
+                if package.canUpdateAutomatically { VStack(alignment: .leading, spacing: 10) {
                     Text("Install a Version").font(.title2.bold())
                     Text("Choose a published version from \(package.manager.rawValue). The newest available version is selected automatically.")
                         .font(.callout).foregroundStyle(.secondary)
@@ -241,7 +281,7 @@ private struct DeveloperPackageDetailContent: View {
                         .buttonStyle(.borderedProminent)
                         .disabled(store.selectedDeveloperVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.workingIDs.contains(package.id))
                     }
-                }
+                } }
                 PackageSecurityExplanation(manager: package.manager.rawValue)
             }.padding(26).frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -257,7 +297,7 @@ private struct DeveloperPackageDetailContent: View {
                     .foregroundStyle(.orange)
                 Button("Restore Updates") { store.restore(exclusion) }.buttonStyle(.borderedProminent)
             } else {
-                Button("Update") { Task { await store.updateDeveloperPackage(package) } }
+                Button(package.canUpdateAutomatically ? "Update" : "View Update") { Task { await store.updateDeveloperPackage(package) } }
                     .buttonStyle(.borderedProminent)
                     .disabled(store.workingIDs.contains(package.id))
             }
@@ -290,12 +330,29 @@ private struct DeveloperPackageDetailContent: View {
     }
 
     private var packageURL: URL? {
-        let encoded = package.name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? package.name
+        let identifier = package.registryIdentifier ?? package.name
+        let encoded = identifier.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? identifier
         switch package.manager {
+        case .node: return URL(string: "https://nodejs.org/en/download")
+        case .bun: return URL(string: "https://bun.com/docs/installation")
+        case .deno: return URL(string: "https://deno.com/runtime")
         case .npm, .pnpm: return URL(string: "https://www.npmjs.com/package/\(encoded)")
-        case .python: return URL(string: "https://pypi.org/project/\(encoded)")
+        case .yarn: return URL(string: "https://yarnpkg.com")
+        case .vsCode: return URL(string: "https://marketplace.visualstudio.com/items?itemName=\(encoded)")
+        case .uv, .pipx, .python: return URL(string: "https://pypi.org/project/\(encoded)")
         case .rubyGems: return URL(string: "https://rubygems.org/gems/\(encoded)")
+        case .rustup: return URL(string: "https://rustup.rs")
         case .cargo: return URL(string: "https://crates.io/crates/\(encoded)")
+        case .githubCLI: return URL(string: "https://github.com/\(identifier)")
+        case .go: return URL(string: "https://pkg.go.dev/\(identifier)")
+        case .composer: return URL(string: "https://packagist.org/packages/\(identifier)")
+        case .dotnet: return URL(string: "https://www.nuget.org/packages/\(encoded)")
+        case .macPorts: return URL(string: "https://ports.macports.org/port/\(encoded)")
+        case .nix: return URL(string: "https://search.nixos.org/packages")
+        case .mise: return URL(string: "https://mise.jdx.dev")
+        case .asdf: return URL(string: "https://asdf-vm.com")
+        case .volta: return URL(string: "https://volta.sh")
+        case .fnm: return URL(string: "https://github.com/Schniz/fnm")
         }
     }
 

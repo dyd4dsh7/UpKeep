@@ -527,7 +527,7 @@ private struct DeveloperUpdateCard: View {
         } content: {
             ItemIdentityView(
                 title: package.name,
-                detail: package.manager.rawValue,
+                detail: [package.manager.rawValue, package.installationContext].compactMap { $0 }.joined(separator: " · "),
                 prereleaseChannel: package.prereleaseChannel,
                 prereleaseIsInstalled: package.prereleaseIsInstalled
             )
@@ -537,14 +537,14 @@ private struct DeveloperUpdateCard: View {
                     .accessibilityLabel("Refreshing \(package.name)")
             }
             VersionTransitionView(current: package.currentVersion, latest: package.latestVersion)
-            Button("Update") { Task { await store.updateDeveloperPackage(package) } }
+            Button(package.canUpdateAutomatically ? "Update" : "View Update") { Task { await store.updateDeveloperPackage(package) } }
                 .listRowPrimaryAction()
                 .disabled(store.workingIDs.contains(package.id))
         }
         .tag(UpdateInspectorSelection.developer(package.id).listID)
         .contentShape(Rectangle())
         .contextMenu {
-            Button("Update") { Task { await store.updateDeveloperPackage(package) } }
+            Button(package.canUpdateAutomatically ? "Update" : "View Update") { Task { await store.updateDeveloperPackage(package) } }
                 .disabled(store.workingIDs.contains(package.id))
             Button("Refresh") { Task { await store.refresh(package) } }
                 .disabled(store.isRefreshing(package))
