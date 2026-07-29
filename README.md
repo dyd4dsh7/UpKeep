@@ -1,6 +1,6 @@
 # Upkeep
 
-Upkeep is a native SwiftUI macOS application that scans installed apps and checks trusted update sources. First-run setup starts with focused application management; Homebrew and the broader developer environment are explicit opt-ins.
+Upkeep is a native SwiftUI macOS application that scans installed apps and checks publisher and package-manager update sources. First-run setup starts with focused application management; Homebrew and the broader developer environment are explicit opt-ins.
 
 The app includes a standard unified macOS toolbar with a prominent live update counter, a menu-bar status item, and a Dock icon badge using the same focused count. The primary count covers application updates, requested Homebrew packages, and macOS updates; global developer packages and Homebrew dependencies remain available in their dedicated workspaces without overwhelming the main queue. It also provides native Settings for every source and supported developer manager, configurable launch/background checks, beta visibility, and notifications.
 
@@ -9,12 +9,18 @@ Individual app, package, and local-model releases can be skipped without hiding 
 ## Update sources
 
 - Mac App Store metadata for production App Store installations
-- Sparkle appcast feeds declared by applications
+- Sparkle appcast feeds declared by applications or their runtime preferences
 - Homebrew casks, when Homebrew is installed
-- GitHub Releases discovered from app and Electron update metadata
+- GitHub Releases discovered from app and Electron update metadata, trusted bundle mappings, or a user-verified repository
 - Ollama registry manifests and LM Studio model repositories for locally installed AI models
 
-TestFlight, Setapp, and Microsoft AutoUpdate installations are identified separately and routed to their owning updater. Sparkle appcasts that declare a package installer open the app's built-in updater instead of presenting the package as a normal download action.
+TestFlight, Setapp, Microsoft AutoUpdate, Steam, Adobe Creative Cloud, JetBrains Toolbox, Epic Games, Spotify, Discord, standalone Tailscale, and macOS-managed apps are identified separately and routed to their owning updater. Steam download progress is read from local manifests. Sparkle appcasts that declare a package installer open the app's built-in updater instead of presenting the package as a normal download action.
+
+Apps with an embedded updater remain labeled as built-in-updater apps even when
+their publisher configures the release feed at runtime. Advanced app details can
+attach an `owner/project` GitHub repository; Upkeep validates that it has
+published releases before saving the bundle-specific mapping. External update
+actions remain pending until the installed bundle reports the expected version.
 
 ## Homebrew workspace
 
@@ -50,6 +56,33 @@ Requires macOS 14 or newer and Apple Command Line Tools.
 
 ```sh
 swift test
-./scripts/package-app.sh
+./scripts/package-app.sh debug
 open outputs/Upkeep.zip
 ```
+
+## Release
+
+Direct distribution requires a Developer ID Application certificate and a
+`notarytool` keychain profile. The release command signs with Hardened Runtime,
+submits the archive to Apple's notary service, staples the ticket, and verifies
+the result with `codesign`, `stapler`, and Gatekeeper before keeping the ZIP.
+
+```sh
+xcrun notarytool store-credentials upkeep-notary
+export UPKEEP_SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)"
+export UPKEEP_NOTARY_PROFILE="upkeep-notary"
+./scripts/release.sh
+```
+
+Release packaging intentionally fails rather than producing an ad-hoc signed
+artifact when either credential is missing.
+
+The `Release` GitHub Actions workflow runs the same script for version tags and
+manual dispatches. It expects repository secrets named
+`DEVELOPER_ID_P12_BASE64`, `DEVELOPER_ID_P12_PASSWORD`, `KEYCHAIN_PASSWORD`,
+`APPLE_ID`, `APPLE_TEAM_ID`, `NOTARY_PASSWORD`, and
+`UPKEEP_SIGNING_IDENTITY`.
+
+The app bundle declares its canonical GitHub repository, so Upkeep discovers
+its own published releases and routes users to the signed release artifact when
+an Upkeep update is available.

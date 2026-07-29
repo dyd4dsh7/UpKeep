@@ -96,16 +96,26 @@ struct HomebrewClient: Sendable {
         var catalogIndexByName: [String: Int] = [:]
         catalogIndexByName.reserveCapacity(catalog.count * 2)
         for (index, cask) in catalog.enumerated() {
-            guard !installedTokens.contains(cask.token), !cask.token.hasPrefix("font-") else { continue }
+            guard !installedTokens.contains(cask.token),
+                  !cask.token.hasPrefix("font-"),
+                  !cask.autoUpdates
+            else { continue }
             // Preserve the API's first-match behavior when aliases collide.
             for name in cask.name {
                 let key = normalize(name)
+                if catalogIndexByName[key] == nil { catalogIndexByName[key] = index }
+            }
+            for appName in cask.artifactAppNames {
+                let key = normalize(
+                    URL(fileURLWithPath: appName).deletingPathExtension().lastPathComponent
+                )
                 if catalogIndexByName[key] == nil { catalogIndexByName[key] = index }
             }
             let tokenKey = normalize(cask.token)
             if catalogIndexByName[tokenKey] == nil { catalogIndexByName[tokenKey] = index }
         }
         return apps.compactMap { app in
+            guard app.allowsHomebrewAdoption else { return nil }
             guard let index = catalogIndexByName[normalize(app.name)] else { return nil }
             let cask = catalog[index]
             return AdoptableApp(app: app, caskToken: cask.token, caskVersion: cask.version)
@@ -122,7 +132,23 @@ struct HomebrewClient: Sendable {
     func upgradeAll() async throws { try await execute(["upgrade"]) }
 
     func adopt(_ item: AdoptableApp) async throws {
-        try await execute(["install", "--cask", "--adopt", item.caskToken])
+        let arguments = ["install", "--cask", "--adopt", item.caskToken]
+        do {
+            try await execute(arguments)
+        } catch let error as BrewError {
+            guard case let .failed(message) = error,
+                  BrewError.requiresAdoptionPermissionRepair(message),
+                  let brew = Self.brewURL
+            else { throw error }
+
+            try await Task.detached(priority: .userInitiated) {
+                _ = try await runInTerminal(
+                    brew,
+                    arguments,
+                    permissionRepairURL: item.app.url
+                )
+            }.value
+        }
     }
 
     func installOrReplace(_ item: AdoptableApp) async throws {
@@ -136,7 +162,14 @@ struct HomebrewClient: Sendable {
     private func execute(_ arguments: [String]) async throws {
         guard let brew = Self.brewURL else { throw BrewError.notInstalled }
         try await Task.detached(priority: .userInitiated) {
-            _ = try await runWithRetry(brew, arguments)
+            do {
+                _ = try await runWithRetry(brew, arguments)
+            } catch let error as BrewError {
+                guard case let .failed(message) = error,
+                      BrewError.requiresInteractiveAuthorization(message)
+                else { throw error }
+                _ = try await runInTerminal(brew, arguments)
+            }
         }.value
     }
 
@@ -162,6 +195,20 @@ struct HomebrewClient: Sendable {
                 || value.contains("already locked")
                 || value.contains("could not acquire a lock")
                 || value.contains("lock is held")
+        }
+
+        static func requiresInteractiveAuthorization(_ message: String) -> Bool {
+            let value = message.lowercased()
+            return value.contains("sudo: a terminal is required")
+                || value.contains("sudo: no tty present")
+                || (value.contains("sudo:") && value.contains("password is required"))
+        }
+
+        static func requiresAdoptionPermissionRepair(_ message: String) -> Bool {
+            let value = message.lowercased()
+            return value.contains("chmod")
+                && value.contains("operation not permitted")
+                && (value.contains("adopting existing app") || value.contains("/applications/"))
         }
     }
 }
@@ -255,6 +302,119 @@ private func run(_ executable: URL, _ arguments: [String]) throws -> Data {
     return data
 }
 
+private func runInTerminal(
+    _ executable: URL,
+    _ arguments: [String],
+    permissionRepairURL: URL? = nil
+) async throws -> Data {
+    let fileManager = FileManager.default
+    let directory = fileManager.temporaryDirectory
+        .appendingPathComponent("Upkeep-Homebrew-\(UUID().uuidString)", isDirectory: true)
+    let scriptURL = directory.appendingPathComponent("Continue Homebrew Update.command")
+    let outputURL = directory.appendingPathComponent("output.log")
+    let statusURL = directory.appendingPathComponent("status")
+    try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? fileManager.removeItem(at: directory) }
+
+    let command = ([executable.path] + arguments).map(shellQuote).joined(separator: " ")
+    let permissionRepair: String
+    if let permissionRepairURL {
+        permissionRepair = """
+        print "Homebrew could not adjust permissions inside the existing app."
+        print "Upkeep will repair only that app bundle, then retry adoption."
+        print
+        /usr/bin/sudo /bin/chmod -R a+rX \(shellQuote(permissionRepairURL.path)) 2>&1 | /usr/bin/tee \(shellQuote(outputURL.path))
+        upkeep_status=${pipestatus[1]}
+        if (( upkeep_status != 0 )); then
+          print -r -- "$upkeep_status" > \(shellQuote(statusURL.path))
+          print
+          print "Permission repair failed with status $upkeep_status. You can close this window."
+          exit $upkeep_status
+        fi
+        print
+        print "Permissions repaired. Retrying Homebrew adoption…"
+        print
+        """
+    } else {
+        permissionRepair = ""
+    }
+
+    let outputMode = permissionRepairURL == nil ? "" : "-a "
+    let script = """
+    #!/bin/zsh
+    set -o pipefail
+    typeset -i upkeep_status=1
+    trap 'print -r -- "$upkeep_status" > \(shellQuote(statusURL.path))' EXIT HUP INT TERM
+    print
+    print "Upkeep needs administrator approval to finish this Homebrew update."
+    print "Enter your macOS password when sudo asks for it."
+    print
+    \(permissionRepair)
+    \(command) 2>&1 | /usr/bin/tee \(outputMode)\(shellQuote(outputURL.path))
+    upkeep_status=${pipestatus[1]}
+    print -r -- "$upkeep_status" > \(shellQuote(statusURL.path))
+    trap - EXIT HUP INT TERM
+    print
+    if (( upkeep_status == 0 )); then
+      print "Homebrew update completed. You can close this window."
+    else
+      print "Homebrew update failed with status $upkeep_status. You can close this window."
+    fi
+    exit $upkeep_status
+    """
+    try script.write(to: scriptURL, atomically: true, encoding: .utf8)
+    try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: scriptURL.path)
+
+    DiagnosticsStore.shared.record(.info, category: .command, "Homebrew needs interactive authorization", metadata: [
+        "Command": "brew " + arguments.joined(separator: " "),
+        "Action": permissionRepairURL == nil
+            ? "Opened Terminal for the administrator password prompt"
+            : "Opened Terminal to repair app permissions and retry Homebrew adoption",
+        "App path": permissionRepairURL?.path ?? "(not applicable)"
+    ])
+
+    let opener = Process()
+    opener.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+    opener.arguments = ["-a", "Terminal", scriptURL.path]
+    do {
+        try opener.run()
+        opener.waitUntilExit()
+    } catch {
+        throw HomebrewClient.BrewError.failed(
+            "Homebrew needs administrator approval, but Upkeep could not open Terminal: \(error.localizedDescription)"
+        )
+    }
+    guard opener.terminationStatus == 0 else {
+        throw HomebrewClient.BrewError.failed(
+            "Homebrew needs administrator approval, but Terminal could not be opened."
+        )
+    }
+
+    while !fileManager.fileExists(atPath: statusURL.path) {
+        try Task.checkCancellation()
+        try await Task.sleep(for: .milliseconds(250))
+    }
+
+    let statusText = (try? String(contentsOf: statusURL, encoding: .utf8))?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    let status = Int32(statusText ?? "") ?? 1
+    let data = (try? Data(contentsOf: outputURL)) ?? Data()
+    guard status == 0 else {
+        let message = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        throw HomebrewClient.BrewError.failed(
+            message?.isEmpty == false
+                ? message!
+                : "Homebrew failed in Terminal with status \(status)."
+        )
+    }
+    return data
+}
+
+private func shellQuote(_ value: String) -> String {
+    "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+}
+
 private struct InfoResponse: Decodable { let formulae: [FormulaDTO]; let casks: [CaskDTO] }
 private struct FormulaDTO: Decodable {
     let name: String; let desc: String?; let license: String?; let homepage: String?
@@ -279,7 +439,58 @@ private struct FlexibleString: Decodable {
         throw DecodingError.typeMismatch(String.self, .init(codingPath: decoder.codingPath, debugDescription: "Expected string"))
     }
 }
-struct CatalogCask: Decodable, Sendable { let token: String; let name: [String]; let version: String }
+struct CatalogCask: Decodable, Sendable {
+    let token: String
+    let name: [String]
+    let version: String
+    let autoUpdates: Bool
+    let artifactAppNames: [String]
+
+    init(
+        token: String,
+        name: [String],
+        version: String,
+        autoUpdates: Bool = false,
+        artifactAppNames: [String] = []
+    ) {
+        self.token = token
+        self.name = name
+        self.version = version
+        self.autoUpdates = autoUpdates
+        self.artifactAppNames = artifactAppNames
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case token, name, version, artifacts
+        case autoUpdates = "auto_updates"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        token = try container.decode(String.self, forKey: .token)
+        name = try container.decode([String].self, forKey: .name)
+        version = try container.decode(String.self, forKey: .version)
+        autoUpdates = try container.decodeIfPresent(Bool.self, forKey: .autoUpdates) ?? false
+        let artifacts = try? container.decode([CatalogArtifact].self, forKey: .artifacts)
+        artifactAppNames = artifacts?.flatMap(\.appNames) ?? []
+    }
+}
+
+private struct CatalogArtifact: Decodable {
+    let appNames: [String]
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let dictionary = try? container.decode([String: [String]].self) {
+            appNames = dictionary["app"] ?? []
+        } else if let dictionary = try? container.decode([String: String].self),
+                  let app = dictionary["app"] {
+            appNames = [app]
+        } else {
+            appNames = []
+        }
+    }
+}
 private func normalize(_ value: String) -> String { value.lowercased().filter(\.isLetter) }
 
 private func packages(from response: InfoResponse, includePrereleases: Bool) -> [HomebrewPackage] {

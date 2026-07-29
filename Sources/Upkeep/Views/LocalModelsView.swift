@@ -17,20 +17,20 @@ struct LocalModelsView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button { Task { await store.scanLocalModels() } } label: {
-                    if store.workingIDs.contains("local-model-scan") {
+                    if store.isWorking(.localModelScan) {
                         ProgressView().controlSize(.small)
                     } else {
                         Label("Check Models", systemImage: "arrow.clockwise")
                     }
                 }
                 .toolbarControlLabel("Check local models")
-                .disabled(store.workingIDs.contains("local-model-scan"))
+                .disabled(store.isWorking(.localModelScan))
             }
         }
     }
 
     private var modelList: some View {
-        List(sortedModels, selection: $store.selectedLocalModelID) { model in
+        List(sortedModels, selection: $store.navigation.selectedLocalModelID) { model in
             LocalModelRow(model: model).tag(model.id)
         }
         .listStyle(.inset)
@@ -78,9 +78,14 @@ private struct LocalModelRow: View {
                 InstalledVersionView(version: model.installedRevision)
             }
             if model.isOutdated && !store.isExcluded(model) {
-                Button("Update") { Task { await store.updateLocalModel(model) } }
+                Button { Task { await store.updateLocalModel(model) } } label: {
+                    WorkingActionLabel(
+                        isWorking: store.isWorking(.localModel(model.id)),
+                        idleTitle: "Update"
+                    )
+                }
                     .buttonStyle(.bordered).controlSize(.small)
-                    .disabled(store.workingIDs.contains(model.id))
+                    .disabled(store.isWorking(.localModel(model.id)))
                     .frame(width: 120)
             } else {
                 Color.clear.frame(width: 120, height: 1).accessibilityHidden(true)
@@ -95,6 +100,7 @@ private struct LocalModelRow: View {
                 } else {
                     if model.isOutdated {
                         Button("Update") { Task { await store.updateLocalModel(model) } }
+                            .disabled(store.isWorking(.localModel(model.id)))
                         Divider()
                     }
                     UpdateExclusionOptions(
@@ -136,7 +142,9 @@ struct LocalModelDetail: View {
                         if let modified = model.modifiedAt { GridRow { label("Downloaded"); Text(modified.formatted(date: .abbreviated, time: .shortened)) } }
                         if let homepage = model.homepage { GridRow { label("Source"); Link(homepage.host() ?? "Open model page", destination: homepage) } }
                     }
-                    .padding(18).background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 14))
+                    .padding(18)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 14))
                     Text(model.runtime == .ollama
                          ? "Upkeep compares the installed manifest digest with Ollama’s registry, then uses ollama pull to update."
                          : "Upkeep compares the local model file with its Hugging Face repository, then uses LM Studio’s lms get command to refresh it.")
@@ -149,15 +157,25 @@ struct LocalModelDetail: View {
     }
 
     private func updateCard(_ model: LocalLLMModel) -> some View {
-        InspectorUpdateStatusCard(subtitle: "Available through \(model.runtime.rawValue)") {
+        let isUpdating = store.isWorking(.localModel(model.id))
+        return InspectorUpdateStatusCard(
+            title: isUpdating ? "Updating…" : "Update available",
+            subtitle: isUpdating ? "Running \(model.runtime.rawValue)" : "Available through \(model.runtime.rawValue)",
+            systemImage: isUpdating ? "arrow.triangle.2.circlepath.circle.fill" : "arrow.down.circle.fill"
+        ) {
             if let exclusion = store.exclusion(for: model) {
                 Label(exclusion.mode.rawValue, systemImage: exclusion.mode == .ignored ? "eye.slash" : "forward.end")
                     .foregroundStyle(.orange)
                 Button("Restore Updates") { store.restore(exclusion) }.buttonStyle(.borderedProminent)
             } else {
-                Button("Update with \(model.runtime.rawValue)") { Task { await store.updateLocalModel(model) } }
+                Button { Task { await store.updateLocalModel(model) } } label: {
+                    WorkingActionLabel(
+                        isWorking: isUpdating,
+                        idleTitle: "Update with \(model.runtime.rawValue)"
+                    )
+                }
                     .buttonStyle(.borderedProminent)
-                    .disabled(store.workingIDs.contains(model.id))
+                    .disabled(isUpdating)
             }
         } options: {
             if let exclusion = store.exclusion(for: model) {

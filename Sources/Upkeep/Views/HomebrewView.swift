@@ -83,7 +83,7 @@ struct HomebrewView: View {
     }
 
     private var packageList: some View {
-        List(sortedPackages, selection: $store.selectedPackageID) { package in
+        List(sortedPackages, selection: $store.navigation.selectedPackageID) { package in
             PackageRow(package: package).tag(package.id)
         }
         .listStyle(.inset)
@@ -166,22 +166,28 @@ private struct PackageRow: View {
             }
             packageVersions
             if package.isOutdated && !store.isExcluded(package) {
-                Button("Update") { Task { await store.updatePackage(package) } }
+                Button { Task { await store.updatePackage(package) } } label: {
+                    WorkingActionLabel(
+                        isWorking: store.isWorking(.homebrewPackage(package.id)),
+                        idleTitle: "Update"
+                    )
+                }
                     .listRowPrimaryAction()
-                    .disabled(store.workingIDs.contains(package.id))
+                    .disabled(store.isWorking(.homebrewPackage(package.id)))
             } else {
                 Color.clear.frame(width: 108, height: 1).accessibilityHidden(true)
             }
         }
         .contextMenu {
             Button("Refresh") { Task { await store.refresh(package) } }
-                .disabled(store.workingIDs.contains("homebrew-refresh-\(package.id)"))
+                .disabled(store.isWorking(.homebrewRefresh(package.id)))
             Divider()
             if let exclusion = store.exclusion(for: package) {
                 Button("Restore Updates") { store.restore(exclusion) }
             } else {
                 if package.isOutdated {
                     Button("Update") { Task { await store.updatePackage(package) } }
+                        .disabled(store.isWorking(.homebrewPackage(package.id)))
                     Divider()
                 }
                 UpdateExclusionOptions(
@@ -198,6 +204,7 @@ private struct PackageRow: View {
     private var rowDetail: String {
         var details = [package.kind.rawValue]
         if package.isDependency { details.append("Dependency") }
+        if package.kind == .cask { details.append("May require password") }
         return details.joined(separator: " · ")
     }
 
@@ -269,20 +276,35 @@ struct PackageDetail: View {
     }
 
     private func updateCard(_ package: HomebrewPackage) -> some View {
-        InspectorUpdateStatusCard(subtitle: "Available through Homebrew") {
+        let isUpdating = store.isWorking(.homebrewPackage(package.id))
+        return InspectorUpdateStatusCard(
+            title: isUpdating ? "Updating…" : "Update available",
+            subtitle: isUpdating
+                ? "Preparing and running Homebrew"
+                : (package.kind == .cask
+                    ? "May require administrator password in Terminal"
+                    : "Available through Homebrew"),
+            systemImage: isUpdating ? "arrow.triangle.2.circlepath.circle.fill" : "arrow.down.circle.fill"
+        ) {
             if let exclusion = store.exclusion(for: package) {
                 Label(exclusion.mode.rawValue, systemImage: exclusion.mode == .ignored ? "eye.slash" : "forward.end")
                     .foregroundStyle(.orange)
                 Button("Restore Updates") { store.restore(exclusion) }
                     .buttonStyle(.borderedProminent)
+            } else if isUpdating {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel("Updating \(package.displayName)")
+                Text("Updating \(package.displayName)…")
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(.secondary)
             } else {
                 Button("Update") { Task { await store.updatePackage(package) } }
                     .buttonStyle(.borderedProminent)
-                    .disabled(store.workingIDs.contains(package.id))
             }
         } options: {
             Button("Refresh") { Task { await store.refresh(package) } }
-                .disabled(store.workingIDs.contains("homebrew-refresh-\(package.id)"))
+                .disabled(isUpdating || store.isWorking(.homebrewRefresh(package.id)))
             Divider()
             if let exclusion = store.exclusion(for: package) {
                 Button("Restore Updates") { store.restore(exclusion) }
@@ -307,7 +329,10 @@ struct PackageDetail: View {
             GridRow { label("Update status"); Text(package.isOutdated ? "Update available" : "Current") }
             if let license = package.license { GridRow { label("License"); Text(license) } }
             if let homepage = package.homepage { GridRow { label("Homepage"); Link(homepage.host() ?? homepage.absoluteString, destination: homepage) } }
-        }.padding(18).background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 14))
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 14))
     }
 
     private func versionSupport(_ package: HomebrewPackage) -> some View {

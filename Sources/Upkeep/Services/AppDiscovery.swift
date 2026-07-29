@@ -47,9 +47,16 @@ enum AppDiscovery {
     }
 
     private static func app(at url: URL, microsoftRegisteredPaths: Set<String>) -> InstalledApp? {
-        guard let bundle = Bundle(url: url) else { return nil }
+        let infoURL = url.appendingPathComponent("Contents/Info.plist")
+        guard let infoData = try? Data(contentsOf: infoURL, options: .mappedIfSafe),
+              let info = try? PropertyListSerialization.propertyList(
+                from: infoData,
+                options: [],
+                format: nil
+              ) as? [String: Any]
+        else { return nil }
         let dates = try? url.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey])
-        let info = bundle.infoDictionary ?? [:]
+        let bundleIdentifier = info["CFBundleIdentifier"] as? String
         let name = (info["CFBundleDisplayName"] as? String)
             ?? (info["CFBundleName"] as? String)
             ?? url.deletingPathExtension().lastPathComponent
@@ -57,14 +64,29 @@ enum AppDiscovery {
             ?? (info["CFBundleVersion"] as? String)
             ?? "Unknown"
         let build = info["CFBundleVersion"] as? String
-        let feed = (info["SUFeedURL"] as? String).flatMap(URL.init(string:))
+        let feed = sparkleFeedURL(
+            info: info,
+            bundleIdentifier: bundleIdentifier,
+            defaults: .standard
+        )
+        let electronUpdate = electronUpdateMetadata(at: url)
+        let identifier = bundleIdentifier?.lowercased()
         let repository = githubRepository(from: info, feedURL: feed)
-            ?? electronGitHubRepository(at: url)
+            ?? electronUpdate.repository
+            ?? trustedGitHubRepository(bundleIdentifier: identifier)
         let receiptURL = url.appendingPathComponent("Contents/_MASReceipt/receipt")
         let hasReceipt = FileManager.default.fileExists(atPath: receiptURL.path)
         let contentsURL = url.appendingPathComponent("Contents", isDirectory: true)
+        let hasUpdaterFramework = containsBuiltInUpdaterFramework(in: contentsURL)
+        let mozillaUpdate = mozillaUpdateMetadata(
+            bundleIdentifier: bundleIdentifier,
+            installedVersion: shortVersion
+        )
+        let chromiumUpdateChannel = chromiumUpdateChannel(bundleIdentifier: bundleIdentifier)
+        let braveUpdateChannel = braveUpdateChannel(bundleIdentifier: bundleIdentifier)
+        let steamAppID = steamAppID(at: url)
         let management = updateManagement(
-            bundleIdentifier: bundle.bundleIdentifier,
+            bundleIdentifier: bundleIdentifier,
             appPath: url.standardizedFileURL.path,
             hasReceipt: hasReceipt,
             receiptType: hasReceipt ? appStoreReceiptType(at: url) : nil,
@@ -72,12 +94,17 @@ enum AppDiscovery {
                 atPath: contentsURL.appendingPathComponent("embedded.provisionprofile").path
             ),
             hasSetappFramework: containsSetappFramework(in: contentsURL),
+            isSteamLauncher: steamAppID != nil,
             microsoftRegisteredPaths: microsoftRegisteredPaths
+        )
+        let managedStatus = managedUpdateStatus(
+            management: management,
+            steamAppID: steamAppID
         )
 
         return InstalledApp(
             name: name,
-            bundleIdentifier: bundle.bundleIdentifier,
+            bundleIdentifier: bundleIdentifier,
             installedVersion: shortVersion,
             buildVersion: build,
             url: url,
@@ -85,6 +112,15 @@ enum AppDiscovery {
             githubRepository: repository,
             hasAppStoreReceipt: hasReceipt,
             updateManagement: management,
+            hasBuiltInUpdater: feed != nil || electronUpdate.isConfigured
+                || hasUpdaterFramework || mozillaUpdate.channel != nil
+                || chromiumUpdateChannel != nil || braveUpdateChannel != nil,
+            mozillaUpdateProduct: mozillaUpdate.product,
+            mozillaUpdateChannel: mozillaUpdate.channel,
+            chromiumUpdateChannel: chromiumUpdateChannel,
+            braveUpdateChannel: braveUpdateChannel,
+            steamAppID: steamAppID,
+            managedUpdateStatus: managedStatus,
             installedAt: dates?.creationDate,
             modifiedAt: dates?.contentModificationDate
         )
@@ -97,6 +133,7 @@ enum AppDiscovery {
         receiptType: String?,
         hasEmbeddedProvisioningProfile: Bool,
         hasSetappFramework: Bool,
+        isSteamLauncher: Bool = false,
         microsoftRegisteredPaths: Set<String>
     ) -> AppUpdateManagement {
         let identifier = bundleIdentifier?.lowercased() ?? ""
@@ -111,9 +148,21 @@ enum AppDiscovery {
             return .appStore
         }
 
+        if isSteamLauncher || identifier == "com.valvesoftware.steam" { return .steam }
+        if identifier == "com.apple.safari" { return .macOS }
+        if identifier == "io.tailscale.ipn.macsys" { return .tailscale }
+        if identifier == "com.spotify.client" { return .spotify }
+        if identifier == "com.hnc.discord" { return .discord }
+        if identifier == "com.epicgames.epicgameslauncher" { return .epicGames }
+        if identifier == "com.jetbrains.toolbox" { return .jetBrainsToolbox }
+
         let standardizedPath = URL(fileURLWithPath: appPath).standardizedFileURL.path
         if microsoftRegisteredPaths.contains(standardizedPath) || microsoftAutoUpdateBundleIdentifiers.contains(identifier) {
             return .microsoftAutoUpdate
+        }
+        if identifier.hasPrefix("com.adobe.") { return .adobeCreativeCloud }
+        if standardizedPath.localizedCaseInsensitiveContains("/JetBrains Toolbox/") {
+            return .jetBrainsToolbox
         }
         return .direct
     }
@@ -131,6 +180,212 @@ enum AppDiscovery {
             contentsURL.appendingPathComponent("Resources/setappPublicKey.pem")
         ]
         return candidates.contains { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    private static func containsBuiltInUpdaterFramework(in contentsURL: URL) -> Bool {
+        let frameworks = contentsURL.appendingPathComponent("Frameworks", isDirectory: true)
+        return ["Sparkle.framework", "Squirrel.framework", "ShipIt.framework"].contains {
+            FileManager.default.fileExists(atPath: frameworks.appendingPathComponent($0).path)
+        }
+    }
+
+    static func mozillaUpdateMetadata(
+        bundleIdentifier: String?,
+        installedVersion: String
+    ) -> (product: MozillaUpdateProduct?, channel: MozillaUpdateChannel?) {
+        switch bundleIdentifier?.lowercased() {
+        case "org.mozilla.firefox":
+            return (.firefox, mozillaChannel(from: installedVersion))
+        case "org.mozilla.firefoxdeveloperedition":
+            return (.firefox, .developerEdition)
+        case "org.mozilla.nightly":
+            return (.firefox, .nightly)
+        case "org.mozilla.thunderbird", "org.mozilla.thunderbirdbeta", "org.mozilla.thunderbirddaily":
+            return (.thunderbird, mozillaChannel(from: installedVersion))
+        default:
+            return (nil, nil)
+        }
+    }
+
+    static func mozillaUpdateChannel(
+        bundleIdentifier: String?,
+        installedVersion: String
+    ) -> MozillaUpdateChannel? {
+        mozillaUpdateMetadata(
+            bundleIdentifier: bundleIdentifier,
+            installedVersion: installedVersion
+        ).channel
+    }
+
+    private static func mozillaChannel(from version: String) -> MozillaUpdateChannel {
+        let normalized = version.lowercased()
+        if normalized.contains("esr") { return .esr }
+        if normalized.contains("a") { return .nightly }
+        if normalized.contains("b") { return .developerEdition }
+        return .release
+    }
+
+    static func chromiumUpdateChannel(bundleIdentifier: String?) -> ChromiumUpdateChannel? {
+        switch bundleIdentifier?.lowercased() {
+        case "com.google.chrome": .stable
+        case "com.google.chrome.beta": .beta
+        case "com.google.chrome.dev": .dev
+        case "com.google.chrome.canary": .canary
+        default: nil
+        }
+    }
+
+    static func braveUpdateChannel(bundleIdentifier: String?) -> BraveUpdateChannel? {
+        switch bundleIdentifier?.lowercased() {
+        case "com.brave.browser": .release
+        case "com.brave.browser.beta": .beta
+        case "com.brave.browser.dev": .dev
+        case "com.brave.browser.nightly": .nightly
+        default: nil
+        }
+    }
+
+    private static func steamAppID(at appURL: URL) -> String? {
+        let launcher = appURL.appendingPathComponent("Contents/MacOS/run.sh")
+        guard let contents = try? String(contentsOf: launcher, encoding: .utf8),
+              let regex = try? NSRegularExpression(pattern: #"steam://run/(\d+)"#),
+              let match = regex.firstMatch(
+                in: contents,
+                range: NSRange(contents.startIndex..., in: contents)
+              ),
+              let range = Range(match.range(at: 1), in: contents)
+        else { return nil }
+        return String(contents[range])
+    }
+
+    private static let trustedGitHubRepositories: [String: String] = [
+        "com.github.githubclient": "desktop/desktop",
+        "com.electron.ollama": "ollama/ollama",
+        "com.microsoft.vscode": "microsoft/vscode",
+        "com.microsoft.vscodeinsiders": "microsoft/vscode",
+        "eu.exelban.stats": "exelban/stats",
+        "io.github.marticliment.unigetui": "Devolutions/UniGetUI"
+    ]
+
+    static func trustedGitHubRepository(bundleIdentifier: String?) -> String? {
+        guard let identifier = bundleIdentifier?.lowercased() else { return nil }
+        return customGitHubRepository(bundleIdentifier: identifier)
+            ?? trustedGitHubRepositories[identifier]
+    }
+
+    static func customGitHubRepository(
+        bundleIdentifier: String?,
+        defaults: UserDefaults = .standard
+    ) -> String? {
+        guard let identifier = bundleIdentifier?.lowercased(),
+              let mappings = defaults.dictionary(forKey: "customGitHubRepositories") as? [String: String]
+        else { return nil }
+        return mappings[identifier]
+    }
+
+    static func sparkleFeedURL(
+        info: [String: Any],
+        bundleIdentifier: String?,
+        defaults: UserDefaults
+    ) -> URL? {
+        let infoCandidates = [
+            info["SUFeedURL"] as? String,
+            info["SUSparkleFeedURL"] as? String,
+            info["SparkleFeedURL"] as? String,
+            (info["Sparkle"] as? [String: Any])?["FeedURL"] as? String
+        ]
+        let preferenceCandidates: [String?]
+        if let bundleIdentifier,
+           let domain = defaults.persistentDomain(forName: bundleIdentifier) {
+            preferenceCandidates = [
+                domain["SUFeedURL"] as? String,
+                domain["SUSparkleFeedURL"] as? String,
+                domain["SparkleFeedURL"] as? String
+            ]
+        } else {
+            preferenceCandidates = []
+        }
+        return (infoCandidates + preferenceCandidates)
+            .compactMap { $0 }
+            .compactMap(URL.init(string:))
+            .first { ["https", "http"].contains($0.scheme?.lowercased()) }
+    }
+
+    private static func managedUpdateStatus(
+        management: AppUpdateManagement,
+        steamAppID: String?
+    ) -> ManagedUpdateStatus? {
+        if management == .steam, let steamAppID,
+           let status = steamUpdateStatus(appID: steamAppID) {
+            return status
+        }
+        guard management.isExternallyManaged else { return nil }
+        return ManagedUpdateStatus(
+            state: .managed,
+            detail: management.updateExplanation
+        )
+    }
+
+    static func steamUpdateStatus(
+        appID: String,
+        applicationSupportURL: URL? = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first
+    ) -> ManagedUpdateStatus? {
+        guard let applicationSupportURL else { return nil }
+        let manifest = applicationSupportURL
+            .appendingPathComponent("Steam/steamapps/appmanifest_\(appID).acf")
+        guard let contents = try? String(contentsOf: manifest, encoding: .utf8) else { return nil }
+
+        func value(_ key: String) -> String? {
+            let pattern = "\"\(NSRegularExpression.escapedPattern(for: key))\"\\s+\"([^\"]*)\""
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
+                  let match = regex.firstMatch(
+                    in: contents,
+                    range: NSRange(contents.startIndex..., in: contents)
+                  ),
+                  let range = Range(match.range(at: 1), in: contents)
+            else { return nil }
+            return String(contents[range])
+        }
+
+        let flags = Int(value("StateFlags") ?? "") ?? 0
+        let downloaded = Double(value("BytesDownloaded") ?? "") ?? 0
+        let total = Double(value("BytesToDownload") ?? "") ?? 0
+        let progress = total > 0 ? downloaded / total : nil
+
+        if flags & 4096 != 0 {
+            return ManagedUpdateStatus(
+                state: .downloading,
+                detail: "Steam is downloading this update.",
+                progress: progress
+            )
+        }
+        if flags & (8 | 32 | 1024 | 2048 | 8192 | 16384) != 0 {
+            return ManagedUpdateStatus(
+                state: .installing,
+                detail: "Steam is preparing or installing this update.",
+                progress: progress
+            )
+        }
+        if flags & 16 != 0 {
+            return ManagedUpdateStatus(
+                state: .queued,
+                detail: "The Steam update is paused or queued.",
+                progress: progress
+            )
+        }
+        if flags & 2 != 0 {
+            return ManagedUpdateStatus(
+                state: .queued,
+                detail: "Steam reports an update is required."
+            )
+        }
+        return ManagedUpdateStatus(
+            state: .managed,
+            detail: "Steam reports the installed files are current."
+        )
     }
 
     private static func microsoftAutoUpdateRegisteredPaths() -> Set<String> {
@@ -176,18 +431,21 @@ enum AppDiscovery {
         return nil
     }
 
-    private static func electronGitHubRepository(at appURL: URL) -> String? {
+    private static func electronUpdateMetadata(
+        at appURL: URL
+    ) -> (repository: String?, isConfigured: Bool) {
         let resources = appURL.appendingPathComponent("Contents/Resources", isDirectory: true)
         for filename in ["app-update.yml", "app-update.yaml"] {
             let configURL = resources.appendingPathComponent(filename)
-            guard let contents = try? String(contentsOf: configURL, encoding: .utf8),
-                  contents.range(of: #"provider:\s*github"#, options: .regularExpression) != nil
-            else { continue }
+            guard let contents = try? String(contentsOf: configURL, encoding: .utf8) else { continue }
+            guard contents.range(of: #"provider:\s*github"#, options: .regularExpression) != nil else {
+                return (nil, true)
+            }
             let owner = yamlValue(named: "owner", in: contents)
             let repo = yamlValue(named: "repo", in: contents)
-            if let owner, let repo { return "\(owner)/\(repo)" }
+            return (owner.flatMap { owner in repo.map { "\(owner)/\($0)" } }, true)
         }
-        return nil
+        return (nil, false)
     }
 
     private static func yamlValue(named key: String, in contents: String) -> String? {

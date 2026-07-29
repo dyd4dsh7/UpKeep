@@ -1,10 +1,18 @@
 import Foundation
 
 struct UpdateScanner: Sendable {
+    private let dependencies: UpdateScannerDependencies
+
+    init(dependencies: UpdateScannerDependencies = .live) {
+        self.dependencies = dependencies
+    }
+
     struct TargetedAppReport: Sendable {
         let updates: [AvailableUpdate]
         let failedSources: Set<UpdateSource>
         let warnings: [ScanWarning]
+
+        static let empty = TargetedAppReport(updates: [], failedSources: [], warnings: [])
     }
 
     /// Checks only the sources declared by one application. Homebrew candidates are
@@ -30,23 +38,25 @@ struct UpdateScanner: Sendable {
             "Prereleases": settings.includePrereleaseUpdates.description,
             "Advanced sources": settings.includeAdvancedSources.description
         ])
-        async let installedApps = AppDiscovery.discover()
+        async let installedApps = dependencies.applicationDiscovery.discover()
         async let brewInventory = scopedResult(enabled: settings.checkHomebrew) {
-            try await HomebrewClient().inventory(includePrereleases: settings.includePrereleaseUpdates)
+            try await dependencies.homebrew.inventory(includePrereleases: settings.includePrereleaseUpdates)
         }
         async let brewCatalog = scopedResult(enabled: settings.checkHomebrew && settings.includeAdvancedSources) {
-            try await HomebrewClient().caskCatalog()
+            try await dependencies.homebrew.caskCatalog()
         }
         async let macOSReport = settings.checkMacOS
-            ? MacOSUpdateClient().scan(includeInstallers: settings.includeAdvancedSources)
+            ? dependencies.macOS.scan(includeInstallers: settings.includeAdvancedSources)
             : MacOSUpdateClient.Report.empty
         async let developerReport = settings.enabledDeveloperManagers.isEmpty
             ? DeveloperPackageClient.Report.empty
-            : DeveloperPackageClient().scan(
+            : dependencies.developerPackages.scan(
                 enabledManagers: settings.enabledDeveloperManagers,
                 includePrereleases: settings.includePrereleaseUpdates
             )
-        async let localModels = settings.checkLocalModels ? LocalModelClient().scan() : LocalModelClient.Report.empty
+        async let localModels = settings.checkLocalModels
+            ? dependencies.localModels.scan()
+            : LocalModelClient.Report.empty
 
         // App source checks only depend on discovery, so do not hold them behind
         // Homebrew, softwareupdate, developer-manager, or model scans.
@@ -113,8 +123,8 @@ struct UpdateScanner: Sendable {
                 adoptable = []
                 homebrewCatalogStatus = .failed
             } else {
-                adoptable = HomebrewClient.adoptableApps(
-                    from: apps.filter { !$0.updateManagement.isExternallyManaged },
+                adoptable = dependencies.homebrew.adoptableApps(
+                    from: apps.filter(\.allowsHomebrewAdoption),
                     catalog: catalog,
                     excluding: packages
                 ).filter {
@@ -276,12 +286,14 @@ struct UpdateScanner: Sendable {
 
     private enum AppUpdateSource: Sendable {
         case appStore
+        case developer
         case sparkle
         case github
 
         var source: UpdateSource {
             switch self {
             case .appStore: .appStore
+            case .developer: .developer
             case .sparkle: .sparkle
             case .github: .github
             }
@@ -345,12 +357,24 @@ struct UpdateScanner: Sendable {
     }
 
     private func enabledSources(for app: InstalledApp, settings: ScanSettings) -> [AppUpdateSource] {
-        guard !app.updateManagement.isExternallyManaged else { return [] }
-        var sources: [AppUpdateSource] = []
-        if settings.checkAppStore, app.updateManagement == .appStore { sources.append(.appStore) }
-        if settings.checkSparkle, app.sparkleFeedURL != nil { sources.append(.sparkle) }
-        if settings.checkGitHub, app.githubRepository != nil { sources.append(.github) }
-        return sources
+        switch app.updateManagement {
+        case .appStore:
+            return settings.checkAppStore ? [.appStore] : []
+        case .direct:
+            var sources: [AppUpdateSource] = []
+            if app.mozillaUpdateChannel != nil
+                || app.chromiumUpdateChannel != nil
+                || app.braveUpdateChannel != nil {
+                sources.append(.developer)
+            }
+            if settings.checkSparkle, app.sparkleFeedURL != nil { sources.append(.sparkle) }
+            if settings.checkGitHub, app.githubRepository != nil { sources.append(.github) }
+            return sources
+        case .testFlight, .setapp, .microsoftAutoUpdate, .steam,
+             .adobeCreativeCloud, .jetBrainsToolbox, .spotify, .discord, .epicGames,
+             .tailscale, .macOS:
+            return []
+        }
     }
 
     private func checkSource(
@@ -364,14 +388,16 @@ struct UpdateScanner: Sendable {
             let update: AvailableUpdate?
             switch appSource {
             case .appStore:
-                update = try await AppStoreClient().update(for: app)
+                update = try await dependencies.appStore.update(for: app)
+            case .developer:
+                update = try await dependencies.mozilla.update(for: app)
             case .sparkle:
-                update = try await SparkleClient().update(
+                update = try await dependencies.sparkle.update(
                     for: app,
                     includePrereleases: includePrereleases
                 )
             case .github:
-                update = try await GitHubClient().update(
+                update = try await dependencies.github.update(
                     for: app,
                     includePrereleases: includePrereleases
                 )
@@ -394,7 +420,7 @@ struct UpdateScanner: Sendable {
     }
 
     static func allowsHomebrewCandidate(for app: InstalledApp) -> Bool {
-        !app.updateManagement.isExternallyManaged
+        app.updateManagement == .direct
     }
 
     private func caskIsNewer(_ candidate: String, than app: InstalledApp) -> Bool {
@@ -420,6 +446,7 @@ private extension UpdateSource {
     var warningSource: ScanWarningSource {
         switch self {
         case .appStore: .appStore
+        case .developer: .developer
         case .sparkle: .sparkle
         case .homebrew: .homebrew
         case .github: .github

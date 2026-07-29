@@ -8,6 +8,9 @@ let package = Package(
         .executable(name: "Upkeep", targets: ["Upkeep"])
     ],
     dependencies: [
+        // Command Line Tools exposes `Testing` but not its `_TestingInternals`
+        // support module. Keep the package dependency so local CLI builds and CI
+        // resolve the same complete test runtime.
         .package(url: "https://github.com/swiftlang/swift-testing.git", exact: "0.12.0")
     ],
     targets: [

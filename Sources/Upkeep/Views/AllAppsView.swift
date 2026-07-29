@@ -36,10 +36,10 @@ struct AllAppsView: View {
                     .contextMenu {
                         if let update = store.updates.first(where: { $0.app.id == app.id }) {
                             Button(update.actionTitle) { Task { await store.performUpdate(update) } }
-                                .disabled(store.workingIDs.contains(update.id))
+                                .disabled(store.isUpdating(update))
                         }
                         Button("Refresh") { Task { await store.refresh(app) } }
-                            .disabled(store.workingIDs.contains("app-refresh-\(app.id)"))
+                            .disabled(store.isWorking(.applicationRefresh(app.id)))
                         Divider()
                         if let exclusion = activeExclusion(for: app) {
                             Button("Restore Updates") { store.restore(exclusion) }
@@ -282,7 +282,9 @@ struct AllAppsView: View {
     }
 
     private func isUnmapped(_ app: InstalledApp) -> Bool {
-        store.sources(for: app).isEmpty && !app.updateManagement.isExternallyManaged
+        store.sources(for: app).isEmpty
+            && !app.updateManagement.isExternallyManaged
+            && !app.hasBuiltInUpdater
     }
 
     private var selectedAppID: Binding<String?> {
@@ -310,7 +312,8 @@ struct AllAppsView: View {
     private func sourceSummary(for app: InstalledApp) -> String {
         let sources = store.sources(for: app)
         guard let first = sources.first else {
-            return app.updateManagement.isExternallyManaged ? app.updateManagement.rawValue : "No update source"
+            if app.updateManagement.isExternallyManaged { return app.updateManagement.rawValue }
+            return app.hasBuiltInUpdater ? "Built-in updater" : "No update source"
         }
         return sources.count == 1 ? first.rawValue : "\(first.rawValue) + \(sources.count - 1) more"
     }
@@ -361,6 +364,7 @@ struct AppDetailView: View {
                     updateStatus
                     if settings.sidebarViewMode == .advanced {
                         updateSources
+                        githubSourceManagement
                     }
                     releaseNotes
                     homebrewManagement
@@ -380,6 +384,11 @@ struct AppDetailView: View {
         .task(id: detailState.showsTechnicalDetails ? app.id : nil) {
             guard detailState.showsTechnicalDetails else { return }
             await inspection.load(app)
+        }
+        .task(id: app.id) {
+            detailState.githubRepositoryEntry = settings.githubRepository(for: app.bundleIdentifier)
+                ?? app.githubRepository
+                ?? ""
         }
     }
 
@@ -494,6 +503,9 @@ struct AppDetailView: View {
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
+                                Text(candidate.verification.rawValue)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
                             }
                             Spacer()
                             if index > 0 {
@@ -502,7 +514,7 @@ struct AppDetailView: View {
                                 }
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
-                                .disabled(store.workingIDs.contains(update.id))
+                                .disabled(store.isUpdating(update.selecting(candidate)))
                             }
                         }
                         .padding(12)
@@ -510,6 +522,54 @@ struct AppDetailView: View {
                 }
                 .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 14))
             }
+        }
+    }
+
+    @ViewBuilder
+    private var githubSourceManagement: some View {
+        if app.bundleIdentifier != nil {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("GitHub Source").font(.title2.weight(.semibold))
+                Text("Attach a publisher repository when Upkeep cannot discover one from the app. The repository must have published releases.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 10) {
+                    TextField("owner/project", text: $detailState.githubRepositoryEntry)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(detailState.isSavingGitHubRepository)
+                    Button(settings.githubRepository(for: app.bundleIdentifier) == nil ? "Verify & Use" : "Update") {
+                        detailState.isSavingGitHubRepository = true
+                        Task {
+                            await store.setGitHubRepository(detailState.githubRepositoryEntry, for: app)
+                            detailState.isSavingGitHubRepository = false
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(
+                        detailState.isSavingGitHubRepository
+                            || GitHubClient.normalizedRepository(detailState.githubRepositoryEntry) == nil
+                    )
+                    if settings.githubRepository(for: app.bundleIdentifier) != nil {
+                        Button("Remove") {
+                            detailState.isSavingGitHubRepository = true
+                            Task {
+                                await store.removeCustomGitHubRepository(for: app)
+                                detailState.githubRepositoryEntry = store.selectedApp?.githubRepository ?? ""
+                                detailState.isSavingGitHubRepository = false
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(detailState.isSavingGitHubRepository)
+                    }
+                }
+                if detailState.isSavingGitHubRepository {
+                    ProgressView("Validating publisher releases…")
+                        .controlSize(.small)
+                }
+            }
+            .padding(16)
+            .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 14))
         }
     }
 
@@ -534,11 +594,27 @@ struct AppDetailView: View {
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
+                    if let managedStatus = app.managedUpdateStatus {
+                        Text(managedStatus.detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let verification = store.externalUpdateVerification(for: app) {
+                        Text(verification.detail)
+                            .font(.caption)
+                            .foregroundStyle(
+                                verification.state == .attention ? Color.orange : Color.secondary
+                            )
+                    }
                 }
                 Spacer()
                 updateOptionsMenu
             }
             Divider()
+            if let progress = app.managedUpdateStatus?.progress {
+                ProgressView(value: progress)
+                    .accessibilityLabel(app.managedUpdateStatus?.state.rawValue ?? "Update progress")
+            }
             actionGrid
         }
         .padding(16)
@@ -593,14 +669,6 @@ struct AppDetailView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button {
-                        Task { await store.adopt(adoptableItem) }
-                    } label: {
-                        if store.workingIDs.contains(adoptableItem.id) { ProgressView().controlSize(.small) }
-                        else { Text("Adopt with Homebrew") }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(store.workingIDs.contains(adoptableItem.id))
                 }
                 .padding(16)
                 .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 14))
@@ -654,15 +722,29 @@ struct AppDetailView: View {
                 Button {
                     Task { await store.performUpdate(update) }
                 } label: {
-                    if store.workingIDs.contains(update.id) {
-                        ProgressView().controlSize(.small).frame(maxWidth: .infinity)
-                    } else {
-                        Label(primaryActionTitle, systemImage: update.actionSystemImage)
-                            .frame(maxWidth: .infinity)
-                    }
+                    WorkingActionLabel(
+                        isWorking: store.isUpdating(update),
+                        idleTitle: primaryActionTitle
+                    )
+                    .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(store.workingIDs.contains(update.id))
+                .disabled(store.isUpdating(update))
+            }
+            if let adoptableItem, !adoptionHandledByUpdate, !homebrewAdoptionIgnored {
+                Button {
+                    Task { await store.adopt(adoptableItem) }
+                } label: {
+                    WorkingActionLabel(
+                        isWorking: store.isWorking(.homebrewAdoption(adoptableItem.id)),
+                        idleTitle: "Adopt",
+                        workingTitle: "Adopting…"
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(store.isWorking(.homebrewAdoption(adoptableItem.id)))
+                .help("Adopt with Homebrew using the \(adoptableItem.caskToken) cask")
             }
             if app.updateManagement.isExternallyManaged {
                 Button { store.openUpdateManager(for: app) } label: {
@@ -710,10 +792,10 @@ struct AppDetailView: View {
     private var updateOptionCommands: some View {
         if let update {
             Button(update.actionTitle) { Task { await store.performUpdate(update) } }
-                .disabled(store.workingIDs.contains(update.id))
+                .disabled(store.isUpdating(update))
         }
         Button("Refresh") { Task { await store.refresh(app) } }
-            .disabled(store.workingIDs.contains("app-refresh-\(app.id)"))
+            .disabled(store.isWorking(.applicationRefresh(app.id)))
         Divider()
         if let exclusion {
             Button("Restore Updates") { store.restore(exclusion) }
@@ -752,6 +834,9 @@ struct AppDetailView: View {
     private var statusTitle: String {
         if let exclusion { return exclusion.mode == .ignored ? "Updates ignored" : "Version skipped" }
         if update == nil, app.updateManagement.isExternallyManaged {
+            if let status = app.managedUpdateStatus, status.state != .managed {
+                return status.state.rawValue
+            }
             return "Managed by \(app.updateManagement.rawValue)"
         }
         return update == nil ? "Up to date" : "Update available"
@@ -764,19 +849,25 @@ struct AppDetailView: View {
                 : "This version is skipped. A later release will appear automatically."
         }
         if app.updateManagement.isExternallyManaged { return app.updateManagement.updateExplanation }
-        if store.source(for: app) == nil { return "No supported update source was detected for this app." }
+        if store.source(for: app) == nil {
+            return app.hasBuiltInUpdater
+                ? "This app contains its own updater. Open the app to check or install updates."
+                : "No supported update source was detected for this app."
+        }
         return "No newer version was reported by the configured update source."
     }
 
     private var statusIcon: String {
         if let exclusion { return exclusion.mode == .ignored ? "eye.slash.circle.fill" : "forward.end.circle.fill" }
         if update == nil, app.updateManagement.isExternallyManaged { return "gearshape.2.fill" }
+        if update == nil, app.hasBuiltInUpdater { return "arrow.triangle.2.circlepath.circle.fill" }
         return update == nil ? "checkmark.circle.fill" : "arrow.down.circle.fill"
     }
 
     private var statusColor: Color {
         if exclusion != nil { return .orange }
         if update == nil, app.updateManagement.isExternallyManaged { return .blue }
+        if update == nil, app.hasBuiltInUpdater { return .blue }
         return update == nil ? .green : .accentColor
     }
 
@@ -789,6 +880,8 @@ struct AppDetailView: View {
         case .github:
             guard let repository = app.githubRepository else { return nil }
             return URL(string: "https://github.com/\(repository)")
+        case .developer:
+            return app.url
         case .sparkle:
             return app.sparkleFeedURL
         case .appStore:
@@ -802,6 +895,7 @@ struct AppDetailView: View {
         switch update?.source ?? store.source(for: app) {
         case .appStore: "Open App Store"
         case .homebrew: "Open Homebrew"
+        case .developer: "Open App"
         case .github: update == nil ? "Open GitHub" : "Open Release"
         case .sparkle: update?.actionURL == nil ? "Open Sparkle" : "Open Download"
         case nil: "Open Source"
@@ -812,6 +906,7 @@ struct AppDetailView: View {
         switch update?.source ?? store.source(for: app) {
         case .appStore: "storefront"
         case .homebrew: "shippingbox"
+        case .developer: "arrow.triangle.2.circlepath"
         case .github: "arrow.up.right.square"
         case .sparkle: update?.requiresInAppInstallation == true ? "arrow.down.circle" : "wand.and.stars"
         case nil: "arrow.up.right.square"
@@ -821,7 +916,9 @@ struct AppDetailView: View {
     private var buildText: String { app.buildVersion.map { " (build \($0))" } ?? "" }
     private var sourceNames: String {
         let names = store.sources(for: app).map(\.rawValue).joined(separator: ", ")
-        return names.isEmpty ? (app.updateManagement.isExternallyManaged ? app.updateManagement.rawValue : "No source") : names
+        if !names.isEmpty { return names }
+        if app.updateManagement.isExternallyManaged { return app.updateManagement.rawValue }
+        return app.hasBuiltInUpdater ? "Built-in updater" : "No source"
     }
     private func detailLabel(_ text: String) -> some View { Text(text).foregroundStyle(.secondary) }
 }
@@ -829,6 +926,8 @@ struct AppDetailView: View {
 @MainActor
 private final class AppDetailState: ObservableObject {
     @Published var showsTechnicalDetails = false
+    @Published var githubRepositoryEntry = ""
+    @Published var isSavingGitHubRepository = false
 }
 
 struct AppIcon: View {
@@ -846,7 +945,13 @@ struct SourceBadge: View {
             .foregroundStyle(color).background(color.opacity(0.1), in: Capsule())
     }
     private var color: Color {
-        switch source { case .appStore: .blue; case .sparkle: .purple; case .homebrew: .orange; case .github: .primary }
+        switch source {
+        case .appStore: .blue
+        case .developer: .teal
+        case .sparkle: .purple
+        case .homebrew: .orange
+        case .github: .primary
+        }
     }
 }
 

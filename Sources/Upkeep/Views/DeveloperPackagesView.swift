@@ -65,17 +65,20 @@ struct DeveloperPackagesView: View {
     }
 
     private var packageList: some View {
-        List(sortedPackages, selection: $store.selectedDeveloperPackageID) { package in
-            DeveloperPackageRow(package: package).tag(package.id)
+        List(sortedPackages, selection: $store.navigation.selectedDeveloperPackageID) { package in
+            DeveloperPackageRow(
+                store: store,
+                package: package,
+                isRefreshing: store.isRefreshing(package),
+                exclusion: store.exclusion(for: package),
+                isWorking: store.isWorking(.developerPackage(package.id))
+            )
+            .equatable()
+            .tag(package.id)
         }
         .listStyle(.inset)
         .onAppear { ensurePackageSelection() }
         .onChange(of: store.filteredDeveloperPackages.map(\.id)) { _, _ in ensurePackageSelection() }
-        .onChange(of: store.selectedDeveloperPackageID) { _, identifier in
-            if let identifier, let package = store.developerPackages.first(where: { $0.id == identifier }) {
-                Task { await store.loadAvailableVersions(for: package) }
-            }
-        }
     }
 
     private var sortedPackages: [DeveloperPackage] {
@@ -93,7 +96,7 @@ struct DeveloperPackagesView: View {
     }
 
     private var isCheckingDeveloperPackages: Bool {
-        store.workingIDs.contains { $0.hasPrefix("developer-scan-") }
+        store.isDeveloperScanRunning
     }
 
     private var developerFilters: [DeveloperManagerFilter] {
@@ -124,8 +127,7 @@ struct BundledPackageIcon: View {
 
     var body: some View {
         Group {
-            if let url = bundledPackageAssetURL(named: name),
-               let image = NSImage(contentsOf: url) {
+            if let image = BundledPackageImageCache.shared.image(named: name) {
                 Image(nsImage: image).resizable().scaledToFit()
             } else {
                 Image(systemName: "shippingbox.fill").resizable().scaledToFit().padding(size * 0.2)
@@ -136,14 +138,53 @@ struct BundledPackageIcon: View {
     }
 }
 
+@MainActor
+private final class BundledPackageImageCache {
+    static let shared = BundledPackageImageCache()
+
+    private var images: [String: NSImage] = [:]
+    private var missingImageNames = Set<String>()
+
+    func image(named name: String) -> NSImage? {
+        if let image = images[name] {
+            return image
+        }
+        guard !missingImageNames.contains(name),
+              let url = bundledPackageAssetURL(named: name),
+              let image = NSImage(contentsOf: url) else {
+            missingImageNames.insert(name)
+            return nil
+        }
+        images[name] = image
+        return image
+    }
+}
+
 func bundledPackageAssetURL(named name: String) -> URL? {
     Bundle.module.url(forResource: name, withExtension: "png")
         ?? Bundle.module.url(forResource: name, withExtension: "svg")
 }
 
-private struct DeveloperPackageRow: View {
-    @EnvironmentObject private var store: UpkeepStore
+func openDeveloperPackageFolder(_ package: DeveloperPackage) {
+    let folderURL = URL(fileURLWithPath: package.executablePath)
+        .deletingLastPathComponent()
+        .standardizedFileURL
+    NSWorkspace.shared.open(folderURL)
+}
+
+private struct DeveloperPackageRow: View, Equatable {
+    let store: UpkeepStore
     let package: DeveloperPackage
+    let isRefreshing: Bool
+    let exclusion: UpdateExclusion?
+    let isWorking: Bool
+
+    nonisolated static func == (left: Self, right: Self) -> Bool {
+        left.package == right.package
+            && left.isRefreshing == right.isRefreshing
+            && left.exclusion == right.exclusion
+            && left.isWorking == right.isWorking
+    }
 
     var body: some View {
         StandardItemRow {
@@ -156,15 +197,20 @@ private struct DeveloperPackageRow: View {
                 prereleaseIsInstalled: package.prereleaseIsInstalled
             )
         } accessories: {
-            if store.isRefreshing(package) {
+            if isRefreshing {
                 ProgressView().controlSize(.small)
                     .accessibilityLabel("Refreshing \(package.name)")
             }
             packageVersions
-            if package.isOutdated && !store.isExcluded(package) {
-                Button(package.canUpdateAutomatically ? "Update" : "View Update") { Task { await store.updateDeveloperPackage(package) } }
+            if package.isOutdated && exclusion == nil {
+                Button { Task { await store.updateDeveloperPackage(package) } } label: {
+                    WorkingActionLabel(
+                        isWorking: isWorking,
+                        idleTitle: package.canUpdateAutomatically ? "Update" : "View Update"
+                    )
+                }
                     .listRowPrimaryAction()
-                    .disabled(store.workingIDs.contains(package.id))
+                    .disabled(isWorking)
             } else {
                 Color.clear.frame(width: 108, height: 1).accessibilityHidden(true)
             }
@@ -172,13 +218,15 @@ private struct DeveloperPackageRow: View {
         .contentShape(Rectangle())
         .contextMenu {
             Button("Refresh") { Task { await store.refresh(package) } }
-                .disabled(store.workingIDs.contains("developer-refresh-\(package.id)"))
+                .disabled(isRefreshing)
+            Button("Open Folder") { openDeveloperPackageFolder(package) }
             Divider()
-            if let exclusion = store.exclusion(for: package) {
+            if let exclusion {
                 Button("Restore Updates") { store.restore(exclusion) }
             } else {
                 if package.isOutdated {
                     Button(package.canUpdateAutomatically ? "Update" : "View Update") { Task { await store.updateDeveloperPackage(package) } }
+                        .disabled(isWorking)
                     Divider()
                 }
                 UpdateExclusionOptions(
@@ -199,7 +247,7 @@ private struct DeveloperPackageRow: View {
     }
 
     @ViewBuilder private var packageVersions: some View {
-        if let exclusion = store.exclusion(for: package) {
+        if let exclusion {
             ItemStatusView(
                 title: exclusion.mode.rawValue,
                 systemImage: exclusion.mode == .ignored ? "eye.slash" : "forward.end",
@@ -220,7 +268,7 @@ struct DeveloperPackageDetail: View {
 
     var body: some View {
         if let package {
-            DeveloperPackageDetailContent(package: package).id(package.id)
+            DeveloperPackageDetailContent(package: package)
         } else {
             ContentUnavailableView("Select a package", systemImage: "shippingbox")
         }
@@ -229,6 +277,7 @@ struct DeveloperPackageDetail: View {
 
 private struct DeveloperPackageDetailContent: View {
     @EnvironmentObject private var store: UpkeepStore
+    @StateObject private var detailState = DeveloperPackageDetailState()
     let package: DeveloperPackage
 
     var body: some View {
@@ -257,50 +306,162 @@ private struct DeveloperPackageDetailContent: View {
                     GridRow { label("Executable"); Text(package.executablePath).lineLimit(2).textSelection(.enabled) }
                     if let homepage = package.manager.homepage { GridRow { label("Registry"); Link(homepage.host() ?? homepage.absoluteString, destination: packageURL ?? homepage) } }
                 }
-                .padding(18).background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 14))
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 14))
+
+                actionGrid
 
                 if package.canUpdateAutomatically { VStack(alignment: .leading, spacing: 10) {
                     Text("Install a Version").font(.title2.bold())
-                    Text("Choose a published version from \(package.manager.rawValue). The newest available version is selected automatically.")
+                    Text("The newest version is ready to install. Load published versions to choose an older release.")
                         .font(.callout).foregroundStyle(.secondary)
                     HStack {
-                        Picker("Version", selection: $store.selectedDeveloperVersion) {
-                            ForEach(store.availableDeveloperVersions, id: \.self) { version in
+                        Picker("Version", selection: Binding(
+                            get: { detailState.versionState.selectedVersion },
+                            set: { detailState.selectVersion($0) }
+                        )) {
+                            ForEach(detailState.versionState.availableVersions, id: \.self) { version in
                                 Text(versionMenuLabel(version, package: package)).tag(version)
                             }
                         }
                         .frame(maxWidth: 260)
-                        .disabled(store.isLoadingDeveloperVersions)
-                        if store.isLoadingDeveloperVersions { ProgressView().controlSize(.small) }
-                        Button("Install Version") {
-                            Task { await store.installDeveloperPackage(package, version: store.selectedDeveloperVersion) }
+                        .disabled(detailState.versionState.isLoading)
+                        if detailState.versionState.isLoading {
+                            ProgressView()
+                                .controlSize(.small)
+                                .frame(width: 24)
+                                .accessibilityLabel("Loading published versions")
+                        } else {
+                            Button {
+                                Task {
+                                    detailState.beginLoadingVersions()
+                                    let versions = await store.developerVersions(for: package)
+                                    guard detailState.packageID == package.id else { return }
+                                    detailState.finishLoadingVersions(versions, for: package)
+                                }
+                            } label: {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Load all published versions")
+                            .accessibilityLabel("Load published versions")
+                        }
+                        Button {
+                            Task { await store.installDeveloperPackage(package, version: detailState.versionState.selectedVersion) }
+                        } label: {
+                            WorkingActionLabel(
+                                isWorking: store.isWorking(.developerPackage(package.id)),
+                                idleTitle: "Install Version",
+                                workingTitle: "Installing…"
+                            )
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(store.selectedDeveloperVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.workingIDs.contains(package.id))
+                        .disabled(detailState.versionState.selectedVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.isWorking(.developerPackage(package.id)))
                     }
                 } }
                 PackageSecurityExplanation(manager: package.manager.rawValue)
             }.padding(26).frame(maxWidth: .infinity, alignment: .leading)
         }
-        .task(id: package.id + String(store.settings.includePrereleaseUpdates)) {
-            await store.loadAvailableVersions(for: package)
+        .confirmationDialog(
+            "Uninstall \(package.name)?",
+            isPresented: $detailState.isConfirmingUninstall,
+            titleVisibility: .visible
+        ) {
+            Button("Uninstall", role: .destructive) {
+                Task { await store.uninstallDeveloperPackage(package) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(uninstallConfirmationMessage)
+        }
+        .onAppear {
+            detailState.prepare(for: package)
+        }
+        .onChange(of: package.id) { _, _ in
+            detailState.prepare(for: package)
+        }
+    }
+
+    private var actionGrid: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 10)], alignment: .leading, spacing: 10) {
+            Button { openDeveloperPackageFolder(package) } label: {
+                Label("Open Folder", systemImage: "folder")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .help("Open the folder containing the \(package.manager.rawValue) executable")
+
+            if let packageURL {
+                Button { NSWorkspace.shared.open(packageURL) } label: {
+                    Label("Open Package Page", systemImage: "arrow.up.right.square")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
+
+            if let homepage = package.manager.homepage, homepage != packageURL {
+                Button { NSWorkspace.shared.open(homepage) } label: {
+                    Label("Manager Website", systemImage: "safari")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
+
+            if DeveloperPackageUninstallAdapters.supports(package) {
+                Button(role: .destructive) { detailState.isConfirmingUninstall = true } label: {
+                    WorkingActionLabel(
+                        isWorking: store.isWorking(.developerPackage(package.id)),
+                        idleTitle: "Uninstall",
+                        workingTitle: "Uninstalling…"
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(.red)
+                .disabled(store.isWorking(.developerPackage(package.id)))
+            }
+        }
+        .controlSize(.large)
+        .buttonBorderShape(.capsule)
+    }
+
+    private var uninstallConfirmationMessage: String {
+        switch package.manager {
+        case .node, .fnm, .rustup:
+            "This removes version \(package.currentVersion) and may also remove tools installed into that runtime. This cannot be undone by Upkeep."
+        case .uv where package.registryIdentifier?.hasPrefix("python:") == true:
+            "This removes version \(package.currentVersion) and may also remove tools installed into that runtime. This cannot be undone by Upkeep."
+        default:
+            "This removes \(package.name) \(package.currentVersion) using \(package.manager.rawValue). This cannot be undone by Upkeep."
         }
     }
 
     private var updateCard: some View {
-        InspectorUpdateStatusCard(subtitle: "Available through \(package.manager.rawValue)") {
+        let isUpdating = store.isWorking(.developerPackage(package.id))
+        return InspectorUpdateStatusCard(
+            title: isUpdating ? "Updating…" : "Update available",
+            subtitle: isUpdating ? "Running \(package.manager.rawValue)" : "Available through \(package.manager.rawValue)",
+            systemImage: isUpdating ? "arrow.triangle.2.circlepath.circle.fill" : "arrow.down.circle.fill"
+        ) {
             if let exclusion = store.exclusion(for: package) {
                 Label(exclusion.mode.rawValue, systemImage: exclusion.mode == .ignored ? "eye.slash" : "forward.end")
                     .foregroundStyle(.orange)
                 Button("Restore Updates") { store.restore(exclusion) }.buttonStyle(.borderedProminent)
             } else {
-                Button(package.canUpdateAutomatically ? "Update" : "View Update") { Task { await store.updateDeveloperPackage(package) } }
+                Button { Task { await store.updateDeveloperPackage(package) } } label: {
+                    WorkingActionLabel(
+                        isWorking: isUpdating,
+                        idleTitle: package.canUpdateAutomatically ? "Update" : "View Update"
+                    )
+                }
                     .buttonStyle(.borderedProminent)
-                    .disabled(store.workingIDs.contains(package.id))
+                    .disabled(isUpdating)
             }
         } options: {
             Button("Refresh") { Task { await store.refresh(package) } }
-                .disabled(store.workingIDs.contains("developer-refresh-\(package.id)"))
+                .disabled(isUpdating || store.isWorking(.developerRefresh(package.id)))
+            Button("Open Folder") { openDeveloperPackageFolder(package) }
             Divider()
             if let exclusion = store.exclusion(for: package) {
                 Button("Restore Updates") { store.restore(exclusion) }
@@ -354,4 +515,44 @@ private struct DeveloperPackageDetailContent: View {
     }
 
     private func label(_ text: String) -> some View { Text(text).foregroundStyle(.secondary) }
+}
+
+@MainActor
+private final class DeveloperPackageDetailState: ObservableObject {
+    struct VersionState {
+        var selectedVersion = ""
+        var availableVersions: [String] = []
+        var isLoading = false
+    }
+
+    @Published var isConfirmingUninstall = false
+    @Published private(set) var versionState = VersionState()
+    private(set) var packageID: String?
+
+    func prepare(for package: DeveloperPackage) {
+        packageID = package.id
+        versionState = VersionState(
+            selectedVersion: package.latestVersion,
+            availableVersions: [package.latestVersion],
+            isLoading: false
+        )
+    }
+
+    func selectVersion(_ version: String) {
+        versionState.selectedVersion = version
+    }
+
+    func beginLoadingVersions() {
+        versionState.isLoading = true
+    }
+
+    func finishLoadingVersions(_ versions: [String], for package: DeveloperPackage) {
+        versionState = VersionState(
+            selectedVersion: versions.contains(package.latestVersion)
+                ? package.latestVersion
+                : (versions.first ?? package.currentVersion),
+            availableVersions: versions,
+            isLoading: false
+        )
+    }
 }

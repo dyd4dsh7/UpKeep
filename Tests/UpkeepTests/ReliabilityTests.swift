@@ -46,6 +46,34 @@ import Testing
     #expect(!HomebrewClient.BrewError.isConcurrentCommandFailure("No available formula with the name foo"))
 }
 
+@Test func homebrewRecognizesInteractiveAuthorizationFailures() {
+    #expect(HomebrewClient.BrewError.requiresInteractiveAuthorization(
+        "sudo: a terminal is required to read the password\nsudo: a password is required"
+    ))
+    #expect(HomebrewClient.BrewError.requiresInteractiveAuthorization(
+        "sudo: no tty present and no askpass program specified"
+    ))
+    #expect(!HomebrewClient.BrewError.requiresInteractiveAuthorization(
+        "Error: Cask docker-desktop is not installed."
+    ))
+}
+
+@Test func homebrewRecognizesAdoptionPermissionFailuresWithoutMatchingUnrelatedErrors() {
+    #expect(HomebrewClient.BrewError.requiresAdoptionPermissionRepair(
+        """
+        ==> Adopting existing App at '/Applications/CodexBar.app'
+        chmod: Unable to change file mode on /Applications/CodexBar.app/Contents/Resources/icon.svg: Operation not permitted
+        Error: Failure while executing; `/usr/bin/env chmod -R a+rX /Applications/CodexBar.app` exited with 1.
+        """
+    ))
+    #expect(!HomebrewClient.BrewError.requiresAdoptionPermissionRepair(
+        "chmod: /opt/homebrew/share/example: Operation not permitted"
+    ))
+    #expect(!HomebrewClient.BrewError.requiresAdoptionPermissionRepair(
+        "Error: Cask codexbar is unavailable."
+    ))
+}
+
 @Test func warningSummariesStayCompact() {
     let warning = ScanWarning(
         source: .sparkle,
@@ -65,7 +93,11 @@ import Testing
 }
 
 @Test func externallyManagedAppsRejectHomebrewCandidates() {
-    for management in [AppUpdateManagement.testFlight, .setapp, .microsoftAutoUpdate] {
+    for management in [
+        AppUpdateManagement.appStore, .testFlight, .setapp, .microsoftAutoUpdate,
+        .steam, .adobeCreativeCloud, .jetBrainsToolbox, .spotify, .discord,
+        .epicGames, .tailscale, .macOS
+    ] {
         let app = InstalledApp(
             name: "Managed App",
             bundleIdentifier: "com.example.managed",

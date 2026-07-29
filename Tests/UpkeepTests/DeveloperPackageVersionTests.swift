@@ -5,6 +5,8 @@ import Testing
 @Test func findsNVMDirectoryFromNodeExecutable() {
     #expect(nvmDirectory(for: "/Users/example/.nvm/versions/node/v24.15.0/bin/node") == "/Users/example/.nvm")
     #expect(nvmDirectory(for: "/opt/homebrew/bin/node") == nil)
+    #expect(nvmNodeVersion(for: "/Users/example/.nvm/versions/node/v24.15.0/bin/node") == "24.15.0")
+    #expect(nvmNodeVersion(for: "/opt/homebrew/bin/node") == nil)
 }
 
 @Test func selectsNodeExecutableMatchingNVMDefaultAlias() {
@@ -15,6 +17,90 @@ import Testing
 
     #expect(preferredNVMExecutable(candidates: candidates, alias: "24") == candidates[1])
     #expect(preferredNVMExecutable(candidates: candidates, alias: "v26.5.0") == candidates[0])
+}
+
+@Test func nvmNodeUpdateReplacesTheSelectedRuntimeAndPreservesDefault() throws {
+    let fileManager = FileManager.default
+    let directory = fileManager.temporaryDirectory
+        .appendingPathComponent("UpkeepNVMUpdateTests-\(UUID().uuidString)", isDirectory: true)
+    try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? fileManager.removeItem(at: directory) }
+
+    let log = directory.appendingPathComponent("calls.log")
+    let nvmScript = directory.appendingPathComponent("nvm.sh")
+    let fakeNVM = """
+    nvm() {
+        printf '%s\\n' "$*" >> "$NVM_TEST_LOG"
+        if [ "$1" = "version" ]; then
+            printf 'N/A\\n'
+            return 3
+        fi
+    }
+    """
+    try Data(fakeNVM.utf8).write(to: nvmScript)
+
+    let arguments = nvmNodeUpdateArguments(
+        nvmDirectory: directory.path,
+        currentVersion: "22.22.3",
+        targetVersion: "22.23.1",
+        isDefault: true
+    )
+    let result = captureDeveloperCommand(
+        URL(fileURLWithPath: "/bin/zsh"),
+        arguments,
+        baseEnvironment: [
+            "HOME": directory.path,
+            "PATH": "/usr/bin:/bin",
+            "NVM_TEST_LOG": log.path
+        ]
+    )
+
+    #expect(result.status == 0)
+    let calls = try String(contentsOf: log, encoding: .utf8)
+    #expect(calls.contains("install 22.23.1 --reinstall-packages-from=22.22.3"))
+    #expect(calls.contains("alias default 22.23.1"))
+    #expect(calls.contains("uninstall 22.22.3"))
+}
+
+@Test func nvmNodeUpdateReconcilesAnAlreadyInstalledTarget() throws {
+    let fileManager = FileManager.default
+    let directory = fileManager.temporaryDirectory
+        .appendingPathComponent("UpkeepNVMReconcileTests-\(UUID().uuidString)", isDirectory: true)
+    try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? fileManager.removeItem(at: directory) }
+
+    let log = directory.appendingPathComponent("calls.log")
+    let nvmScript = directory.appendingPathComponent("nvm.sh")
+    let fakeNVM = """
+    nvm() {
+        printf '%s\\n' "$*" >> "$NVM_TEST_LOG"
+        if [ "$1" = "version" ]; then printf 'v22.23.1\\n'; fi
+    }
+    """
+    try Data(fakeNVM.utf8).write(to: nvmScript)
+
+    let result = captureDeveloperCommand(
+        URL(fileURLWithPath: "/bin/zsh"),
+        nvmNodeUpdateArguments(
+            nvmDirectory: directory.path,
+            currentVersion: "22.22.3",
+            targetVersion: "22.23.1",
+            isDefault: false
+        ),
+        baseEnvironment: [
+            "HOME": directory.path,
+            "PATH": "/usr/bin:/bin",
+            "NVM_TEST_LOG": log.path
+        ]
+    )
+
+    #expect(result.status == 0)
+    let calls = try String(contentsOf: log, encoding: .utf8)
+    #expect(calls.contains("use v22.23.1"))
+    #expect(calls.contains("reinstall-packages 22.22.3"))
+    #expect(calls.contains("uninstall 22.22.3"))
+    #expect(!calls.contains("alias default"))
+    #expect(!calls.contains("install 22.23.1"))
 }
 
 @Test func parsesCurrentPNPMGlobalInventoryShape() throws {

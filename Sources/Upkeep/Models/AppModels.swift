@@ -11,6 +11,13 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
     let githubRepository: String?
     let hasAppStoreReceipt: Bool
     let updateManagement: AppUpdateManagement
+    let hasBuiltInUpdater: Bool
+    let mozillaUpdateProduct: MozillaUpdateProduct?
+    let mozillaUpdateChannel: MozillaUpdateChannel?
+    let chromiumUpdateChannel: ChromiumUpdateChannel?
+    let braveUpdateChannel: BraveUpdateChannel?
+    let steamAppID: String?
+    let managedUpdateStatus: ManagedUpdateStatus?
     let installedAt: Date?
     let modifiedAt: Date?
     var prereleaseChannel: PrereleaseChannel? { VersionComparator.prereleaseChannel(for: installedVersion) }
@@ -25,6 +32,13 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
         githubRepository: String?,
         hasAppStoreReceipt: Bool,
         updateManagement: AppUpdateManagement? = nil,
+        hasBuiltInUpdater: Bool? = nil,
+        mozillaUpdateProduct: MozillaUpdateProduct? = nil,
+        mozillaUpdateChannel: MozillaUpdateChannel? = nil,
+        chromiumUpdateChannel: ChromiumUpdateChannel? = nil,
+        braveUpdateChannel: BraveUpdateChannel? = nil,
+        steamAppID: String? = nil,
+        managedUpdateStatus: ManagedUpdateStatus? = nil,
         installedAt: Date? = nil,
         modifiedAt: Date? = nil
     ) {
@@ -38,6 +52,18 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
         self.githubRepository = githubRepository
         self.hasAppStoreReceipt = hasAppStoreReceipt
         self.updateManagement = updateManagement ?? (hasAppStoreReceipt ? .appStore : .direct)
+        self.hasBuiltInUpdater = hasBuiltInUpdater ?? (
+            sparkleFeedURL != nil || mozillaUpdateChannel != nil
+                || chromiumUpdateChannel != nil || braveUpdateChannel != nil
+        )
+        self.mozillaUpdateProduct = mozillaUpdateChannel == nil
+            ? nil
+            : (mozillaUpdateProduct ?? .firefox)
+        self.mozillaUpdateChannel = mozillaUpdateChannel
+        self.chromiumUpdateChannel = chromiumUpdateChannel
+        self.braveUpdateChannel = braveUpdateChannel
+        self.steamAppID = steamAppID
+        self.managedUpdateStatus = managedUpdateStatus
         self.installedAt = installedAt
         self.modifiedAt = modifiedAt
     }
@@ -48,6 +74,62 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
         }
         return "app|path|\(url.standardizedFileURL.path)"
     }
+
+    /// Adoption is an explicit ownership change. Direct developer downloads
+    /// remain eligible even when they embed an updater; the Homebrew catalog
+    /// separately excludes casks that declare `auto_updates`.
+    var allowsHomebrewAdoption: Bool {
+        updateManagement == .direct
+    }
+
+    func replacingGitHubRepository(_ repository: String?) -> InstalledApp {
+        InstalledApp(
+            name: name,
+            bundleIdentifier: bundleIdentifier,
+            installedVersion: installedVersion,
+            buildVersion: buildVersion,
+            url: url,
+            sparkleFeedURL: sparkleFeedURL,
+            githubRepository: repository,
+            hasAppStoreReceipt: hasAppStoreReceipt,
+            updateManagement: updateManagement,
+            hasBuiltInUpdater: hasBuiltInUpdater,
+            mozillaUpdateProduct: mozillaUpdateProduct,
+            mozillaUpdateChannel: mozillaUpdateChannel,
+            chromiumUpdateChannel: chromiumUpdateChannel,
+            braveUpdateChannel: braveUpdateChannel,
+            steamAppID: steamAppID,
+            managedUpdateStatus: managedUpdateStatus,
+            installedAt: installedAt,
+            modifiedAt: modifiedAt
+        )
+    }
+}
+
+enum MozillaUpdateProduct: String, Hashable, Sendable {
+    case firefox
+    case thunderbird
+}
+
+enum MozillaUpdateChannel: String, Hashable, Sendable {
+    case release
+    case developerEdition
+    case nightly
+    case esr
+}
+
+enum ChromiumUpdateChannel: String, Hashable, Sendable {
+    case stable
+    case beta
+    case dev
+    case canary
+}
+
+enum BraveUpdateChannel: String, Hashable, Sendable {
+    case release
+    case beta
+    case dev
+    case nightly
 }
 
 enum AppUpdateManagement: String, Codable, Hashable, Sendable {
@@ -56,10 +138,21 @@ enum AppUpdateManagement: String, Codable, Hashable, Sendable {
     case testFlight = "TestFlight"
     case setapp = "Setapp"
     case microsoftAutoUpdate = "Microsoft AutoUpdate"
+    case steam = "Steam"
+    case adobeCreativeCloud = "Adobe Creative Cloud"
+    case jetBrainsToolbox = "JetBrains Toolbox"
+    case spotify = "Spotify"
+    case discord = "Discord"
+    case epicGames = "Epic Games"
+    case tailscale = "Tailscale"
+    case macOS = "macOS"
 
     var isExternallyManaged: Bool {
         switch self {
-        case .testFlight, .setapp, .microsoftAutoUpdate: true
+        case .testFlight, .setapp, .microsoftAutoUpdate, .steam,
+             .adobeCreativeCloud, .jetBrainsToolbox, .spotify, .discord, .epicGames,
+             .tailscale, .macOS:
+            true
         case .direct, .appStore: false
         }
     }
@@ -69,6 +162,14 @@ enum AppUpdateManagement: String, Codable, Hashable, Sendable {
         case .testFlight: "Open TestFlight"
         case .setapp: "Open Setapp"
         case .microsoftAutoUpdate: "Open Microsoft AutoUpdate"
+        case .steam: "Open Steam Downloads"
+        case .adobeCreativeCloud: "Open Adobe Creative Cloud"
+        case .jetBrainsToolbox: "Open JetBrains Toolbox"
+        case .spotify: "Open Spotify"
+        case .discord: "Open Discord"
+        case .epicGames: "Open Epic Games"
+        case .tailscale: "Open Tailscale"
+        case .macOS: "Open Software Update"
         case .appStore: "Open App Store"
         case .direct: "Open App"
         }
@@ -79,6 +180,14 @@ enum AppUpdateManagement: String, Codable, Hashable, Sendable {
         case .testFlight: "paperplane.fill"
         case .setapp: "square.stack.3d.up.fill"
         case .microsoftAutoUpdate: "arrow.triangle.2.circlepath"
+        case .steam: "gamecontroller.fill"
+        case .adobeCreativeCloud: "cloud.fill"
+        case .jetBrainsToolbox: "shippingbox.fill"
+        case .spotify: "music.note"
+        case .discord: "bubble.left.and.bubble.right.fill"
+        case .epicGames: "gamecontroller.fill"
+        case .tailscale: "network"
+        case .macOS: "gear.badge"
         case .appStore: "storefront.fill"
         case .direct: "arrow.up.forward.app"
         }
@@ -89,19 +198,67 @@ enum AppUpdateManagement: String, Codable, Hashable, Sendable {
         case .testFlight: "This beta is updated through TestFlight, not the Mac App Store."
         case .setapp: "This edition is managed and updated by Setapp."
         case .microsoftAutoUpdate: "This installation is managed by Microsoft AutoUpdate."
+        case .steam: "This app or game is installed and updated through Steam."
+        case .adobeCreativeCloud: "This app is managed by Adobe Creative Cloud."
+        case .jetBrainsToolbox: "This app is managed by JetBrains Toolbox."
+        case .spotify: "Spotify manages updates through its built-in updater."
+        case .discord: "Discord manages updates through its built-in updater."
+        case .epicGames: "This app or game is managed by Epic Games Launcher."
+        case .tailscale: "This standalone edition uses Tailscale’s built-in updater."
+        case .macOS: "This Apple app is updated as part of macOS."
         case .appStore: "This app is updated through the Mac App Store."
         case .direct: "This app is updated by its developer."
         }
     }
 }
 
+struct ManagedUpdateStatus: Hashable, Sendable {
+    enum State: String, Hashable, Sendable {
+        case managed = "Managed"
+        case queued = "Queued"
+        case downloading = "Downloading"
+        case installing = "Installing"
+        case restartRequired = "Restart required"
+        case attention = "Needs attention"
+    }
+
+    let state: State
+    let detail: String
+    let progress: Double?
+
+    init(state: State, detail: String, progress: Double? = nil) {
+        self.state = state
+        self.detail = detail
+        self.progress = progress.map { min(max($0, 0), 1) }
+    }
+}
+
+enum ReleaseVerification: String, Hashable, Sendable {
+    case platformManaged = "Platform-managed"
+    case packageManager = "Package-manager verified"
+    case publisherFeed = "Publisher feed"
+    case sparkleSignature = "Sparkle signature declared"
+    case repositoryMatch = "Repository matched"
+}
+
 enum UpdateSource: String, Codable, CaseIterable, Identifiable, Sendable {
     case appStore = "App Store"
+    case developer = "Developer"
     case sparkle = "Sparkle"
     case homebrew = "Homebrew"
     case github = "GitHub"
 
     var id: Self { self }
+
+    var confidenceDetail: String {
+        switch self {
+        case .appStore: "Apple-managed distribution"
+        case .developer: "Developer-published update service"
+        case .sparkle: "Developer-published update feed"
+        case .homebrew: "Homebrew-managed package"
+        case .github: "Matched GitHub repository"
+        }
+    }
 }
 
 enum PrereleaseChannel: String, Codable, Hashable, Sendable {
@@ -125,6 +282,7 @@ struct UpdateCandidate: Identifiable, Hashable, Sendable {
     let sourcePrereleaseChannel: PrereleaseChannel?
     let requiresHomebrewAdoption: Bool
     let requiresInAppInstallation: Bool
+    let verification: ReleaseVerification
 
     init(
         availableVersion: String,
@@ -134,7 +292,8 @@ struct UpdateCandidate: Identifiable, Hashable, Sendable {
         homebrewToken: String?,
         sourcePrereleaseChannel: PrereleaseChannel?,
         requiresHomebrewAdoption: Bool,
-        requiresInAppInstallation: Bool = false
+        requiresInAppInstallation: Bool = false,
+        verification: ReleaseVerification? = nil
     ) {
         self.availableVersion = availableVersion
         self.source = source
@@ -144,6 +303,17 @@ struct UpdateCandidate: Identifiable, Hashable, Sendable {
         self.sourcePrereleaseChannel = sourcePrereleaseChannel
         self.requiresHomebrewAdoption = requiresHomebrewAdoption
         self.requiresInAppInstallation = requiresInAppInstallation
+        self.verification = verification ?? Self.defaultVerification(for: source)
+    }
+
+    private static func defaultVerification(for source: UpdateSource) -> ReleaseVerification {
+        switch source {
+        case .appStore: .platformManaged
+        case .homebrew: .packageManager
+        case .developer: .publisherFeed
+        case .sparkle: .publisherFeed
+        case .github: .repositoryMatch
+        }
     }
 
     var availablePrereleaseChannel: PrereleaseChannel? {
@@ -156,6 +326,7 @@ struct UpdateCandidate: Identifiable, Hashable, Sendable {
         return switch source {
         case .homebrew: "Update"
         case .appStore: "Open App Store"
+        case .developer: "Open App"
         case .sparkle: "Download"
         case .github: "View Release"
         }
@@ -184,7 +355,8 @@ struct AvailableUpdate: Identifiable, Hashable, Sendable {
         homebrewToken: String?,
         sourcePrereleaseChannel: PrereleaseChannel? = nil,
         requiresHomebrewAdoption: Bool = false,
-        requiresInAppInstallation: Bool = false
+        requiresInAppInstallation: Bool = false,
+        verification: ReleaseVerification? = nil
     ) {
         self.app = app
         self.candidates = [UpdateCandidate(
@@ -195,7 +367,8 @@ struct AvailableUpdate: Identifiable, Hashable, Sendable {
             homebrewToken: homebrewToken,
             sourcePrereleaseChannel: sourcePrereleaseChannel,
             requiresHomebrewAdoption: requiresHomebrewAdoption,
-            requiresInAppInstallation: requiresInAppInstallation
+            requiresInAppInstallation: requiresInAppInstallation,
+            verification: verification
         )]
     }
 
@@ -220,7 +393,8 @@ struct AvailableUpdate: Identifiable, Hashable, Sendable {
             homebrewToken: candidate.homebrewToken,
             sourcePrereleaseChannel: candidate.sourcePrereleaseChannel,
             requiresHomebrewAdoption: candidate.requiresHomebrewAdoption,
-            requiresInAppInstallation: candidate.requiresInAppInstallation
+            requiresInAppInstallation: candidate.requiresInAppInstallation,
+            verification: candidate.verification
         )
     }
 
@@ -244,9 +418,10 @@ struct AvailableUpdate: Identifiable, Hashable, Sendable {
     private static func sourceRank(_ candidate: UpdateCandidate) -> Int {
         switch candidate.source {
         case .appStore: 0
-        case .homebrew: candidate.requiresHomebrewAdoption ? 4 : 1
-        case .sparkle: 2
-        case .github: 3
+        case .homebrew: candidate.requiresHomebrewAdoption ? 5 : 1
+        case .developer: 2
+        case .sparkle: 3
+        case .github: 4
         }
     }
 
@@ -258,16 +433,29 @@ struct AvailableUpdate: Identifiable, Hashable, Sendable {
     }
     var prereleaseIsInstalled: Bool { availablePrereleaseChannel == nil && app.prereleaseChannel != nil }
     var requiresInAppInstallation: Bool { primaryCandidate.requiresInAppInstallation }
+    var directInstallURL: URL? {
+        guard !requiresInAppInstallation,
+              source == .sparkle || source == .github,
+              let actionURL,
+              actionURL.scheme?.lowercased() == "https",
+              ["zip", "dmg"].contains(actionURL.pathExtension.lowercased())
+        else { return nil }
+        return actionURL
+    }
+    var canInstallDirectly: Bool { directInstallURL != nil }
 
     var actionTitle: String {
-        primaryCandidate.actionTitle
+        if canInstallDirectly { return "Update" }
+        return primaryCandidate.actionTitle
     }
 
     var actionDescription: String {
+        if canInstallDirectly { return "Download, verify, and install with Upkeep" }
         if requiresInAppInstallation { return "Open the app to run its built-in updater" }
         return switch source {
         case .homebrew: "Install with Homebrew"
         case .appStore: "Open in the App Store"
+        case .developer: "Open the app's built-in updater"
         case .sparkle: "Open the developer download"
         case .github: "Open the GitHub release"
         }
@@ -275,10 +463,12 @@ struct AvailableUpdate: Identifiable, Hashable, Sendable {
 
 
     var actionSystemImage: String {
+        if canInstallDirectly { return "arrow.down.app.fill" }
         if requiresInAppInstallation { return "arrow.up.forward.app" }
         return switch source {
         case .homebrew: "shippingbox.and.arrow.backward.fill"
         case .appStore: "storefront.fill"
+        case .developer: "arrow.triangle.2.circlepath"
         case .sparkle: "arrow.down.circle.fill"
         case .github: "arrow.up.right.square.fill"
         }
@@ -337,8 +527,18 @@ enum BatchUpdateItem: Identifiable, Hashable, Sendable {
     }
 
     var opensExternalUpdater: Bool {
-        if case let .application(update) = self { return update.homebrewToken == nil }
+        if case let .application(update) = self {
+            return update.homebrewToken == nil && !update.canInstallDirectly
+        }
         return false
+    }
+
+    var mayRequireAdministratorPassword: Bool {
+        switch self {
+        case let .application(update): update.homebrewToken != nil
+        case let .homebrew(package): package.kind == .cask
+        case .developer, .model: false
+        }
     }
 }
 
@@ -390,6 +590,16 @@ struct ScanReport: Sendable {
     let developerPackages: [DeveloperPackage]
     let installedDeveloperManagers: [DeveloperPackageManager]
     let localModels: [LocalLLMModel]
+
+    static let empty = ScanReport(
+        apps: [], updates: [], checkedAt: Date(), warnings: [], failedAppSources: [:],
+        homebrewInventoryStatus: .disabled, homebrewCatalogStatus: .disabled,
+        macOSUpdatesStatus: .disabled, macOSInstallersStatus: .disabled,
+        failedDeveloperManagers: [], failedDeveloperExecutablePaths: [],
+        localModelsStatus: .disabled, failedLocalModelIDs: [], failedLocalModelRuntimes: [],
+        homebrewPackages: [], adoptableApps: [], macOSUpdates: [], developerPackages: [],
+        installedDeveloperManagers: [], localModels: []
+    )
 }
 
 enum ScanStatus: Equatable, Sendable {
@@ -400,6 +610,7 @@ enum ScanStatus: Equatable, Sendable {
 
 enum ScanWarningSource: String, Codable, Sendable {
     case appStore = "App Store"
+    case developer = "Developer"
     case sparkle = "Sparkle"
     case github = "GitHub"
     case homebrew = "Homebrew"
@@ -443,6 +654,8 @@ enum SidebarDestination: String, CaseIterable, Identifiable {
     case testFlight = "TestFlight"
     case setapp = "Setapp"
     case microsoftAutoUpdate = "Microsoft AutoUpdate"
+    case steam = "Steam"
+    case otherUpdaters = "Other Updaters"
     case sparkle = "Sparkle"
     case homebrewApps = "Homebrew Apps"
     case github = "GitHub"
@@ -464,6 +677,8 @@ enum SidebarDestination: String, CaseIterable, Identifiable {
         case .testFlight: "paperplane"
         case .setapp: "square.stack.3d.up"
         case .microsoftAutoUpdate: "arrow.triangle.2.circlepath"
+        case .steam: "gamecontroller"
+        case .otherUpdaters: "arrow.triangle.2.circlepath.circle"
         case .sparkle: "wand.and.stars"
         case .homebrewApps: "shippingbox"
         case .github: "chevron.left.forwardslash.chevron.right"
@@ -485,6 +700,8 @@ enum SidebarDestination: String, CaseIterable, Identifiable {
         case .testFlight: "paperplane.fill"
         case .setapp: "square.stack.3d.up.fill"
         case .microsoftAutoUpdate: "arrow.triangle.2.circlepath"
+        case .steam: "gamecontroller.fill"
+        case .otherUpdaters: "arrow.triangle.2.circlepath.circle.fill"
         case .sparkle: "wand.and.stars.inverse"
         case .homebrewApps: "shippingbox.fill"
         case .github: "chevron.left.forwardslash.chevron.right"

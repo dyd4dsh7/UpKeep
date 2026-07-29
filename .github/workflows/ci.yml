@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test-and-package:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test
+        run: swift test
+      - name: Package debug app
+        run: ./scripts/package-app.sh debug
+      - name: Extract debug app
+        run: ditto -x -k outputs/Upkeep.zip ci-artifact
+      - name: Verify debug signature
+        run: codesign --verify --deep --strict ci-artifact/Upkeep.app
+      - name: Ensure release validation rejects debug artifacts
+        run: |
+          if ./scripts/validate-release.sh ci-artifact/Upkeep.app; then
+            echo "Debug artifact unexpectedly passed release validation" >&2
+            exit 1
+          fi
+      - name: Launch smoke test
+        run: |
+          open -n ci-artifact/Upkeep.app
+          sleep 2
+          pgrep -x Upkeep
+          pkill -x Upkeep

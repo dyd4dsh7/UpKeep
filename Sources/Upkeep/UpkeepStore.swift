@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Foundation
 import UniformTypeIdentifiers
 import UserNotifications
@@ -19,7 +20,7 @@ struct RunningAppConfirmation: Identifiable {
     var title: String { apps.count == 1 ? "Quit \(apps[0].name) and Continue?" : "Quit Running Apps and Continue?" }
     var message: String {
         let names = apps.map(\.name).formatted()
-        return "\(names) \(apps.count == 1 ? "is" : "are") currently running. Upkeep must quit \(apps.count == 1 ? "it" : "them") before Homebrew changes the application files."
+        return "\(names) \(apps.count == 1 ? "is" : "are") currently running. Upkeep must quit \(apps.count == 1 ? "it" : "them") before changing the application files."
     }
     var buttonTitle: String {
         switch action {
@@ -28,6 +29,20 @@ struct RunningAppConfirmation: Identifiable {
         default: "Quit and Update"
         }
     }
+}
+
+struct HomebrewAuthorizationConfirmation: Identifiable {
+    enum Action {
+        case update(AvailableUpdate)
+        case package(HomebrewPackage)
+        case adopt(AdoptableApp)
+        case updateAdoptable(AdoptableApp)
+        case allPackages
+    }
+
+    let id = UUID()
+    let itemName: String
+    let action: Action
 }
 
 private enum RunningAppUpdateError: LocalizedError {
@@ -54,60 +69,62 @@ private enum BatchUpdateError: LocalizedError {
 @MainActor
 final class UpkeepStore: ObservableObject {
     let settings: AppSettings
-    @Published var apps: [InstalledApp] = []
-    @Published var updates: [AvailableUpdate] = []
-    @Published var homebrewPackages: [HomebrewPackage] = []
-    @Published var adoptableApps: [AdoptableApp] = []
-    @Published var macOSUpdates: [MacOSUpdate] = []
-    @Published var updateHistory: [UpdateRecord] = []
-    @Published var developerPackages: [DeveloperPackage] = []
-    @Published var developerManagerFilter: DeveloperManagerFilter = .all
-    @Published var installedDeveloperManagers: [DeveloperPackageManager] = []
-    @Published var localModels: [LocalLLMModel] = []
-    @Published var selection: SidebarDestination = .updates
-    @Published var homebrewFilter: HomebrewFilter = .all
-    @Published var appListFilter: AppListFilter = .all
-    @Published var appSortOrder: AppSortOrder = .recommended
-    @Published var appSortAscending = true
-    @Published var homebrewSortOrder: HomebrewSortOrder = .recommended
-    @Published var homebrewSortAscending = true
-    @Published var updateListFilter: UpdateListFilter = .all
-    @Published var updateSortOrder: UpdateSortOrder = .recommended
-    @Published var updateSortAscending = true
-    @Published var selectedPackageID: String?
-    @Published var selectedDeveloperPackageID: String?
-    @Published var selectedDeveloperVersion = ""
-    @Published var selectedLocalModelID: String?
-    @Published var availableDeveloperVersions: [String] = []
-    @Published var isLoadingDeveloperVersions = false
-    @Published var selectedApp: InstalledApp?
-    @Published var updateInspectorSelection: UpdateInspectorSelection?
-    @Published var searchText = ""
-    @Published var isScanning = false
-    @Published var lastChecked: Date?
-    @Published private(set) var nextScheduledCheck: Date?
-    @Published var errorMessage: String?
-    @Published var scanWarnings: [ScanWarning] = []
-    @Published var workingIDs = Set<String>()
-    @Published var pendingRevert: UpdateRecord?
-    @Published var pendingRunningAppConfirmation: RunningAppConfirmation?
-    @Published var isShowingBatchReview = false
-    @Published private(set) var batchUpdateProgress: BatchUpdateProgress?
-    @Published private(set) var runningBundleIdentifiers = Set<String>()
-    @Published private(set) var runningApplicationPaths = Set<String>()
-    @Published private(set) var diagnosticEntries = DiagnosticsStore.shared.entries()
-    @Published var diagnosticsSearchText = ""
-    @Published var diagnosticsLevelFilter = DiagnosticLevelFilter.all
-    @Published var diagnosticsCategoryFilter: DiagnosticCategory?
+    private let dependencies: UpkeepDependencies
+    let library = UpkeepLibraryState()
+    var navigation = UpkeepNavigationState()
+    let scanState: UpkeepScanState
+    let updateExecutionState = UpkeepUpdateExecutionState()
+    var diagnostics = UpkeepDiagnosticsState()
+
     private var periodicTask: Task<Void, Never>?
-    private var runningAppTask: Task<Void, Never>?
+    private var runningApplicationObservers = Set<AnyCancellable>()
+    private var featureStateObservers = Set<AnyCancellable>()
     private var didStart = false
     private let startedAt = Date()
     private var versionCache: [String: [String]] = [:]
+    private var externalVerificationTasks: [String: Task<Void, Never>] = [:]
 
-    init(settings: AppSettings = AppSettings()) {
+    init(
+        settings: AppSettings = AppSettings(),
+        dependencies: UpkeepDependencies = .live
+    ) {
         self.settings = settings
-        self.lastChecked = settings.lastCompletedScanDate
+        self.dependencies = dependencies
+        self.scanState = UpkeepScanState(lastChecked: settings.lastCompletedScanDate)
+        bindFeatureState()
+    }
+
+    private func bindFeatureState() {
+        [library.objectWillChange, navigation.objectWillChange, scanState.objectWillChange,
+         updateExecutionState.objectWillChange, diagnostics.objectWillChange]
+            .forEach { publisher in
+                publisher
+                    .sink { [weak self] _ in self?.objectWillChange.send() }
+                    .store(in: &featureStateObservers)
+            }
+    }
+
+    func isWorking(_ operation: OperationID) -> Bool {
+        updateExecutionState.activeOperations.contains(operation)
+    }
+
+    func isUpdating(_ update: AvailableUpdate) -> Bool {
+        if isWorking(.applicationUpdate(update.id)) { return true }
+        guard let token = update.homebrewToken else { return false }
+        if let package = homebrewPackages.first(where: { $0.kind == .cask && $0.token == token }) {
+            return isWorking(.homebrewPackage(package.id))
+        }
+        if let item = adoptableApps.first(where: { $0.caskToken == token && $0.app.id == update.app.id }) {
+            return isWorking(.homebrewAdoption(item.id))
+        }
+        return false
+    }
+
+    var isDeveloperScanRunning: Bool {
+        updateExecutionState.activeOperations.contains {
+            if case .developerScan = $0 { return true }
+            return false
+        }
     }
 
     var visibleUpdates: [AvailableUpdate] { updates.filter { !isExcluded($0) } }
@@ -159,7 +176,7 @@ final class UpkeepStore: ObservableObject {
         return matching(scoped, name: { $0.displayName })
     }
 
-    func apps(for destination: SidebarDestination) -> [InstalledApp] {
+    func applications(for destination: SidebarDestination) -> [InstalledApp] {
         apps.filter { app in
             switch destination {
             case .allApps: true
@@ -167,10 +184,17 @@ final class UpkeepStore: ObservableObject {
             case .testFlight: app.updateManagement == .testFlight
             case .setapp: app.updateManagement == .setapp
             case .microsoftAutoUpdate: app.updateManagement == .microsoftAutoUpdate
-            case .sparkle: app.sparkleFeedURL != nil
+            case .steam: app.updateManagement == .steam
+            case .otherUpdaters:
+                [.adobeCreativeCloud, .jetBrainsToolbox, .spotify, .discord, .epicGames, .tailscale]
+                    .contains(app.updateManagement)
+            case .sparkle: app.updateManagement == .direct && app.sparkleFeedURL != nil
             case .homebrewApps: homebrewPackage(for: app) != nil
-            case .github: app.githubRepository != nil
-            case .noSource: sources(for: app).isEmpty && !app.updateManagement.isExternallyManaged
+            case .github: app.updateManagement == .direct && app.githubRepository != nil
+            case .noSource:
+                sources(for: app).isEmpty
+                    && !app.updateManagement.isExternallyManaged
+                    && !app.hasBuiltInUpdater
             default: false
             }
         }
@@ -187,9 +211,12 @@ final class UpkeepStore: ObservableObject {
         }
         if app.updateManagement == .appStore { detected.insert(.appStore) }
         if homebrewPackage(for: app) != nil { detected.insert(.homebrew) }
-        if app.sparkleFeedURL != nil { detected.insert(.sparkle) }
-        if app.githubRepository != nil { detected.insert(.github) }
-        let preferredOrder: [UpdateSource] = [.appStore, .homebrew, .sparkle, .github]
+        if app.updateManagement == .direct {
+            if app.mozillaUpdateChannel != nil { detected.insert(.developer) }
+            if app.sparkleFeedURL != nil { detected.insert(.sparkle) }
+            if app.githubRepository != nil { detected.insert(.github) }
+        }
+        let preferredOrder: [UpdateSource] = [.appStore, .homebrew, .developer, .sparkle, .github]
         let ordered = preferredOrder.filter(detected.contains)
         guard let primary = updates.first(where: { $0.app.id == app.id })?.source else { return ordered }
         return [primary] + ordered.filter { $0 != primary }
@@ -205,7 +232,7 @@ final class UpkeepStore: ObservableObject {
         case .history: updateHistory.count
         case .developerPackages: developerPackages.count
         case .localModels: localModels.count
-        default: apps(for: destination).count
+        default: applications(for: destination).count
         }
     }
 
@@ -214,7 +241,7 @@ final class UpkeepStore: ObservableObject {
         isScanning = true
         errorMessage = nil
         let previousCount = totalUpdateCount
-        let report = await UpdateScanner().scan(settings: settings.scanSettings)
+        let report = await dependencies.scanner.scan(settings: settings.scanSettings)
         apps = report.apps
         for app in apps {
             settings.migrateExclusion(from: legacyExclusionKey(for: app), to: exclusionKey(for: app))
@@ -232,7 +259,7 @@ final class UpkeepStore: ObservableObject {
             else if report.homebrewCatalogStatus == .disabled { adoptableApps = [] }
         }
         macOSUpdates = mergedMacOSUpdates(from: report)
-        updateHistory = await UpdateHistoryStore.shared.records()
+        updateHistory = await dependencies.history.records()
         developerPackages = mergedDeveloperPackages(from: report)
         installedDeveloperManagers = report.installedDeveloperManagers
         localModels = mergedLocalModels(from: report)
@@ -264,16 +291,16 @@ final class UpkeepStore: ObservableObject {
     }
 
     func refresh(_ app: InstalledApp) async {
-        let operationID = "app-refresh-\(app.id)"
-        guard !workingIDs.contains(operationID) else { return }
-        workingIDs.insert(operationID)
-        defer { workingIDs.remove(operationID) }
+        let operationID = OperationID.applicationRefresh(app.id)
+        guard !isWorking(operationID) else { return }
+        updateExecutionState.activeOperations.insert(operationID)
+        defer { updateExecutionState.activeOperations.remove(operationID) }
 
-        let refreshedApp = await AppDiscovery.discover(at: app.url) ?? app
+        let refreshedApp = await dependencies.applicationDiscovery.discover(at: app.url) ?? app
         if let index = apps.firstIndex(where: { $0.id == app.id }) { apps[index] = refreshedApp }
         if selectedApp?.id == app.id { selectedApp = refreshedApp }
 
-        let report = await UpdateScanner().scan(app: refreshedApp, settings: settings.scanSettings)
+        let report = await dependencies.scanner.scan(app: refreshedApp, settings: settings.scanSettings)
         var candidates = updates.first(where: { $0.app.id == app.id })?.candidates ?? []
         let enabledSources = enabledUpdateSources(for: refreshedApp)
         candidates.removeAll { candidate in
@@ -285,7 +312,7 @@ final class UpkeepStore: ObservableObject {
 
         if let existingPackage = homebrewPackage(for: refreshedApp), settings.checkHomebrew {
             do {
-                if let refreshedPackage = try await HomebrewClient().package(
+                if let refreshedPackage = try await dependencies.homebrew.package(
                     token: existingPackage.token,
                     kind: existingPackage.kind,
                     includePrereleases: settings.includePrereleaseUpdates
@@ -310,7 +337,9 @@ final class UpkeepStore: ObservableObject {
         }
 
         candidates = candidates.filter {
-            !$0.requiresHomebrewAdoption || !settings.isHomebrewAdoptionIgnored(key: exclusionKey(for: refreshedApp))
+            !$0.requiresHomebrewAdoption
+                || (refreshedApp.allowsHomebrewAdoption
+                    && !settings.isHomebrewAdoptionIgnored(key: exclusionKey(for: refreshedApp)))
         }
         updates.removeAll { $0.app.id == app.id }
         if !candidates.isEmpty { updates.append(AvailableUpdate(app: refreshedApp, candidates: candidates)) }
@@ -319,6 +348,7 @@ final class UpkeepStore: ObservableObject {
         let affectedSources = Set(enabledSources.map { source in
             switch source {
             case .appStore: ScanWarningSource.appStore.rawValue
+            case .developer: ScanWarningSource.developer.rawValue
             case .sparkle: ScanWarningSource.sparkle.rawValue
             case .github: ScanWarningSource.github.rawValue
             case .homebrew: ScanWarningSource.homebrew.rawValue
@@ -335,12 +365,12 @@ final class UpkeepStore: ObservableObject {
     }
 
     func refresh(_ package: HomebrewPackage) async {
-        let operationID = "homebrew-refresh-\(package.id)"
-        guard !workingIDs.contains(operationID) else { return }
-        workingIDs.insert(operationID)
-        defer { workingIDs.remove(operationID) }
+        let operationID = OperationID.homebrewRefresh(package.id)
+        guard !isWorking(operationID) else { return }
+        updateExecutionState.activeOperations.insert(operationID)
+        defer { updateExecutionState.activeOperations.remove(operationID) }
         do {
-            guard let refreshed = try await HomebrewClient().package(
+            guard let refreshed = try await dependencies.homebrew.package(
                 token: package.token,
                 kind: package.kind,
                 includePrereleases: settings.includePrereleaseUpdates
@@ -360,11 +390,11 @@ final class UpkeepStore: ObservableObject {
     }
 
     func refresh(_ package: DeveloperPackage) async {
-        let operationID = "developer-refresh-\(package.id)"
-        guard !workingIDs.contains(operationID) else { return }
-        workingIDs.insert(operationID)
-        defer { workingIDs.remove(operationID) }
-        let versions = await DeveloperPackageClient().availableVersions(
+        let operationID = OperationID.developerRefresh(package.id)
+        guard !isWorking(operationID) else { return }
+        updateExecutionState.activeOperations.insert(operationID)
+        defer { updateExecutionState.activeOperations.remove(operationID) }
+        let versions = await dependencies.developerPackages.availableVersions(
             for: package,
             includePrereleases: settings.includePrereleaseUpdates
         )
@@ -397,13 +427,7 @@ final class UpkeepStore: ObservableObject {
         guard !didStart else { return }
         didStart = true
         refreshRunningApplications()
-        runningAppTask = Task { [weak self] in
-            while !Task.isCancelled {
-                guard let self else { return }
-                self.refreshRunningApplications()
-                try? await Task.sleep(for: .seconds(2))
-            }
-        }
+        observeRunningApplications()
         if settings.checkOnLaunch { await scan() }
         scheduleNextRefresh()
     }
@@ -429,12 +453,12 @@ final class UpkeepStore: ObservableObject {
     }
 
     func scanDeveloperPackages(manager: DeveloperPackageManager?) async {
-        let identifier = "developer-scan-\(manager?.rawValue ?? "all")"
-        guard !workingIDs.contains(identifier) else { return }
-        workingIDs.insert(identifier)
-        defer { workingIDs.remove(identifier) }
+        let identifier = OperationID.developerScan(manager)
+        guard !isWorking(identifier) else { return }
+        updateExecutionState.activeOperations.insert(identifier)
+        defer { updateExecutionState.activeOperations.remove(identifier) }
         let managers = manager.map { Set([$0]) } ?? settings.enabledDeveloperManagers
-        let report = await DeveloperPackageClient().scan(
+        let report = await dependencies.developerPackages.scan(
             enabledManagers: managers,
             includePrereleases: settings.includePrereleaseUpdates
         )
@@ -462,18 +486,15 @@ final class UpkeepStore: ObservableObject {
     }
 
     func loadAvailableVersions(for package: DeveloperPackage, force: Bool = false) async {
-        selectedDeveloperVersion = package.latestVersion
-        let cacheKey = developerVersionCacheKey(for: package)
-        if !force, let cached = versionCache[cacheKey] {
-            availableDeveloperVersions = cached
-            return
+        if selectedDeveloperVersion != package.latestVersion {
+            selectedDeveloperVersion = package.latestVersion
         }
         isLoadingDeveloperVersions = true
-        availableDeveloperVersions = [package.latestVersion]
-        let versions = await DeveloperPackageClient().availableVersions(
-            for: package, includePrereleases: settings.includePrereleaseUpdates
-        )
-        versionCache[cacheKey] = versions
+        if availableDeveloperVersions != [package.latestVersion] {
+            availableDeveloperVersions = [package.latestVersion]
+        }
+        let versions = await developerVersions(for: package, force: force)
+        guard !Task.isCancelled else { return }
         if selectedDeveloperPackageID == package.id {
             availableDeveloperVersions = versions
             selectedDeveloperVersion = versions.contains(package.latestVersion)
@@ -483,14 +504,45 @@ final class UpkeepStore: ObservableObject {
         }
     }
 
+    func developerVersions(for package: DeveloperPackage, force: Bool = false) async -> [String] {
+        let cacheKey = developerVersionCacheKey(for: package)
+        if !force, let cached = versionCache[cacheKey] {
+            return cached
+        }
+        let versions = await dependencies.developerPackages.availableVersions(
+            for: package, includePrereleases: settings.includePrereleaseUpdates
+        )
+        versionCache[cacheKey] = versions
+        return versions
+    }
+
     private func developerVersionCacheKey(for package: DeveloperPackage) -> String {
         "\(package.id)|prereleases:\(settings.includePrereleaseUpdates)"
     }
 
     func performUpdate(_ update: AvailableUpdate) async {
-        guard !workingIDs.contains(update.id) else { return }
-        if update.homebrewToken != nil,
+        guard !isUpdating(update) else { return }
+        if update.homebrewToken != nil {
+            pendingHomebrewAuthorizationConfirmation = HomebrewAuthorizationConfirmation(
+                itemName: update.app.name,
+                action: .update(update)
+            )
+            return
+        }
+        await continueApplicationUpdate(update)
+    }
+
+    private func continueApplicationUpdate(_ update: AvailableUpdate) async {
+        if update.homebrewToken != nil || update.canInstallDirectly,
            queueRunningAppConfirmation(for: [update.app], action: .update(update)) { return }
+        await performApplicationUpdate(update)
+    }
+
+    private func performApplicationUpdate(_ update: AvailableUpdate) async {
+        let operationID = OperationID.applicationUpdate(update.id)
+        guard !isWorking(operationID) else { return }
+        updateExecutionState.activeOperations.insert(operationID)
+        defer { updateExecutionState.activeOperations.remove(operationID) }
         await performUpdateNow(update)
     }
 
@@ -503,7 +555,7 @@ final class UpkeepStore: ObservableObject {
             } else {
                 let record: UpdateRecord
                 do {
-                    record = try await UpdateHistoryStore.shared.prepareAppBackup(
+                    record = try await dependencies.history.prepareAppBackup(
                         app: update.app, toVersion: update.availableVersion, kind: .homebrew
                     )
                 } catch {
@@ -511,32 +563,74 @@ final class UpkeepStore: ObservableObject {
                     recordUpdateFailure(item: update.app.name, action: "Prepare rollback backup", error: error)
                     return
                 }
-                let succeeded = await perform(
-                    id: update.id,
+                let succeeded = await execute(
                     label: update.app.name,
                     metadata: updateDiagnosticMetadata(update)
-                ) { try await HomebrewClient().upgradeCask(token: token) }
+                ) { try await self.dependencies.homebrew.upgradeCask(token: token) }
                 if succeeded {
                     var historyError: Error?
-                    do { try await UpdateHistoryStore.shared.add(record) }
+                    do { try await dependencies.history.add(record) }
                     catch { historyError = error }
                     await scan()
                     if let historyError { recordHistoryFailure(item: update.app.name, error: historyError) }
                     reconcileHomebrewUpdate(token: token, name: update.app.name)
                 } else {
-                    await UpdateHistoryStore.shared.discardBackup(for: record)
+                    await dependencies.history.discardBackup(for: record)
                 }
             }
+        } else if update.canInstallDirectly {
+            let record: UpdateRecord
+            do {
+                record = try await dependencies.history.prepareAppBackup(
+                    app: update.app, toVersion: update.availableVersion, kind: .app
+                )
+            } catch {
+                errorMessage = "Could not create a rollback backup: \(error.localizedDescription)"
+                recordUpdateFailure(
+                    item: update.app.name,
+                    action: "Prepare rollback backup",
+                    error: error
+                )
+                return
+            }
+            let succeeded = await execute(
+                label: update.app.name,
+                metadata: updateDiagnosticMetadata(update)
+            ) {
+                try await self.dependencies.directAppInstaller.install(update: update)
+            }
+            if succeeded {
+                var historyError: Error?
+                do { try await dependencies.history.add(record) }
+                catch { historyError = error }
+                await scan()
+                if let historyError {
+                    recordHistoryFailure(item: update.app.name, error: historyError)
+                }
+            } else {
+                await dependencies.history.discardBackup(for: record)
+            }
         } else if update.requiresInAppInstallation {
-            let opened = NSWorkspace.shared.open(update.app.url)
+            let opened = dependencies.externalOpener.open(update.app.url)
             recordExternalUpdateAction(update, opened: opened)
         } else if let actionURL = update.actionURL {
-            let opened = NSWorkspace.shared.open(actionURL)
+            let opened = dependencies.externalOpener.open(actionURL)
             recordExternalUpdateAction(update, opened: opened)
         }
     }
 
     func updatePackage(_ package: HomebrewPackage) async {
+        if package.kind == .cask {
+            pendingHomebrewAuthorizationConfirmation = HomebrewAuthorizationConfirmation(
+                itemName: package.displayName,
+                action: .package(package)
+            )
+            return
+        }
+        await continuePackageUpdate(package)
+    }
+
+    private func continuePackageUpdate(_ package: HomebrewPackage) async {
         if package.kind == .cask,
            let app = matchingApp(for: package),
            queueRunningAppConfirmation(for: [app], action: .package(package)) { return }
@@ -544,28 +638,44 @@ final class UpkeepStore: ObservableObject {
     }
 
     private func updatePackageNow(_ package: HomebrewPackage) async {
+        let operationID = OperationID.homebrewPackage(package.id)
+        guard !isWorking(operationID) else { return }
+        updateExecutionState.activeOperations.insert(operationID)
+        defer { updateExecutionState.activeOperations.remove(operationID) }
+
         let record = await recoveryRecord(for: package)
         if package.kind == .cask, matchingApp(for: package) != nil, record == nil { return }
-        let succeeded = await perform(id: package.id, label: package.displayName, metadata: [
+        let succeeded = await execute(label: package.displayName, metadata: [
             "Source": "Homebrew",
             "From": package.installedVersion,
             "To": package.currentVersion
-        ]) { try await HomebrewClient().upgrade(package) }
+        ]) { try await self.dependencies.homebrew.upgrade(package) }
         if succeeded {
             var historyError: Error?
             if let record {
-                do { try await UpdateHistoryStore.shared.add(record) }
+                do { try await dependencies.history.add(record) }
                 catch { historyError = error }
             }
             await scan()
             if let historyError { recordHistoryFailure(item: package.displayName, error: historyError) }
             reconcileHomebrewUpdate(token: package.token, name: package.displayName)
         } else if let record {
-            await UpdateHistoryStore.shared.discardBackup(for: record)
+            await dependencies.history.discardBackup(for: record)
         }
     }
 
     func updateAllPackages() async {
+        if homebrewPackages.contains(where: { $0.isOutdated && !isExcluded($0) && $0.kind == .cask }) {
+            pendingHomebrewAuthorizationConfirmation = HomebrewAuthorizationConfirmation(
+                itemName: "Homebrew cask updates",
+                action: .allPackages
+            )
+            return
+        }
+        await continueAllPackageUpdates()
+    }
+
+    private func continueAllPackageUpdates() async {
         let runningApps = homebrewPackages
             .filter { $0.isOutdated && !isExcluded($0) && $0.kind == .cask }
             .compactMap(matchingApp(for:))
@@ -574,25 +684,26 @@ final class UpkeepStore: ObservableObject {
     }
 
     private func updateAllPackagesNow() async {
-        guard !workingIDs.contains("homebrew-all") else { return }
+        let operationID = OperationID.homebrewBatch
+        guard !isWorking(operationID) else { return }
         let startedAt = Date()
-        workingIDs.insert("homebrew-all")
+        updateExecutionState.activeOperations.insert(operationID)
         errorMessage = nil
-        defer { workingIDs.remove("homebrew-all") }
+        defer { updateExecutionState.activeOperations.remove(operationID) }
         var failureMessage: String?
         let attempted = homebrewPackages.filter { $0.isOutdated && !isExcluded($0) }
         for package in attempted {
             let record = await recoveryRecord(for: package)
             if package.kind == .cask, matchingApp(for: package) != nil, record == nil { break }
             do {
-                try await HomebrewClient().upgrade(package)
+                try await dependencies.homebrew.upgrade(package)
             } catch {
-                if let record { await UpdateHistoryStore.shared.discardBackup(for: record) }
+                if let record { await dependencies.history.discardBackup(for: record) }
                 failureMessage = error.localizedDescription
                 break
             }
             if let record {
-                do { try await UpdateHistoryStore.shared.add(record) }
+                do { try await dependencies.history.add(record) }
                 catch {
                     failureMessage = "\(package.displayName) was updated, but its rollback history could not be saved: \(error.localizedDescription)"
                     recordHistoryFailure(item: package.displayName, error: error)
@@ -627,28 +738,84 @@ final class UpkeepStore: ObservableObject {
     }
 
     func adopt(_ item: AdoptableApp) async {
+        pendingHomebrewAuthorizationConfirmation = HomebrewAuthorizationConfirmation(
+            itemName: item.app.name,
+            action: .adopt(item)
+        )
+    }
+
+    func checkAppManagementPermission() async {
+        let operationID = OperationID.appManagementPermissionCheck
+        guard !isWorking(operationID) else { return }
+        updateExecutionState.activeOperations.insert(operationID)
+        defer { updateExecutionState.activeOperations.remove(operationID) }
+
+        appManagementPermissionCheck = await AppManagementPermissionChecker.check(
+            using: homebrewPermissionCheckApps
+        )
+    }
+
+    func openAppManagementSettings() {
+        guard let url = URL(
+            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AppBundles"
+        ), dependencies.externalOpener.open(url) else {
+            errorMessage = "Could not open App Management settings."
+            return
+        }
+    }
+
+    var homebrewPermissionCheckApps: [InstalledApp] {
+        var appsByID = Dictionary(uniqueKeysWithValues: adoptableApps.map { ($0.app.id, $0.app) })
+        for package in homebrewPackages where package.kind == .cask {
+            if let app = homebrewPackageApp(for: package) {
+                appsByID[app.id] = app
+            }
+        }
+        return appsByID.values.sorted {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+    }
+
+    private func continueAdoption(_ item: AdoptableApp) async {
         if queueRunningAppConfirmation(for: [item.app], action: .adopt(item)) { return }
         await adoptNow(item)
     }
 
     private func adoptNow(_ item: AdoptableApp) async {
-        let succeeded = await perform(id: item.id, label: item.app.name, metadata: [
+        let operationID = OperationID.homebrewAdoption(item.id)
+        guard !isWorking(operationID) else { return }
+        updateExecutionState.activeOperations.insert(operationID)
+        defer { updateExecutionState.activeOperations.remove(operationID) }
+
+        let succeeded = await execute(label: item.app.name, metadata: [
             "Source": "Homebrew adoption",
             "Installed": item.app.installedVersion,
             "Catalog": item.caskVersion
-        ]) { try await HomebrewClient().adopt(item) }
+        ]) { try await self.dependencies.homebrew.adopt(item) }
         if succeeded { await scan() }
     }
 
     func updateAdoptableApp(_ item: AdoptableApp) async {
+        pendingHomebrewAuthorizationConfirmation = HomebrewAuthorizationConfirmation(
+            itemName: item.app.name,
+            action: .updateAdoptable(item)
+        )
+    }
+
+    private func continueAdoptableUpdate(_ item: AdoptableApp) async {
         if queueRunningAppConfirmation(for: [item.app], action: .updateAdoptable(item)) { return }
         await updateAdoptableAppNow(item)
     }
 
     private func updateAdoptableAppNow(_ item: AdoptableApp) async {
+        let operationID = OperationID.homebrewAdoption(item.id)
+        guard !isWorking(operationID) else { return }
+        updateExecutionState.activeOperations.insert(operationID)
+        defer { updateExecutionState.activeOperations.remove(operationID) }
+
         let record: UpdateRecord
         do {
-            record = try await UpdateHistoryStore.shared.prepareAppBackup(
+            record = try await dependencies.history.prepareAppBackup(
                 app: item.app, toVersion: item.caskVersion, kind: .homebrew
             )
         } catch {
@@ -656,20 +823,20 @@ final class UpkeepStore: ObservableObject {
             recordUpdateFailure(item: item.app.name, action: "Prepare rollback backup", error: error)
             return
         }
-        let succeeded = await perform(id: item.id, label: item.app.name, metadata: [
+        let succeeded = await execute(label: item.app.name, metadata: [
             "Source": "Homebrew adoption",
             "From": item.app.installedVersion,
             "To": item.caskVersion
-        ]) { try await HomebrewClient().installOrReplace(item) }
+        ]) { try await self.dependencies.homebrew.installOrReplace(item) }
         if succeeded {
             var historyError: Error?
-            do { try await UpdateHistoryStore.shared.add(record) }
+            do { try await dependencies.history.add(record) }
             catch { historyError = error }
             await scan()
             if let historyError { recordHistoryFailure(item: item.app.name, error: historyError) }
             reconcileHomebrewUpdate(token: item.caskToken, name: item.app.name)
         } else {
-            await UpdateHistoryStore.shared.discardBackup(for: record)
+            await dependencies.history.discardBackup(for: record)
         }
     }
 
@@ -696,12 +863,36 @@ final class UpkeepStore: ObservableObject {
         case .microsoftAutoUpdate:
             let installed = URL(fileURLWithPath: "/Library/Application Support/Microsoft/MAU2.0/Microsoft AutoUpdate.app")
             target = fileManager.fileExists(atPath: installed.path) ? installed : app.url
+        case .steam:
+            target = URL(string: "steam://open/downloads")
+        case .adobeCreativeCloud:
+            let candidates = [
+                URL(fileURLWithPath: "/Applications/Utilities/Adobe Creative Cloud/ACC/Creative Cloud.app"),
+                URL(fileURLWithPath: "/Applications/Adobe Creative Cloud.app")
+            ]
+            target = candidates.first { fileManager.fileExists(atPath: $0.path) } ?? app.url
+        case .jetBrainsToolbox:
+            let candidates = [
+                URL(fileURLWithPath: "/Applications/JetBrains Toolbox.app"),
+                fileManager.homeDirectoryForCurrentUser
+                    .appendingPathComponent("Applications/JetBrains Toolbox.app")
+            ]
+            target = candidates.first { fileManager.fileExists(atPath: $0.path) } ?? app.url
+        case .spotify, .discord:
+            target = app.url
+        case .epicGames:
+            let installed = URL(fileURLWithPath: "/Applications/Epic Games Launcher.app")
+            target = fileManager.fileExists(atPath: installed.path) ? installed : app.url
+        case .tailscale:
+            target = app.url
+        case .macOS:
+            target = URL(string: "x-apple.systempreferences:com.apple.Software-Update-Settings.extension")
         case .appStore:
             target = URL(string: "macappstore://showUpdatesPage")
         case .direct:
             target = app.url
         }
-        guard let target, NSWorkspace.shared.open(target) else {
+        guard let target, dependencies.externalOpener.open(target) else {
             errorMessage = "Could not open \(app.updateManagement.rawValue)."
             return
         }
@@ -717,7 +908,7 @@ final class UpkeepStore: ObservableObject {
         }
 
         switch confirmation.action {
-        case let .update(update): await performUpdateNow(update)
+        case let .update(update): await performApplicationUpdate(update)
         case let .package(package): await updatePackageNow(package)
         case let .adopt(item): await adoptNow(item)
         case let .updateAdoptable(item): await updateAdoptableAppNow(item)
@@ -725,9 +916,20 @@ final class UpkeepStore: ObservableObject {
         }
     }
 
+    func confirmHomebrewAuthorization(_ confirmation: HomebrewAuthorizationConfirmation) async {
+        pendingHomebrewAuthorizationConfirmation = nil
+        switch confirmation.action {
+        case let .update(update): await continueApplicationUpdate(update)
+        case let .package(package): await continuePackageUpdate(package)
+        case let .adopt(item): await continueAdoption(item)
+        case let .updateAdoptable(item): await continueAdoptableUpdate(item)
+        case .allPackages: await continueAllPackageUpdates()
+        }
+    }
+
     func updateDeveloperPackage(_ package: DeveloperPackage) async {
         guard package.canUpdateAutomatically else {
-            if let url = package.manager.homepage { NSWorkspace.shared.open(url) }
+            if let url = package.manager.homepage { _ = dependencies.externalOpener.open(url) }
             else { errorMessage = "\(package.name) must be updated with \(package.manager.rawValue)." }
             return
         }
@@ -736,7 +938,7 @@ final class UpkeepStore: ObservableObject {
 
     func installDeveloperPackage(_ package: DeveloperPackage, version: String) async {
         guard package.canUpdateAutomatically else {
-            if let url = package.manager.homepage { NSWorkspace.shared.open(url) }
+            if let url = package.manager.homepage { _ = dependencies.externalOpener.open(url) }
             else { errorMessage = "\(package.name) must be updated with \(package.manager.rawValue)." }
             return
         }
@@ -745,12 +947,17 @@ final class UpkeepStore: ObservableObject {
             errorMessage = "Enter a version to install."
             return
         }
-        let succeeded = await perform(id: package.id, label: package.name, metadata: [
+        let operationID = OperationID.developerPackage(package.id)
+        guard !isWorking(operationID) else { return }
+        updateExecutionState.activeOperations.insert(operationID)
+        defer { updateExecutionState.activeOperations.remove(operationID) }
+
+        let succeeded = await execute(label: package.name, metadata: [
             "Source": package.manager.rawValue,
             "From": package.currentVersion,
             "To": selectedVersion
         ]) {
-            try await DeveloperPackageClient().install(package, version: selectedVersion)
+            try await self.dependencies.developerPackages.install(package, version: selectedVersion)
         }
         if succeeded {
             let record = UpdateRecord(
@@ -759,17 +966,36 @@ final class UpkeepStore: ObservableObject {
                 kind: .developer, originalAppPath: nil, backupPath: nil,
                 recoveryNote: "Package-manager updates do not have a universal rollback mechanism. Reinstall the previous version with \(package.manager.rawValue) if needed."
             )
-            try? await UpdateHistoryStore.shared.add(record)
+            try? await dependencies.history.add(record)
+            await scan()
+        }
+    }
+
+    func uninstallDeveloperPackage(_ package: DeveloperPackage) async {
+        let operationID = OperationID.developerPackage(package.id)
+        guard !isWorking(operationID) else { return }
+        updateExecutionState.activeOperations.insert(operationID)
+        defer { updateExecutionState.activeOperations.remove(operationID) }
+
+        let succeeded = await execute(label: package.name, metadata: [
+            "Source": package.manager.rawValue,
+            "Version": package.currentVersion,
+            "Action": "Uninstall"
+        ]) {
+            try await self.dependencies.developerPackages.uninstall(package)
+        }
+        if succeeded {
+            developerPackages.removeAll { $0.id == package.id }
             await scan()
         }
     }
 
     func scanLocalModels() async {
-        let identifier = "local-model-scan"
-        guard !workingIDs.contains(identifier) else { return }
-        workingIDs.insert(identifier)
-        defer { workingIDs.remove(identifier) }
-        let report = await LocalModelClient().scan()
+        let identifier = OperationID.localModelScan
+        guard !isWorking(identifier) else { return }
+        updateExecutionState.activeOperations.insert(identifier)
+        defer { updateExecutionState.activeOperations.remove(identifier) }
+        let report = await dependencies.localModels.scan()
         var merged = Dictionary(uniqueKeysWithValues: report.models.map { ($0.id, $0) })
         for previous in localModels where report.failedModelIDs.contains(previous.id) || report.failedRuntimes.contains(previous.runtime) {
             merged[previous.id] = previous
@@ -785,11 +1011,16 @@ final class UpkeepStore: ObservableObject {
     }
 
     func updateLocalModel(_ model: LocalLLMModel) async {
-        let succeeded = await perform(id: model.id, label: model.name, metadata: [
+        let operationID = OperationID.localModel(model.id)
+        guard !isWorking(operationID) else { return }
+        updateExecutionState.activeOperations.insert(operationID)
+        defer { updateExecutionState.activeOperations.remove(operationID) }
+
+        let succeeded = await execute(label: model.name, metadata: [
             "Source": model.runtime.rawValue,
             "From": model.installedRevision,
             "To": model.latestRevision
-        ]) { try await LocalModelClient().update(model) }
+        ]) { try await self.dependencies.localModels.update(model) }
         if succeeded {
             let record = UpdateRecord(
                 id: UUID(), date: Date(), name: model.name,
@@ -797,18 +1028,18 @@ final class UpkeepStore: ObservableObject {
                 kind: .model, originalAppPath: nil, backupPath: nil,
                 recoveryNote: "Model files are managed by \(model.runtime.rawValue). Download the earlier model revision again if rollback is required."
             )
-            try? await UpdateHistoryStore.shared.add(record)
+            try? await dependencies.history.add(record)
             await scanLocalModels()
         }
     }
 
     func performBatchUpdates(_ items: [BatchUpdateItem]) async -> BatchUpdateSummary {
-        let batchID = "unified-update-batch"
-        guard !items.isEmpty, !workingIDs.contains(batchID) else { return BatchUpdateSummary(results: []) }
-        workingIDs.insert(batchID)
+        let batchID = OperationID.unifiedBatch
+        guard !items.isEmpty, !isWorking(batchID) else { return BatchUpdateSummary(results: []) }
+        updateExecutionState.activeOperations.insert(batchID)
         errorMessage = nil
         defer {
-            workingIDs.remove(batchID)
+            updateExecutionState.activeOperations.remove(batchID)
             batchUpdateProgress = nil
         }
 
@@ -848,16 +1079,33 @@ final class UpkeepStore: ObservableObject {
     }
 
     private func performBatchItem(_ item: BatchUpdateItem) async -> BatchUpdateResult {
-        let workID = "batch|\(item.id)"
-        workingIDs.insert(workID)
-        defer { workingIDs.remove(workID) }
+        let workID = OperationID.batchItem(item.id)
+        updateExecutionState.activeOperations.insert(workID)
+        defer { updateExecutionState.activeOperations.remove(workID) }
 
         do {
             switch item {
             case let .application(update):
                 guard let token = update.homebrewToken else {
+                    if update.canInstallDirectly {
+                        let record = try await dependencies.history.prepareAppBackup(
+                            app: update.app, toVersion: update.availableVersion, kind: .app
+                        )
+                        do {
+                            try await dependencies.directAppInstaller.install(update: update)
+                            try await dependencies.history.add(record)
+                        } catch {
+                            await dependencies.history.discardBackup(for: record)
+                            throw error
+                        }
+                        return BatchUpdateResult(
+                            item: item,
+                            outcome: .updated,
+                            detail: "Updated \(update.app.name) in Upkeep."
+                        )
+                    }
                     let target = update.requiresInAppInstallation ? update.app.url : update.actionURL
-                    guard let target, NSWorkspace.shared.open(target) else {
+                    guard let target, dependencies.externalOpener.open(target) else {
                         throw BatchUpdateError.couldNotOpen(update.source.rawValue)
                     }
                     return BatchUpdateResult(
@@ -871,49 +1119,49 @@ final class UpkeepStore: ObservableObject {
                 if let package = homebrewPackages.first(where: { $0.kind == .cask && $0.token == token }) {
                     try await upgradeBatchPackage(package)
                 } else if let adoptable = adoptableApps.first(where: { $0.caskToken == token && $0.app.id == update.app.id }) {
-                    let record = try await UpdateHistoryStore.shared.prepareAppBackup(
+                    let record = try await dependencies.history.prepareAppBackup(
                         app: adoptable.app, toVersion: adoptable.caskVersion, kind: .homebrew
                     )
-                    do { try await HomebrewClient().installOrReplace(adoptable) }
+                    do { try await dependencies.homebrew.installOrReplace(adoptable) }
                     catch {
-                        await UpdateHistoryStore.shared.discardBackup(for: record)
+                        await dependencies.history.discardBackup(for: record)
                         throw error
                     }
-                    try await UpdateHistoryStore.shared.add(record)
+                    try await dependencies.history.add(record)
                 } else {
-                    let record = try await UpdateHistoryStore.shared.prepareAppBackup(
+                    let record = try await dependencies.history.prepareAppBackup(
                         app: update.app, toVersion: update.availableVersion, kind: .homebrew
                     )
-                    do { try await HomebrewClient().upgradeCask(token: token) }
+                    do { try await dependencies.homebrew.upgradeCask(token: token) }
                     catch {
-                        await UpdateHistoryStore.shared.discardBackup(for: record)
+                        await dependencies.history.discardBackup(for: record)
                         throw error
                     }
-                    try await UpdateHistoryStore.shared.add(record)
+                    try await dependencies.history.add(record)
                 }
 
             case let .homebrew(package):
                 try await upgradeBatchPackage(package)
 
             case let .developer(package):
-                try await DeveloperPackageClient().install(package, version: package.latestVersion)
+                try await dependencies.developerPackages.install(package, version: package.latestVersion)
                 let record = UpdateRecord(
                     id: UUID(), date: Date(), name: package.name,
                     fromVersion: package.currentVersion, toVersion: package.latestVersion,
                     kind: .developer, originalAppPath: nil, backupPath: nil,
                     recoveryNote: "Package-manager updates do not have a universal rollback mechanism. Reinstall the previous version with \(package.manager.rawValue) if needed."
                 )
-                try? await UpdateHistoryStore.shared.add(record)
+                try? await dependencies.history.add(record)
 
             case let .model(model):
-                try await LocalModelClient().update(model)
+                try await dependencies.localModels.update(model)
                 let record = UpdateRecord(
                     id: UUID(), date: Date(), name: model.name,
                     fromVersion: model.installedRevision, toVersion: model.latestRevision,
                     kind: .model, originalAppPath: nil, backupPath: nil,
                     recoveryNote: "Model files are managed by \(model.runtime.rawValue). Download the earlier model revision again if rollback is required."
                 )
-                try? await UpdateHistoryStore.shared.add(record)
+                try? await dependencies.history.add(record)
             }
             return BatchUpdateResult(item: item, outcome: .updated, detail: "Updated to \(item.availableVersion).")
         } catch {
@@ -924,7 +1172,7 @@ final class UpkeepStore: ObservableObject {
     private func upgradeBatchPackage(_ package: HomebrewPackage) async throws {
         let record: UpdateRecord
         if package.kind == .cask, let app = matchingApp(for: package) {
-            record = try await UpdateHistoryStore.shared.prepareAppBackup(
+            record = try await dependencies.history.prepareAppBackup(
                 app: app, toVersion: package.currentVersion, kind: .homebrew
             )
         } else {
@@ -935,12 +1183,12 @@ final class UpkeepStore: ObservableObject {
                 recoveryNote: "Homebrew formula versions cannot always be rolled back automatically. Restore from Time Machine or install a versioned formula when available."
             )
         }
-        do { try await HomebrewClient().upgrade(package) }
+        do { try await dependencies.homebrew.upgrade(package) }
         catch {
-            await UpdateHistoryStore.shared.discardBackup(for: record)
+            await dependencies.history.discardBackup(for: record)
             throw error
         }
-        try await UpdateHistoryStore.shared.add(record)
+        try await dependencies.history.add(record)
     }
 
     private func batchRunningApps(for items: [BatchUpdateItem]) -> [InstalledApp] {
@@ -952,7 +1200,8 @@ final class UpkeepStore: ObservableObject {
 
     private func batchApp(for item: BatchUpdateItem) -> InstalledApp? {
         switch item {
-        case let .application(update): return update.homebrewToken == nil ? nil : update.app
+        case let .application(update):
+            return update.homebrewToken == nil && !update.canInstallDirectly ? nil : update.app
         case let .homebrew(package): return package.kind == .cask ? matchingApp(for: package) : nil
         case .developer, .model: return nil
         }
@@ -1056,28 +1305,47 @@ final class UpkeepStore: ObservableObject {
     }
 
     func prepareMacOSUpdate(_ update: MacOSUpdate) async {
+        let operationID = OperationID.macOSUpdate(update.id)
+        guard !isWorking(operationID) else { return }
+        updateExecutionState.activeOperations.insert(operationID)
+        defer { updateExecutionState.activeOperations.remove(operationID) }
+
         do {
-            try await UpdateHistoryStore.shared.addMacOSPlan(update: update)
-            updateHistory = await UpdateHistoryStore.shared.records()
-            MacOSUpdateClient().openSoftwareUpdateSettings()
+            try await dependencies.history.addMacOSPlan(update: update)
+            updateHistory = await dependencies.history.records()
+            openSoftwareUpdateSettings()
         } catch { errorMessage = error.localizedDescription }
     }
 
-    func openBetaSettings() { MacOSUpdateClient().openSoftwareUpdateSettings() }
+    func openBetaSettings() { openSoftwareUpdateSettings() }
 
     func revert(_ record: UpdateRecord) async {
-        let succeeded = await perform(id: record.id.uuidString, label: "Restore \(record.name)", metadata: [
+        let operationID = OperationID.historyRestore(record.id)
+        guard !isWorking(operationID) else { return }
+        updateExecutionState.activeOperations.insert(operationID)
+        defer { updateExecutionState.activeOperations.remove(operationID) }
+
+        let succeeded = await execute(label: "Restore \(record.name)", metadata: [
             "From": record.toVersion,
             "To": record.fromVersion,
             "Source": "History"
         ]) {
-            try await UpdateHistoryStore.shared.revert(record)
+            try await dependencies.history.revert(record)
         }
         if succeeded { await scan() }
     }
 
     func openMacOSRecoveryHelp() {
-        if let url = URL(string: "https://support.apple.com/102551") { NSWorkspace.shared.open(url) }
+        if let url = URL(string: "https://support.apple.com/102551") { _ = dependencies.externalOpener.open(url) }
+    }
+
+    private func openSoftwareUpdateSettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.Software-Update-Settings.extension"),
+              dependencies.externalOpener.open(url)
+        else {
+            errorMessage = "Could not open Software Update settings."
+            return
+        }
     }
 
     func openMainWindow() {
@@ -1111,17 +1379,13 @@ final class UpkeepStore: ObservableObject {
     private func exclusionKey(for package: DeveloperPackage) -> String { "developer|\(package.id)" }
     private func exclusionKey(for model: LocalLLMModel) -> String { "model|\(model.id)" }
 
-    private func perform(
-        id: String,
+    private func execute(
         label: String,
         metadata: [String: String] = [:],
         operation: () async throws -> Void
     ) async -> Bool {
-        guard !workingIDs.contains(id) else { return false }
         let startedAt = Date()
-        workingIDs.insert(id)
         errorMessage = nil
-        defer { workingIDs.remove(id) }
         do {
             try await operation()
             DiagnosticsStore.shared.record(.info, category: .update, "Update action completed", metadata: metadata.merging([
@@ -1176,8 +1440,99 @@ final class UpkeepStore: ObservableObject {
                 "Available": update.availableVersion
             ]
         )
-        if !opened { errorMessage = "Could not open the update action for \(update.app.name)." }
+        if opened {
+            beginExternalUpdateVerification(update)
+        } else {
+            errorMessage = "Could not open the update action for \(update.app.name)."
+        }
         refreshDiagnostics()
+    }
+
+    private func beginExternalUpdateVerification(_ update: AvailableUpdate) {
+        externalVerificationTasks[update.id]?.cancel()
+        externalUpdateVerifications[update.id] = ExternalUpdateVerification(
+            state: .waiting,
+            detail: "Waiting for \(update.app.name) to finish the update…"
+        )
+        externalVerificationTasks[update.id] = Task { @MainActor [weak self] in
+            guard let self else { return }
+            for _ in 0..<20 {
+                do { try await Task.sleep(for: .seconds(3)) }
+                catch { return }
+                guard let refreshed = await self.dependencies.applicationDiscovery.discover(
+                    at: update.app.url
+                ) else { continue }
+                if VersionComparator.compare(
+                    refreshed.installedVersion,
+                    update.availableVersion
+                ) != .orderedAscending {
+                    self.externalUpdateVerifications[update.id] = ExternalUpdateVerification(
+                        state: .completed,
+                        detail: "Verified \(refreshed.installedVersion) from the installed app bundle."
+                    )
+                    await self.refresh(refreshed)
+                    self.externalVerificationTasks[update.id] = nil
+                    return
+                }
+            }
+            self.externalUpdateVerifications[update.id] = ExternalUpdateVerification(
+                state: .attention,
+                detail: "\(update.app.name) still reports \(update.app.installedVersion). Finish its updater or restart the app, then refresh."
+            )
+            DiagnosticsStore.shared.record(
+                .warning,
+                category: .update,
+                "External update still needs verification",
+                metadata: [
+                    "Item": update.app.name,
+                    "Expected": update.availableVersion,
+                    "Reported": update.app.installedVersion
+                ]
+            )
+            self.externalVerificationTasks[update.id] = nil
+            self.refreshDiagnostics()
+        }
+    }
+
+    func externalUpdateVerification(for app: InstalledApp) -> ExternalUpdateVerification? {
+        externalUpdateVerifications[app.id]
+    }
+
+    func setGitHubRepository(_ value: String, for app: InstalledApp) async {
+        guard let bundleIdentifier = app.bundleIdentifier else {
+            errorMessage = "This app does not declare a bundle identifier, so Upkeep cannot save a reliable mapping."
+            return
+        }
+        do {
+            let repository = try await GitHubClient().validateRepository(value)
+            settings.setGitHubRepository(repository, for: bundleIdentifier)
+            let mappedApp = app.replacingGitHubRepository(repository)
+            replaceApp(app, with: mappedApp)
+            await refresh(mappedApp)
+        } catch {
+            errorMessage = "Could not use that GitHub source: \(error.localizedDescription)"
+        }
+    }
+
+    func removeCustomGitHubRepository(for app: InstalledApp) async {
+        guard let bundleIdentifier = app.bundleIdentifier else { return }
+        settings.setGitHubRepository(nil, for: bundleIdentifier)
+        let repository = AppDiscovery.trustedGitHubRepository(bundleIdentifier: bundleIdentifier)
+        let remappedApp = app.replacingGitHubRepository(repository)
+        replaceApp(app, with: remappedApp)
+        await refresh(remappedApp)
+    }
+
+    private func replaceApp(_ oldApp: InstalledApp, with newApp: InstalledApp) {
+        if let index = apps.firstIndex(where: { $0.id == oldApp.id }) {
+            apps[index] = newApp
+        }
+        if selectedApp?.id == oldApp.id { selectedApp = newApp }
+        updates = updates.map { update in
+            update.app.id == oldApp.id
+                ? AvailableUpdate(app: newApp, candidates: update.candidates)
+                : update
+        }
     }
 
     private func updateDiagnosticMetadata(_ update: AvailableUpdate) -> [String: String] {
@@ -1209,7 +1564,7 @@ final class UpkeepStore: ObservableObject {
     private func recoveryRecord(for package: HomebrewPackage) async -> UpdateRecord? {
         if package.kind == .cask, let app = matchingApp(for: package) {
             do {
-                return try await UpdateHistoryStore.shared.prepareAppBackup(
+                return try await dependencies.history.prepareAppBackup(
                     app: app, toVersion: package.currentVersion, kind: .homebrew
                 )
             } catch {
@@ -1249,16 +1604,16 @@ final class UpkeepStore: ObservableObject {
     }
 
     func isRefreshing(_ app: InstalledApp) -> Bool {
-        workingIDs.contains("app-refresh-\(app.id)")
+        isWorking(.applicationRefresh(app.id))
     }
 
     func isRefreshing(_ package: HomebrewPackage) -> Bool {
-        workingIDs.contains("homebrew-refresh-\(package.id)")
+        isWorking(.homebrewRefresh(package.id))
             || homebrewPackageApp(for: package).map(isRefreshing) == true
     }
 
     func isRefreshing(_ package: DeveloperPackage) -> Bool {
-        workingIDs.contains("developer-refresh-\(package.id)")
+        isWorking(.developerRefresh(package.id))
     }
 
     func lastChecked(for app: InstalledApp) -> Date? {
@@ -1289,6 +1644,22 @@ final class UpkeepStore: ObservableObject {
         let paths = Set(runningApplications.compactMap(\.bundleURL).map(canonicalPath))
         if identifiers != runningBundleIdentifiers { runningBundleIdentifiers = identifiers }
         if paths != runningApplicationPaths { runningApplicationPaths = paths }
+    }
+
+    private func observeRunningApplications() {
+        guard runningApplicationObservers.isEmpty else { return }
+        let notifications = NSWorkspace.shared.notificationCenter
+        [
+            NSWorkspace.didLaunchApplicationNotification,
+            NSWorkspace.didTerminateApplicationNotification
+        ].forEach { name in
+            notifications.publisher(for: name)
+                .receive(on: RunLoop.main)
+                .sink { [weak self] _ in
+                    Task { @MainActor [weak self] in self?.refreshRunningApplications() }
+                }
+                .store(in: &runningApplicationObservers)
+        }
     }
 
     private func quitRunningApplications(for apps: [InstalledApp]) async throws {
@@ -1332,11 +1703,24 @@ final class UpkeepStore: ObservableObject {
     }
 
     private func enabledUpdateSources(for app: InstalledApp) -> Set<UpdateSource> {
-        var sources = Set<UpdateSource>()
-        if settings.checkAppStore, app.updateManagement == .appStore { sources.insert(.appStore) }
-        if settings.checkSparkle, app.sparkleFeedURL != nil { sources.insert(.sparkle) }
-        if settings.checkGitHub, app.githubRepository != nil { sources.insert(.github) }
-        return sources
+        switch app.updateManagement {
+        case .appStore:
+            return settings.checkAppStore ? [.appStore] : []
+        case .direct:
+            var sources = Set<UpdateSource>()
+            if app.mozillaUpdateChannel != nil
+                || app.chromiumUpdateChannel != nil
+                || app.braveUpdateChannel != nil {
+                sources.insert(.developer)
+            }
+            if settings.checkSparkle, app.sparkleFeedURL != nil { sources.insert(.sparkle) }
+            if settings.checkGitHub, app.githubRepository != nil { sources.insert(.github) }
+            return sources
+        case .testFlight, .setapp, .microsoftAutoUpdate, .steam,
+             .adobeCreativeCloud, .jetBrainsToolbox, .spotify, .discord, .epicGames,
+             .tailscale, .macOS:
+            return []
+        }
     }
 
     private func replaceHomebrewPackage(_ package: HomebrewPackage) {

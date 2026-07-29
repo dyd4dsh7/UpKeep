@@ -5,7 +5,7 @@ struct UpkeepSidebarView: View {
     @EnvironmentObject private var settings: AppSettings
 
     var body: some View {
-        List(selection: $store.selection) {
+        List(selection: $store.navigation.selection) {
             item(.updates)
 
             Section("Library") {
@@ -21,6 +21,8 @@ struct UpkeepSidebarView: View {
                     item(.testFlight)
                     item(.setapp)
                     item(.microsoftAutoUpdate)
+                    item(.steam)
+                    item(.otherUpdaters)
                     item(.homebrewApps)
                     item(.sparkle)
                     item(.github)

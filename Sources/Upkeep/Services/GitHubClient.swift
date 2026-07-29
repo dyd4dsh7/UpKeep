@@ -1,6 +1,39 @@
 import Foundation
 
 struct GitHubClient: Sendable {
+    static func normalizedRepository(_ value: String) -> String? {
+        var candidate = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        candidate = candidate.replacingOccurrences(
+            of: #"^https?://github\.com/"#,
+            with: "",
+            options: [.regularExpression, .caseInsensitive]
+        )
+        candidate = candidate.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if candidate.hasSuffix(".git") { candidate.removeLast(4) }
+        let parts = candidate.split(separator: "/", omittingEmptySubsequences: true)
+        guard parts.count == 2,
+              parts.allSatisfy({ part in
+                  !part.isEmpty && part.allSatisfy {
+                      $0.isLetter || $0.isNumber || "-._".contains($0)
+                  }
+              })
+        else { return nil }
+        return parts.map(String.init).joined(separator: "/")
+    }
+
+    func validateRepository(_ value: String) async throws -> String {
+        guard let repository = Self.normalizedRepository(value) else {
+            throw UpdateSourceError.malformedData("Enter a GitHub repository as owner/project.")
+        }
+        let releases = try await fetchReleases(repository: repository)
+        guard releases.contains(where: { $0.draft != true }) else {
+            throw UpdateSourceError.malformedData(
+                "That repository does not have any published releases."
+            )
+        }
+        return repository
+    }
+
     func update(for app: InstalledApp, includePrereleases: Bool = false) async throws -> AvailableUpdate? {
         guard let repository = app.githubRepository else { return nil }
 
@@ -19,28 +52,50 @@ struct GitHubClient: Sendable {
                 availableVersion: version,
                 source: .github,
                 releaseNotes: release.body,
-                actionURL: URL(string: release.htmlUrl),
+                actionURL: Self.installableAsset(in: release, for: app)?.downloadURL
+                    ?? URL(string: release.htmlUrl),
                 homebrewToken: nil,
-                sourcePrereleaseChannel: release.prereleaseChannel
+                sourcePrereleaseChannel: release.prereleaseChannel,
+                requiresInAppInstallation: app.hasBuiltInUpdater
             )
         } catch { throw UpdateSourceError(error) }
     }
 
     private func fetchReleases(repository: String) async throws -> [Release] {
         guard let url = URL(string: "https://api.github.com/repos/\(repository)/releases?per_page=100") else { return [] }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 15
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue("Upkeep/1.0", forHTTPHeaderField: "User-Agent")
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw UpdateSourceError.invalidResponse }
-        // GitHub uses 404 when a valid repository has no published releases.
-        if http.statusCode == 404 { return [] }
-        guard http.statusCode == 200 else { throw UpdateSourceError.httpStatus(http.statusCode) }
-
         do {
+            let data = try await PublisherResponseCache.shared.data(
+                for: "github-\(repository.lowercased())",
+                maximumAge: 30 * 60
+            ) {
+                var request = URLRequest(url: url)
+                request.timeoutInterval = 15
+                request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+                request.setValue("Upkeep/1.0", forHTTPHeaderField: "User-Agent")
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard let http = response as? HTTPURLResponse else {
+                    throw UpdateSourceError.invalidResponse
+                }
+                // GitHub uses 404 when a valid repository has no published releases.
+                if http.statusCode == 404 { return Data("[]".utf8) }
+                guard http.statusCode == 200 else {
+                    throw UpdateSourceError.httpStatus(http.statusCode)
+                }
+                return data
+            }
             return try JSONDecoder().decode([Release].self, from: data)
-        } catch { throw UpdateSourceError.malformedData(error.localizedDescription) }
+        } catch {
+            let entries = try await GitHubAtomClient.entries(repository: repository)
+            return entries.map {
+                Release(
+                    tagName: $0.tagName,
+                    htmlUrl: $0.htmlURL,
+                    body: $0.content,
+                    prerelease: VersionComparator.isPrerelease($0.tagName),
+                    draft: false
+                )
+            }
+        }
     }
 
     static func newestRelease(in releases: [Release]) -> Release? {
@@ -98,12 +153,84 @@ struct GitHubClient: Sendable {
         value.lowercased().filter(\.isLetter)
     }
 
+    static func installableAsset(in release: Release, for app: InstalledApp) -> Release.Asset? {
+        let appName = normalizeAssetComponent(app.name)
+        let repositoryName = normalizeAssetComponent(
+            app.githubRepository?.split(separator: "/").last.map(String.init) ?? ""
+        )
+        return release.assets
+            .filter {
+                guard let url = $0.downloadURL else { return false }
+                return ["zip", "dmg"].contains(url.pathExtension.lowercased())
+            }
+            .filter { asset in
+                let name = asset.name.lowercased()
+                guard name.contains("mac") || name.contains("darwin") || name.contains("osx")
+                    || name.hasSuffix(".dmg")
+                else { return false }
+                let normalized = normalizeAssetComponent(name)
+                return normalized.contains(appName) || normalized.contains(repositoryName)
+            }
+            .filter { assetMatchesCurrentArchitecture($0.name) }
+            .sorted { left, right in
+                let leftRank = assetRank(left.name)
+                let rightRank = assetRank(right.name)
+                return leftRank == rightRank
+                    ? left.name.localizedStandardCompare(right.name) == .orderedAscending
+                    : leftRank < rightRank
+            }
+            .first
+    }
+
+    private static func normalizeAssetComponent(_ value: String) -> String {
+        value.lowercased().filter(\.isLetter)
+    }
+
+    private static func assetMatchesCurrentArchitecture(_ name: String) -> Bool {
+        let value = name.lowercased()
+        let declaresIntel = value.contains("x86_64") || value.contains("x64")
+            || value.contains("amd64") || value.contains("intel")
+        let declaresArm = value.contains("arm64") || value.contains("aarch64")
+        if value.contains("universal") || (!declaresIntel && !declaresArm) { return true }
+        #if arch(arm64)
+        return declaresArm
+        #else
+        return declaresIntel
+        #endif
+    }
+
+    private static func assetRank(_ name: String) -> Int {
+        let value = name.lowercased()
+        let isDiskImage = value.hasSuffix(".dmg")
+        if value.contains("desktop") && isDiskImage { return 0 }
+        if value.contains("desktop") { return 1 }
+        if isDiskImage { return 2 }
+        return 3
+    }
+
     struct Release: Decodable, Equatable {
         let tagName: String
         let htmlUrl: String
         let body: String?
         let prerelease: Bool?
         let draft: Bool?
+        let assets: [Asset]
+
+        init(
+            tagName: String,
+            htmlUrl: String,
+            body: String?,
+            prerelease: Bool?,
+            draft: Bool?,
+            assets: [Asset] = []
+        ) {
+            self.tagName = tagName
+            self.htmlUrl = htmlUrl
+            self.body = body
+            self.prerelease = prerelease
+            self.draft = draft
+            self.assets = assets
+        }
 
         var prereleaseChannel: PrereleaseChannel? {
             guard prerelease == true else { return nil }
@@ -114,7 +241,19 @@ struct GitHubClient: Sendable {
         enum CodingKeys: String, CodingKey {
             case tagName = "tag_name"
             case htmlUrl = "html_url"
-            case body, prerelease, draft
+            case body, prerelease, draft, assets
+        }
+
+        struct Asset: Decodable, Equatable {
+            let name: String
+            let browserDownloadUrl: String
+
+            var downloadURL: URL? { URL(string: browserDownloadUrl) }
+
+            enum CodingKeys: String, CodingKey {
+                case name
+                case browserDownloadUrl = "browser_download_url"
+            }
         }
     }
 }

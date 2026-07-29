@@ -5,6 +5,7 @@ import SwiftUI
 struct UpkeepApp: App {
     @StateObject private var settings: AppSettings
     @StateObject private var store: UpkeepStore
+    @StateObject private var updateViewState = UpdateViewState()
 
     init() {
         let appSettings = AppSettings()
@@ -17,6 +18,7 @@ struct UpkeepApp: App {
             ContentView()
                 .environmentObject(store)
                 .environmentObject(settings)
+                .environmentObject(updateViewState)
                 .frame(minWidth: 760, minHeight: 500)
         }
         .windowToolbarStyle(.unified(showsTitle: true))
@@ -41,9 +43,9 @@ struct UpkeepApp: App {
                         Button {
                             store.searchText = ""
                             store.selection = .updates
-                            store.updateListFilter = filter
+                            updateViewState.filter = filter
                         } label: {
-                            if store.updateListFilter == filter {
+                            if updateViewState.filter == filter {
                                 Label(filter.rawValue, systemImage: "checkmark")
                             } else {
                                 Text(filter.rawValue)

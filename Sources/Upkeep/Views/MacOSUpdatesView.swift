@@ -69,9 +69,19 @@ struct MacOSUpdatesView: View {
                 color: update.isBeta ? .purple : .accentColor
             )
             InstalledVersionView(version: update.version)
-            Button(update.isFullInstaller ? "View in Software Update" : "Prepare Update") {
+            Button {
                 Task { await store.prepareMacOSUpdate(update) }
-            }.buttonStyle(.bordered).controlSize(.small).frame(width: 150)
+            } label: {
+                WorkingActionLabel(
+                    isWorking: store.isWorking(.macOSUpdate(update.id)),
+                    idleTitle: update.isFullInstaller ? "View in Software Update" : "Prepare Update",
+                    workingTitle: "Opening…"
+                )
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .frame(width: 150)
+            .disabled(store.isWorking(.macOSUpdate(update.id)))
         }
     }
 }

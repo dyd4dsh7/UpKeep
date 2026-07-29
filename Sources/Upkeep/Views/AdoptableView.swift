@@ -20,7 +20,7 @@ struct AdoptableView: View {
                     } content: {
                         ItemIdentityView(
                             title: item.app.name,
-                            detail: "Homebrew cask · \(item.caskToken)",
+                            detail: "Homebrew cask · \(item.caskToken) · May require password",
                             isRunning: store.isRunning(item.app),
                             prereleaseChannel: item.prereleaseChannel
                         )
@@ -29,11 +29,14 @@ struct AdoptableView: View {
                         Button {
                             Task { await store.adopt(item) }
                         } label: {
-                            if store.workingIDs.contains(item.id) { ProgressView().controlSize(.small) }
-                            else { Text("Adopt") }
+                            WorkingActionLabel(
+                                isWorking: store.isWorking(.homebrewAdoption(item.id)),
+                                idleTitle: "Adopt",
+                                workingTitle: "Adopting…"
+                            )
                         }
                         .listRowPrimaryAction()
-                        .disabled(store.workingIDs.contains(item.id))
+                        .disabled(store.isWorking(.homebrewAdoption(item.id)))
                     }
                     .tag(item.app.id)
                     .contentShape(Rectangle())

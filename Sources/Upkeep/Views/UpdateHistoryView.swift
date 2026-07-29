@@ -25,7 +25,16 @@ struct UpdateHistoryView: View {
                         Text(record.date.formatted(date: .abbreviated, time: .shortened))
                             .font(.caption).foregroundStyle(.secondary).frame(width: 120, alignment: .trailing)
                         if record.canRevertDirectly {
-                            Button("Revert") { store.pendingRevert = record }.buttonStyle(.bordered).controlSize(.small)
+                            Button { store.pendingRevert = record } label: {
+                                WorkingActionLabel(
+                                    isWorking: store.isWorking(.historyRestore(record.id)),
+                                    idleTitle: "Revert",
+                                    workingTitle: "Restoring…"
+                                )
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .disabled(store.isWorking(.historyRestore(record.id)))
                         } else if record.backupPath != nil {
                             Text("Backup expired").font(.caption).foregroundStyle(.secondary)
                         } else if record.kind == .macOS {

@@ -8,9 +8,14 @@ struct ContentView: View {
         NavigationSplitView {
             UpkeepSidebarView()
                 .navigationSplitViewColumnWidth(min: 215, ideal: 235, max: 300)
+                // Keep independent alerts on separate branches. Chaining multiple
+                // alert modifiers on the split-view root causes the last alert to
+                // suppress Homebrew's authorization prompt on macOS.
+                .upkeepHomebrewAuthorizationAlert(store)
         } detail: {
             detail
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .upkeepRunningAppConfirmationAlert(store)
                 .inspector(isPresented: inspectorPresented) {
                     inspectorContent
                         .inspectorColumnWidth(
@@ -22,7 +27,7 @@ struct ContentView: View {
         }
         .navigationTitle(navigationTitle)
         .navigationSubtitle(navigationSubtitle)
-        .searchable(text: $store.searchText, placement: .toolbar, prompt: "Search Upkeep")
+        .searchable(text: $store.navigation.searchText, placement: .toolbar, prompt: "Search Upkeep")
         .sheet(isPresented: Binding(
             get: { !settings.hasCompletedSetup },
             set: { _ in }
@@ -59,11 +64,6 @@ struct ContentView: View {
                 store.selection = .allApps
             }
         }
-        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
-            AppBrand.refreshDockPresentationIfNeeded(
-                updateCount: settings.showDockBadge ? store.totalUpdateCount : 0
-            )
-        }
         .onChange(of: store.selection) { _, _ in
             store.selectedApp = nil
             store.updateInspectorSelection = nil
@@ -78,10 +78,14 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshDockBadge()
         }
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+            AppBrand.refreshDockPresentationIfNeeded(
+                updateCount: settings.showDockBadge ? store.totalUpdateCount : 0
+            )
+        }
         .alert("The operation couldn’t be completed", isPresented: Binding(
             get: { store.errorMessage != nil }, set: { if !$0 { store.errorMessage = nil } }
         )) { Button("OK", role: .cancel) {} } message: { Text(store.errorMessage ?? "Unknown error") }
-        .upkeepRunningAppConfirmationAlert(store)
     }
 
     private func refreshMenuBar() {
@@ -124,10 +128,10 @@ struct ContentView: View {
         case .history: UpdateHistoryView()
         case .developerPackages: DeveloperPackagesView()
         case .localModels: LocalModelsView()
-        case .appStore, .testFlight, .setapp, .microsoftAutoUpdate,
+        case .appStore, .testFlight, .setapp, .microsoftAutoUpdate, .steam, .otherUpdaters,
              .sparkle, .homebrewApps, .github, .noSource:
             AllAppsView(
-                apps: store.apps(for: store.selection).filter { store.searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(store.searchText) },
+                apps: store.applications(for: store.selection).filter { store.searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(store.searchText) },
                 title: store.selection.rawValue,
                 systemImage: store.selection.headerSystemImage
             )
@@ -137,6 +141,9 @@ struct ContentView: View {
     private var inspectorPresented: Binding<Bool> {
         Binding(
             get: {
+                if isSearching {
+                    return store.selectedApp != nil || store.updateInspectorSelection != nil
+                }
                 switch store.selection {
                 case .updates:
                     return store.selectedApp != nil || store.updateInspectorSelection != nil
@@ -160,20 +167,32 @@ struct ContentView: View {
     }
 
     @ViewBuilder private var inspectorContent: some View {
-        switch store.selection {
-        case .homebrewPackages:
-            PackageDetail(package: selectedHomebrewPackage)
-        case .developerPackages:
-            DeveloperPackageDetail(package: selectedDeveloperPackage)
-        case .localModels:
-            LocalModelDetail(model: selectedLocalModel)
-        default:
+        if isSearching {
             if let app = store.selectedApp {
                 AppDetailView(app: app)
             } else if let inspector = store.updateInspectorSelection {
                 updateInspector(inspector)
             }
+        } else {
+            switch store.selection {
+            case .homebrewPackages:
+                PackageDetail(package: selectedHomebrewPackage)
+            case .developerPackages:
+                DeveloperPackageDetail(package: selectedDeveloperPackage)
+            case .localModels:
+                LocalModelDetail(model: selectedLocalModel)
+            default:
+                if let app = store.selectedApp {
+                    AppDetailView(app: app)
+                } else if let inspector = store.updateInspectorSelection {
+                    updateInspector(inspector)
+                }
+            }
         }
+    }
+
+    private var isSearching: Bool {
+        !store.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var selectedHomebrewPackage: HomebrewPackage? {
@@ -239,6 +258,22 @@ struct ContentView: View {
 }
 
 extension View {
+    func upkeepHomebrewAuthorizationAlert(_ store: UpkeepStore) -> some View {
+        alert(item: Binding(
+            get: { store.pendingHomebrewAuthorizationConfirmation },
+            set: { store.pendingHomebrewAuthorizationConfirmation = $0 }
+        )) { confirmation in
+            Alert(
+                title: Text("Administrator Password May Be Required"),
+                message: Text(confirmation.action.authorizationMessage(itemName: confirmation.itemName)),
+                primaryButton: .default(Text(confirmation.action.isAdoption ? "Continue Adoption" : "Continue Update")) {
+                    Task { await store.confirmHomebrewAuthorization(confirmation) }
+                },
+                secondaryButton: .cancel()
+            )
+        }
+    }
+
     func upkeepRunningAppConfirmationAlert(_ store: UpkeepStore) -> some View {
         alert(item: Binding(
             get: { store.pendingRunningAppConfirmation },
@@ -253,5 +288,21 @@ extension View {
                 secondaryButton: .cancel()
             )
         }
+    }
+}
+
+private extension HomebrewAuthorizationConfirmation.Action {
+    var isAdoption: Bool {
+        switch self {
+        case .adopt, .updateAdoptable: true
+        case .update, .package, .allPackages: false
+        }
+    }
+
+    func authorizationMessage(itemName: String) -> String {
+        if isAdoption {
+            return "\(itemName) is a Homebrew cask. If Homebrew cannot read the existing app bundle, Upkeep will open Terminal and ask for your macOS password to repair readable permissions inside that app only, then retry adoption."
+        }
+        return "\(itemName) is a Homebrew cask. Its installer or cleanup steps may need administrator approval. If required, Upkeep will open Terminal and macOS will ask for your password."
     }
 }

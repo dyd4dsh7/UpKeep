@@ -12,7 +12,8 @@ struct ChangelogView: View {
                             HStack(alignment: .firstTextBaseline) {
                                 Text("Upkeep \(release.version)").font(.title2.bold())
                                 if release.version == UpkeepRelease.all.first?.version {
-                                    Text("CURRENT").font(.caption2.bold()).foregroundStyle(.blue)
+                                    Text(release.isUnreleased ? "UNRELEASED" : "CURRENT")
+                                        .font(.caption2.bold()).foregroundStyle(.blue)
                                         .padding(.horizontal, 7).padding(.vertical, 3)
                                         .background(.blue.opacity(0.12), in: Capsule())
                                 }
@@ -42,8 +43,17 @@ private struct UpkeepRelease: Identifiable {
     let version: String
     let date: String
     let changes: [String]
+    var isUnreleased: Bool { version == "Next" }
 
     static let all = [
+        UpkeepRelease(version: "Next", date: "In development", changes: [
+            "Adds trusted GitHub release discovery for Stats and UniGetUI plus validated, user-supplied repository mappings.",
+            "Finds runtime-configured Sparkle feeds and identifies apps that own their updater without incorrectly calling them unsupported.",
+            "Routes Steam, Adobe Creative Cloud, JetBrains Toolbox, Epic Games, Spotify, Discord, standalone Tailscale, and macOS-managed apps to their publisher-owned updater.",
+            "Reads Steam queue and download progress from local manifests and verifies external updates against the installed app bundle.",
+            "Displays release provenance and Sparkle signature declarations, and matches Homebrew casks by their declared app artifacts.",
+            "Adds signed and notarized release packaging with CI, release, and validation workflows."
+        ]),
         UpkeepRelease(version: "0.23.1", date: "22 July 2026", changes: [
             "Scans every NVM installation, editor extensions, Python tool environments, Rust toolchains, GitHub CLI extensions, Go tools, Composer, .NET, MacPorts, Nix, mise, asdf, Volta, and fnm only when they are detected.",
             "Finds Bun and Yarn global packages and keeps packages from separate Node installations distinct.",

@@ -112,5 +112,5 @@ struct UpdatePlan: Sendable {
 }
 
 private extension AvailableUpdate {
-    var opensExternalUpdater: Bool { homebrewToken == nil }
+    var opensExternalUpdater: Bool { homebrewToken == nil && !canInstallDirectly }
 }

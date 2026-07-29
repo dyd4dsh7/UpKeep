@@ -2,6 +2,7 @@ import SwiftUI
 
 struct GlobalSearchView: View {
     @EnvironmentObject private var store: UpkeepStore
+    @StateObject private var searchState = GlobalSearchState()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -16,7 +17,7 @@ struct GlobalSearchView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List {
+                List(selection: $searchState.selection) {
                     if !matchingApps.isEmpty {
                         Section("Applications") {
                             ForEach(matchingApps) { app in appRow(app) }
@@ -54,6 +55,13 @@ struct GlobalSearchView: View {
                     }
                 }
                 .listStyle(.inset)
+                .onChange(of: searchState.selection) { _, newSelection in
+                    guard let newSelection else { return }
+                    activate(newSelection)
+                }
+                .onChange(of: query) { _, _ in
+                    searchState.selection = nil
+                }
             }
         }
     }
@@ -132,11 +140,7 @@ struct GlobalSearchView: View {
         } accessories: {
             InstalledVersionView(version: app.installedVersion)
         }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            store.updateInspectorSelection = nil
-            store.selectedApp = app
-        }
+        .tag(SearchResultSelection.application(app.id))
     }
 
     private func adoptableRow(_ item: AdoptableApp) -> some View {
@@ -147,11 +151,7 @@ struct GlobalSearchView: View {
         } accessories: {
             VersionTransitionView(current: item.app.installedVersion, latest: item.caskVersion)
         }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            store.updateInspectorSelection = nil
-            store.selectedApp = item.app
-        }
+        .tag(SearchResultSelection.adoptable(item.id))
     }
 
     private func homebrewRow(_ package: HomebrewPackage) -> some View {
@@ -165,12 +165,7 @@ struct GlobalSearchView: View {
         } accessories: {
             VersionTransitionView(current: package.installedVersion, latest: package.isOutdated ? package.currentVersion : nil)
         }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            store.selectedApp = nil
-            store.selectedPackageID = package.id
-            store.updateInspectorSelection = .homebrew(package.id)
-        }
+        .tag(SearchResultSelection.homebrew(package.id))
     }
 
     private func developerRow(_ package: DeveloperPackage) -> some View {
@@ -181,12 +176,7 @@ struct GlobalSearchView: View {
         } accessories: {
             VersionTransitionView(current: package.currentVersion, latest: package.isOutdated ? package.latestVersion : nil)
         }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            store.selectedApp = nil
-            store.selectedDeveloperPackageID = package.id
-            store.updateInspectorSelection = .developer(package.id)
-        }
+        .tag(SearchResultSelection.developer(package.id))
     }
 
     private func modelRow(_ model: LocalLLMModel) -> some View {
@@ -200,12 +190,7 @@ struct GlobalSearchView: View {
         } accessories: {
             VersionTransitionView(current: model.installedRevision, latest: model.isOutdated ? model.latestRevision : nil)
         }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            store.selectedApp = nil
-            store.selectedLocalModelID = model.id
-            store.updateInspectorSelection = .model(model.id)
-        }
+        .tag(SearchResultSelection.model(model.id))
     }
 
     private func macOSRow(_ update: MacOSUpdate) -> some View {
@@ -220,9 +205,17 @@ struct GlobalSearchView: View {
             )
         } accessories: {
             InstalledVersionView(version: update.version)
-            Button("Open") { Task { await store.prepareMacOSUpdate(update) } }
+            Button { Task { await store.prepareMacOSUpdate(update) } } label: {
+                WorkingActionLabel(
+                    isWorking: store.isWorking(.macOSUpdate(update.id)),
+                    idleTitle: "Open",
+                    workingTitle: "Opening…"
+                )
+            }
                 .buttonStyle(.bordered).controlSize(.small)
+                .disabled(store.isWorking(.macOSUpdate(update.id)))
         }
+        .tag(SearchResultSelection.macOS(update.id))
     }
 
     private func historyRow(_ record: UpdateRecord) -> some View {
@@ -236,11 +229,39 @@ struct GlobalSearchView: View {
         } accessories: {
             VersionTransitionView(current: record.fromVersion, latest: record.toVersion)
         }
+        .tag(SearchResultSelection.history(record.id))
+    }
+
+    private func activate(_ selection: SearchResultSelection) {
+        store.selectedApp = nil
+        store.updateInspectorSelection = nil
+        switch selection {
+        case let .application(id):
+            store.selectedApp = store.apps.first { $0.id == id }
+        case let .adoptable(id):
+            store.selectedApp = store.adoptableApps.first { $0.id == id }?.app
+        case let .homebrew(id):
+            store.selectedPackageID = id
+            store.updateInspectorSelection = .homebrew(id)
+        case let .developer(id):
+            store.selectedDeveloperPackageID = id
+            store.updateInspectorSelection = .developer(id)
+        case let .model(id):
+            store.selectedLocalModelID = id
+            store.updateInspectorSelection = .model(id)
+        case .macOS:
+            store.selection = .macOSUpdates
+        case .history:
+            store.selection = .history
+        }
     }
 
     private func appSourceSummary(_ app: InstalledApp) -> String {
         let sources = store.sources(for: app)
-        if sources.isEmpty { return app.updateManagement.isExternallyManaged ? app.updateManagement.rawValue : "No update source" }
+        if sources.isEmpty {
+            if app.updateManagement.isExternallyManaged { return app.updateManagement.rawValue }
+            return app.hasBuiltInUpdater ? "Built-in updater" : "No update source"
+        }
         return sources.map(\.rawValue).joined(separator: " · ")
     }
 
@@ -253,4 +274,19 @@ struct GlobalSearchView: View {
         case .model: "brain.head.profile.fill"
         }
     }
+}
+
+private enum SearchResultSelection: Hashable {
+    case application(String)
+    case adoptable(String)
+    case homebrew(String)
+    case developer(String)
+    case model(String)
+    case macOS(String)
+    case history(UUID)
+}
+
+@MainActor
+private final class GlobalSearchState: ObservableObject {
+    @Published var selection: SearchResultSelection?
 }

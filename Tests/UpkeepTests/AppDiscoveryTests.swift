@@ -1,5 +1,144 @@
+import Foundation
 import Testing
 @testable import Upkeep
+
+@Test func applicationDiscoveryRereadsMetadataAfterInPlaceReplacement() async throws {
+    let fileManager = FileManager.default
+    let root = fileManager.temporaryDirectory
+        .appendingPathComponent("Upkeep-AppDiscovery-\(UUID().uuidString)", isDirectory: true)
+    let appURL = root.appendingPathComponent("OpenCode.app", isDirectory: true)
+    let contentsURL = appURL.appendingPathComponent("Contents", isDirectory: true)
+    let infoURL = contentsURL.appendingPathComponent("Info.plist")
+    try fileManager.createDirectory(at: contentsURL, withIntermediateDirectories: true)
+    defer { try? fileManager.removeItem(at: root) }
+
+    try writeTestAppInfo(version: "1.17.20", to: infoURL)
+    let before = try #require(await AppDiscovery.discover(at: appURL))
+    #expect(before.installedVersion == "1.17.20")
+
+    try writeTestAppInfo(version: "1.18.4", to: infoURL)
+    let after = try #require(await AppDiscovery.discover(at: appURL))
+    #expect(after.installedVersion == "1.18.4")
+    #expect(after.bundleIdentifier == "ai.opencode.desktop")
+}
+
+@Test func applicationDiscoveryRecognizesElectronUpdaterOwnership() async throws {
+    let fileManager = FileManager.default
+    let root = fileManager.temporaryDirectory
+        .appendingPathComponent("Upkeep-ElectronDiscovery-\(UUID().uuidString)", isDirectory: true)
+    let appURL = root.appendingPathComponent("Electron App.app", isDirectory: true)
+    let contentsURL = appURL.appendingPathComponent("Contents", isDirectory: true)
+    let resourcesURL = contentsURL.appendingPathComponent("Resources", isDirectory: true)
+    try fileManager.createDirectory(at: resourcesURL, withIntermediateDirectories: true)
+    defer { try? fileManager.removeItem(at: root) }
+
+    try writeTestAppInfo(version: "1.0.0", to: contentsURL.appendingPathComponent("Info.plist"))
+    try """
+        provider: github
+        owner: example
+        repo: electron-app
+        """.write(
+            to: resourcesURL.appendingPathComponent("app-update.yml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+    let app = try #require(await AppDiscovery.discover(at: appURL))
+
+    #expect(app.hasBuiltInUpdater)
+    #expect(app.githubRepository == "example/electron-app")
+    #expect(app.allowsHomebrewAdoption)
+}
+
+@Test func applicationDiscoveryRecognizesEmbeddedUpdaterFramework() async throws {
+    let fileManager = FileManager.default
+    let root = fileManager.temporaryDirectory
+        .appendingPathComponent("Upkeep-UpdaterFramework-\(UUID().uuidString)", isDirectory: true)
+    let appURL = root.appendingPathComponent("Self Updating.app", isDirectory: true)
+    let contentsURL = appURL.appendingPathComponent("Contents", isDirectory: true)
+    let squirrelURL = contentsURL.appendingPathComponent(
+        "Frameworks/Squirrel.framework",
+        isDirectory: true
+    )
+    try fileManager.createDirectory(at: squirrelURL, withIntermediateDirectories: true)
+    defer { try? fileManager.removeItem(at: root) }
+    try writeTestAppInfo(version: "1.0.0", to: contentsURL.appendingPathComponent("Info.plist"))
+
+    let app = try #require(await AppDiscovery.discover(at: appURL))
+
+    #expect(app.hasBuiltInUpdater)
+    #expect(app.allowsHomebrewAdoption)
+}
+
+@Test func applicationDiscoveryRecognizesSteamLauncherShortcuts() async throws {
+    let fileManager = FileManager.default
+    let root = fileManager.temporaryDirectory
+        .appendingPathComponent("Upkeep-SteamShortcut-\(UUID().uuidString)", isDirectory: true)
+    let appURL = root.appendingPathComponent("Steam Game.app", isDirectory: true)
+    let contentsURL = appURL.appendingPathComponent("Contents", isDirectory: true)
+    let executableURL = contentsURL.appendingPathComponent("MacOS", isDirectory: true)
+    try fileManager.createDirectory(at: executableURL, withIntermediateDirectories: true)
+    defer { try? fileManager.removeItem(at: root) }
+    try writeTestAppInfo(version: "1.0", to: contentsURL.appendingPathComponent("Info.plist"))
+    try """
+        #!/bin/bash
+        open steam://run/245470
+        """.write(
+            to: executableURL.appendingPathComponent("run.sh"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+    let app = try #require(await AppDiscovery.discover(at: appURL))
+
+    #expect(app.updateManagement == .steam)
+    #expect(app.steamAppID == "245470")
+    #expect(!app.allowsHomebrewAdoption)
+}
+
+private func writeTestAppInfo(version: String, to url: URL) throws {
+    let info: [String: Any] = [
+        "CFBundleDisplayName": "OpenCode",
+        "CFBundleName": "OpenCode",
+        "CFBundleIdentifier": "ai.opencode.desktop",
+        "CFBundleShortVersionString": version,
+        "CFBundleVersion": version,
+        "CFBundlePackageType": "APPL"
+    ]
+    let data = try PropertyListSerialization.data(
+        fromPropertyList: info,
+        format: .xml,
+        options: 0
+    )
+    try data.write(to: url, options: .atomic)
+}
+
+@Test func updaterOwnershipAllowsOnlyDirectDeveloperDownloadsToBeAdopted() {
+    func app(
+        management: AppUpdateManagement,
+        hasBuiltInUpdater: Bool = false
+    ) -> InstalledApp {
+        InstalledApp(
+            name: "Example",
+            bundleIdentifier: "com.example.app",
+            installedVersion: "1.0",
+            buildVersion: nil,
+            url: URL(fileURLWithPath: "/Applications/Example.app"),
+            sparkleFeedURL: nil,
+            githubRepository: nil,
+            hasAppStoreReceipt: management == .appStore,
+            updateManagement: management,
+            hasBuiltInUpdater: hasBuiltInUpdater
+        )
+    }
+
+    #expect(app(management: .direct).allowsHomebrewAdoption)
+    #expect(app(management: .direct, hasBuiltInUpdater: true).allowsHomebrewAdoption)
+    #expect(!app(management: .appStore).allowsHomebrewAdoption)
+    #expect(!app(management: .testFlight).allowsHomebrewAdoption)
+    #expect(!app(management: .setapp).allowsHomebrewAdoption)
+    #expect(!app(management: .microsoftAutoUpdate).allowsHomebrewAdoption)
+}
 
 @Test func classifiesProductionAndTestFlightReceiptsSeparately() {
     let production = AppDiscovery.updateManagement(
@@ -81,4 +220,32 @@ import Testing
 
     #expect(registered == .microsoftAutoUpdate)
     #expect(visualStudioCode == .direct)
+}
+
+@Test func classifiesKnownExternalUpdaterManagers() {
+    func management(
+        identifier: String?,
+        path: String = "/Applications/Example.app"
+    ) -> AppUpdateManagement {
+        AppDiscovery.updateManagement(
+            bundleIdentifier: identifier,
+            appPath: path,
+            hasReceipt: false,
+            receiptType: nil,
+            hasEmbeddedProvisioningProfile: false,
+            hasSetappFramework: false,
+            microsoftRegisteredPaths: []
+        )
+    }
+
+    #expect(management(identifier: "com.valvesoftware.steam") == .steam)
+    #expect(management(identifier: "com.spotify.client") == .spotify)
+    #expect(management(identifier: "com.hnc.Discord") == .discord)
+    #expect(management(identifier: "com.epicgames.EpicGamesLauncher") == .epicGames)
+    #expect(management(identifier: "com.adobe.Photoshop") == .adobeCreativeCloud)
+    #expect(management(identifier: "com.jetbrains.toolbox") == .jetBrainsToolbox)
+    #expect(management(
+        identifier: "com.jetbrains.intellij",
+        path: "/Users/example/Applications/JetBrains Toolbox/IntelliJ IDEA.app"
+    ) == .jetBrainsToolbox)
 }

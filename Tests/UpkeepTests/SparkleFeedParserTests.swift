@@ -64,6 +64,23 @@ import Testing
     #expect(parser.parse()?.installationType == .package)
 }
 
+@Test func recognizesDeclaredSparkleEdDSASignatures() throws {
+    let xml = """
+    <?xml version="1.0" encoding="utf-8"?>
+    <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+      <channel>
+        <item><enclosure url="https://example.com/app.zip" sparkle:shortVersionString="3.0" sparkle:edSignature="signed-value" /></item>
+      </channel>
+    </rss>
+    """
+    let parser = SparkleFeedParser(
+        data: try #require(xml.data(using: .utf8)),
+        baseURL: try #require(URL(string: "https://example.com/appcast.xml"))
+    )
+
+    #expect(parser.parse()?.hasEdSignature == true)
+}
+
 @Test func recognizesArchivedSparklePackageInstallers() throws {
     let xml = """
     <?xml version="1.0" encoding="utf-8"?>

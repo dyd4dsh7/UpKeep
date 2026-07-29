@@ -3,6 +3,7 @@ import SwiftUI
 
 struct UpdatesView: View {
     @EnvironmentObject private var store: UpkeepStore
+    @EnvironmentObject private var viewState: UpdateViewState
 
     var body: some View {
         VStack(spacing: 0) {
@@ -11,6 +12,13 @@ struct UpdatesView: View {
             } else if appUpdates.isEmpty && filteredPackages.isEmpty && systemUpdates.isEmpty && filteredDeveloperPackages.isEmpty && filteredModels.isEmpty {
                 emptyState
             } else {
+                UpdateDecisionHeader(
+                    recommendedCount: store.recommendedBatchUpdateItems.count,
+                    attentionCount: store.availableBatchUpdateItems.count - store.recommendedBatchUpdateItems.count,
+                    isWorking: store.isWorking(.unifiedBatch),
+                    review: { store.isShowingBatchReview = true }
+                )
+                Divider()
                 List(selection: selectedUpdateItemID) {
                     if !appUpdates.isEmpty {
                         Section("Applications") {
@@ -41,7 +49,7 @@ struct UpdatesView: View {
                 .listStyle(.inset)
             }
         }
-        .sheet(isPresented: $store.isShowingBatchReview) {
+        .sheet(isPresented: $store.navigation.isShowingBatchReview) {
             BatchUpdateSheet(items: store.availableBatchUpdateItems)
                 .environmentObject(store)
         }
@@ -54,13 +62,6 @@ struct UpdatesView: View {
             updateFilterMenu
             ListDensityButton()
             ScanToolbarButton()
-            Button("Review Updates…") { store.isShowingBatchReview = true }
-                .buttonStyle(.borderedProminent)
-                .disabled(
-                    store.availableBatchUpdateItems.isEmpty ||
-                    store.workingIDs.contains("unified-update-batch")
-                )
-                .toolbarControlLabel("Review updates")
         }
     }
 
@@ -79,7 +80,7 @@ struct UpdatesView: View {
         } label: {
             ListControlLabel(
                 systemImage: "list.bullet",
-                isActive: store.updateSortOrder != .recommended
+                isActive: viewState.sortOrder != .recommended
             )
         }
         .menuIndicator(.hidden)
@@ -91,16 +92,16 @@ struct UpdatesView: View {
             Section("Filter") {
                 ForEach(UpdateListFilter.allCases) { filter in
                     Button {
-                        store.updateListFilter = filter
+                        viewState.filter = filter
                     } label: {
-                        MenuSelectionLabel(title: filter.rawValue, isSelected: store.updateListFilter == filter)
+                        MenuSelectionLabel(title: filter.rawValue, isSelected: viewState.filter == filter)
                     }
                 }
             }
         } label: {
             ListControlLabel(
                 systemImage: "line.3.horizontal.decrease",
-                isActive: store.updateListFilter != .all
+                isActive: viewState.filter != .all
             )
         }
         .menuIndicator(.hidden)
@@ -113,13 +114,13 @@ struct UpdatesView: View {
         ascending: Bool = true
     ) -> some View {
         Button {
-            store.updateSortOrder = order
-            store.updateSortAscending = ascending
+            viewState.sortOrder = order
+            viewState.sortAscending = ascending
         } label: {
             MenuSelectionLabel(
                 title: title,
-                isSelected: store.updateSortOrder == order &&
-                    (order == .recommended || store.updateSortAscending == ascending)
+                isSelected: viewState.sortOrder == order &&
+                    (order == .recommended || viewState.sortAscending == ascending)
             )
         }
     }
@@ -168,46 +169,52 @@ struct UpdatesView: View {
     }
 
     private var appUpdates: [AvailableUpdate] {
-        guard store.updateListFilter == .all || store.updateListFilter == .applications else { return [] }
+        guard viewState.filter == .all || viewState.filter == .applications else { return [] }
         return store.filteredUpdates.sorted { compareUpdates($0, $1) }
     }
 
     private var filteredPackages: [HomebrewPackage] {
-        guard store.updateListFilter == .all || store.updateListFilter == .homebrew else { return [] }
+        guard viewState.filter == .all || viewState.filter == .homebrew else { return [] }
         return store.homebrewPackages.filter {
             $0.isOutdated && !store.isExcluded($0)
-                && (store.updateListFilter == .homebrew || !$0.isDependency)
+                && (viewState.filter == .homebrew || !$0.isDependency)
                 && (store.searchText.isEmpty || $0.displayName.localizedCaseInsensitiveContains(store.searchText))
         }.sorted { comparePackage($0.displayName, $0.installedVersion, $0.currentVersion, "Homebrew", $1.displayName, $1.installedVersion, $1.currentVersion, "Homebrew") }
     }
 
     private var systemUpdates: [MacOSUpdate] {
-        guard store.updateListFilter == .all || store.updateListFilter == .macOS else { return [] }
+        guard viewState.filter == .all || viewState.filter == .macOS else { return [] }
         return store.macOSUpdates.filter { !$0.isFullInstaller && (store.searchText.isEmpty || $0.title.localizedCaseInsensitiveContains(store.searchText)) }
             .sorted { comparePackage($0.title, $0.version, $0.version, "macOS", $1.title, $1.version, $1.version, "macOS") }
     }
 
     private var filteredDeveloperPackages: [DeveloperPackage] {
-        guard store.updateListFilter == .developer else { return [] }
+        guard viewState.filter == .developer else { return [] }
         return store.developerPackages.filter { $0.isOutdated && !store.isExcluded($0) && (store.searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(store.searchText)) }
             .sorted { comparePackage($0.name, $0.currentVersion, $0.latestVersion, $0.manager.rawValue, $1.name, $1.currentVersion, $1.latestVersion, $1.manager.rawValue) }
     }
 
     private var filteredModels: [LocalLLMModel] {
-        guard store.updateListFilter == .models else { return [] }
+        guard viewState.filter == .models else { return [] }
         return store.visibleOutdatedLocalModels.filter { store.searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(store.searchText) }
             .sorted { comparePackage($0.name, $0.installedRevision, $0.latestRevision, $0.runtime.rawValue, $1.name, $1.installedRevision, $1.latestRevision, $1.runtime.rawValue) }
     }
 
     private func compareUpdates(_ left: AvailableUpdate, _ right: AvailableUpdate) -> Bool {
-        if store.updateSortOrder == .installDate || store.updateSortOrder == .recentlyUpdated {
-            let leftDate = store.updateSortOrder == .installDate ? left.app.installedAt : left.app.modifiedAt
-            let rightDate = store.updateSortOrder == .installDate ? right.app.installedAt : right.app.modifiedAt
+        if viewState.sortOrder == .recommended {
+            let leftRisk = BatchUpdateItem.application(left).riskGroup.rawValue
+            let rightRisk = BatchUpdateItem.application(right).riskGroup.rawValue
+            if leftRisk != rightRisk { return leftRisk < rightRisk }
+            return left.app.name.localizedStandardCompare(right.app.name) == .orderedAscending
+        }
+        if viewState.sortOrder == .installDate || viewState.sortOrder == .recentlyUpdated {
+            let leftDate = viewState.sortOrder == .installDate ? left.app.installedAt : left.app.modifiedAt
+            let rightDate = viewState.sortOrder == .installDate ? right.app.installedAt : right.app.modifiedAt
             let comparison = compareDate(
                 leftDate, rightDate,
                 leftName: left.app.name, rightName: right.app.name
             )
-            return store.updateSortAscending
+            return viewState.sortAscending
                 ? comparison == .orderedAscending
                 : comparison == .orderedDescending
         }
@@ -222,7 +229,7 @@ struct UpdatesView: View {
         _ rightName: String, _ rightCurrent: String, _ rightLatest: String, _ rightSource: String
     ) -> Bool {
         let comparison: ComparisonResult
-        switch store.updateSortOrder {
+        switch viewState.sortOrder {
         case .recommended: return leftName.localizedStandardCompare(rightName) == .orderedAscending
         case .name: comparison = leftName.localizedStandardCompare(rightName)
         case .source: comparison = leftSource.localizedStandardCompare(rightSource)
@@ -230,7 +237,7 @@ struct UpdatesView: View {
         case .availableVersion: comparison = VersionComparator.compare(leftLatest, rightLatest)
         case .installDate, .recentlyUpdated: comparison = leftName.localizedStandardCompare(rightName)
         }
-        return store.updateSortAscending ? comparison == .orderedAscending : comparison == .orderedDescending
+        return viewState.sortAscending ? comparison == .orderedAscending : comparison == .orderedDescending
     }
 
     private func compareDate(
@@ -256,7 +263,7 @@ struct UpdatesView: View {
             ProgressView().controlSize(.large)
             Text("Checking your applications")
                 .font(.title3.weight(.medium))
-            Text("Comparing installed versions with trusted developer sources.")
+            Text("Comparing installed versions with publisher and package-manager sources.")
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -267,7 +274,7 @@ struct UpdatesView: View {
             Label(emptyTitle, systemImage: "checkmark.seal.fill")
         } description: {
             Text(store.searchText.isEmpty
-                 ? (store.updateListFilter != .all
+                 ? (viewState.filter != .all
                     ? "No available updates match the selected category."
                     : "Supported update sources reported no newer versions for your apps.")
                  : "Try a different search term.")
@@ -282,7 +289,7 @@ struct UpdatesView: View {
 
     private var emptyTitle: String {
         if !store.searchText.isEmpty { return "No matching updates" }
-        if store.updateListFilter != .all { return "No \(store.updateListFilter.rawValue)" }
+        if viewState.filter != .all { return "No \(viewState.filter.rawValue)" }
         return "No updates found"
     }
 }
@@ -364,6 +371,18 @@ private struct BatchUpdateSheet: View {
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 11)
+
+            if selectedItems.contains(where: \.mayRequireAdministratorPassword) {
+                Label(
+                    "Selected Homebrew casks may open Terminal and request your administrator password.",
+                    systemImage: "lock.shield.fill"
+                )
+                .font(.callout)
+                .foregroundStyle(.orange)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 10)
+            }
 
             List {
                 ForEach(visibleRiskGroups) { group in
@@ -658,17 +677,23 @@ private struct DeveloperUpdateCard: View {
                     .accessibilityLabel("Refreshing \(package.name)")
             }
             VersionTransitionView(current: package.currentVersion, latest: package.latestVersion)
-            Button(package.canUpdateAutomatically ? "Update" : "View Update") { Task { await store.updateDeveloperPackage(package) } }
+            Button { Task { await store.updateDeveloperPackage(package) } } label: {
+                WorkingActionLabel(
+                    isWorking: store.isWorking(.developerPackage(package.id)),
+                    idleTitle: package.canUpdateAutomatically ? "Update" : "View Update"
+                )
+            }
                 .listRowPrimaryAction()
-                .disabled(store.workingIDs.contains(package.id))
+                .disabled(store.isWorking(.developerPackage(package.id)))
         }
         .tag(UpdateInspectorSelection.developer(package.id).listID)
         .contentShape(Rectangle())
         .contextMenu {
             Button(package.canUpdateAutomatically ? "Update" : "View Update") { Task { await store.updateDeveloperPackage(package) } }
-                .disabled(store.workingIDs.contains(package.id))
+                .disabled(store.isWorking(.developerPackage(package.id)))
             Button("Refresh") { Task { await store.refresh(package) } }
                 .disabled(store.isRefreshing(package))
+            Button("Open Folder") { openDeveloperPackageFolder(package) }
             Divider()
             exclusionOptions(
                 skipTitle: "Skip Version \(package.latestVersion)",
@@ -696,9 +721,16 @@ private struct MacOSUpdateCard: View {
                 prereleaseChannel: update.prereleaseChannel
             )
         } accessories: {
-            Button("Open Software Update") { Task { await store.prepareMacOSUpdate(update) } }
+            Button { Task { await store.prepareMacOSUpdate(update) } } label: {
+                WorkingActionLabel(
+                    isWorking: store.isWorking(.macOSUpdate(update.id)),
+                    idleTitle: "Open Software Update",
+                    workingTitle: "Opening…"
+                )
+            }
                 .buttonStyle(.bordered).controlSize(.small)
                 .frame(width: 120)
+                .disabled(store.isWorking(.macOSUpdate(update.id)))
         }
     }
 }
@@ -713,9 +745,7 @@ struct UpdateCard: View {
         } content: {
             ItemIdentityView(
                 title: update.app.name,
-                detail: update.requiresInAppInstallation
-                    ? "\(update.source.rawValue) · Open app to install"
-                    : update.source.rawValue,
+                detail: appUpdateDetail,
                 isRunning: store.isRunning(update.app),
                 prereleaseChannel: update.prereleaseChannel,
                 prereleaseIsInstalled: update.prereleaseIsInstalled
@@ -729,19 +759,18 @@ struct UpdateCard: View {
             Button {
                 Task { await store.performUpdate(update) }
             } label: {
-                if store.workingIDs.contains(update.id) { ProgressView().controlSize(.small) }
-                else { Text(actionTitle) }
+                WorkingActionLabel(isWorking: store.isUpdating(update), idleTitle: actionTitle)
             }
             .listRowPrimaryAction()
-            .disabled(store.workingIDs.contains(update.id))
+            .disabled(store.isUpdating(update))
         }
         .tag("app:\(update.app.id)")
         .contentShape(Rectangle())
         .contextMenu {
             Button(actionTitle) { Task { await store.performUpdate(update) } }
-                .disabled(store.workingIDs.contains(update.id))
+                .disabled(store.isUpdating(update))
             Button("Refresh") { Task { await store.refresh(update.app) } }
-                .disabled(store.workingIDs.contains("app-refresh-\(update.app.id)"))
+                .disabled(store.isWorking(.applicationRefresh(update.app.id)))
             Divider()
             exclusionOptions(
                 skipTitle: "Skip Version \(update.availableVersion)",
@@ -765,6 +794,14 @@ struct UpdateCard: View {
     private var actionTitle: String {
         update.actionTitle
     }
+
+    private var appUpdateDetail: String {
+        var parts = [update.source.confidenceDetail]
+        if update.canInstallDirectly { parts.append("Installs in Upkeep") }
+        if update.requiresInAppInstallation { parts.append("Open app to install") }
+        if update.homebrewToken != nil { parts.append("May require password") }
+        return parts.joined(separator: " · ")
+    }
 }
 
 private struct HomebrewUpdateCard: View {
@@ -777,7 +814,9 @@ private struct HomebrewUpdateCard: View {
         } content: {
             ItemIdentityView(
                 title: package.displayName,
-                detail: package.kind.rawValue + (package.isDependency ? " · Dependency" : ""),
+                detail: package.kind.rawValue
+                    + (package.isDependency ? " · Dependency" : "")
+                    + (package.kind == .cask ? " · May require password" : ""),
                 prereleaseChannel: package.prereleaseChannel,
                 prereleaseIsInstalled: package.prereleaseIsInstalled
             )
@@ -787,15 +826,20 @@ private struct HomebrewUpdateCard: View {
                     .accessibilityLabel("Refreshing \(package.displayName)")
             }
             VersionTransitionView(current: package.installedVersion, latest: package.currentVersion)
-            Button("Update") { Task { await store.updatePackage(package) } }
+            Button { Task { await store.updatePackage(package) } } label: {
+                WorkingActionLabel(
+                    isWorking: store.isWorking(.homebrewPackage(package.id)),
+                    idleTitle: "Update"
+                )
+            }
                 .listRowPrimaryAction()
-                .disabled(store.workingIDs.contains(package.id))
+                .disabled(store.isWorking(.homebrewPackage(package.id)))
         }
         .tag(UpdateInspectorSelection.homebrew(package.id).listID)
         .contentShape(Rectangle())
         .contextMenu {
             Button("Update") { Task { await store.updatePackage(package) } }
-                .disabled(store.workingIDs.contains(package.id))
+                .disabled(store.isWorking(.homebrewPackage(package.id)))
             Button("Refresh") { Task { await store.refresh(package) } }
                 .disabled(store.isRefreshing(package))
             Divider()
@@ -824,15 +868,20 @@ private struct LocalModelUpdateCard: View {
             )
         } accessories: {
             VersionTransitionView(current: model.installedRevision, latest: model.latestRevision)
-            Button("Update") { Task { await store.updateLocalModel(model) } }
+            Button { Task { await store.updateLocalModel(model) } } label: {
+                WorkingActionLabel(
+                    isWorking: store.isWorking(.localModel(model.id)),
+                    idleTitle: "Update"
+                )
+            }
                 .listRowPrimaryAction()
-                .disabled(store.workingIDs.contains(model.id))
+                .disabled(store.isWorking(.localModel(model.id)))
         }
         .tag(UpdateInspectorSelection.model(model.id).listID)
         .contentShape(Rectangle())
         .contextMenu {
             Button("Update") { Task { await store.updateLocalModel(model) } }
-                .disabled(store.workingIDs.contains(model.id))
+                .disabled(store.isWorking(.localModel(model.id)))
             Divider()
             exclusionOptions(
                 skipTitle: "Skip This Revision",

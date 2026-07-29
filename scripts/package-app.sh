@@ -34,7 +34,18 @@ fi
 chmod +x "${APP_DIR}/Contents/MacOS/Upkeep"
 
 xattr -cr "${APP_DIR}"
-codesign --force --deep --sign - "${APP_DIR}"
+if [[ "${CONFIGURATION}" == "release" ]]; then
+    : "${UPKEEP_SIGNING_IDENTITY:?Set UPKEEP_SIGNING_IDENTITY to a Developer ID Application certificate name.}"
+    : "${UPKEEP_NOTARY_PROFILE:?Set UPKEEP_NOTARY_PROFILE to an xcrun notarytool keychain profile.}"
+    codesign \
+        --force \
+        --options runtime \
+        --timestamp \
+        --sign "${UPKEEP_SIGNING_IDENTITY}" \
+        "${APP_DIR}"
+else
+    codesign --force --sign - "${APP_DIR}"
+fi
 codesign --verify --deep --strict "${APP_DIR}"
 
 mkdir -p "${OUTPUT_DIR}"
@@ -42,4 +53,16 @@ if [[ -e "${ARCHIVE_PATH}" ]]; then
     mv "${ARCHIVE_PATH}" "${STAGING_DIR}/previous-Upkeep.zip"
 fi
 ditto -c -k --sequesterRsrc --keepParent "${APP_DIR}" "${ARCHIVE_PATH}"
+
+if [[ "${CONFIGURATION}" == "release" ]]; then
+    xcrun notarytool submit "${ARCHIVE_PATH}" \
+        --keychain-profile "${UPKEEP_NOTARY_PROFILE}" \
+        --wait
+    xcrun stapler staple "${APP_DIR}"
+    xcrun stapler validate "${APP_DIR}"
+    rm -f "${ARCHIVE_PATH}"
+    ditto -c -k --sequesterRsrc --keepParent "${APP_DIR}" "${ARCHIVE_PATH}"
+    "${PROJECT_DIR}/scripts/validate-release.sh" "${APP_DIR}"
+fi
+
 echo "Packaged ${ARCHIVE_PATH}"

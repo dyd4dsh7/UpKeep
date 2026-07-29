@@ -335,6 +335,24 @@ struct InspectorUpdateStatusCard<Actions: View, Options: View>: View {
     }
 }
 
+struct WorkingActionLabel: View {
+    let isWorking: Bool
+    let idleTitle: String
+    var workingTitle = "Updating…"
+
+    var body: some View {
+        if isWorking {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text(workingTitle)
+            }
+            .accessibilityElement(children: .combine)
+        } else {
+            Text(idleTitle)
+        }
+    }
+}
+
 struct RunningIndicator: View {
     var body: some View {
         Circle()

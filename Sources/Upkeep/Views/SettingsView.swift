@@ -220,6 +220,44 @@ struct SettingsView: View {
                     Text("Prerelease Updates")
                 }
             }
+            if settings.checkHomebrew {
+                Section {
+                    SettingsOptionRow(
+                        title: appManagementPermissionTitle,
+                        detail: appManagementPermissionDetail,
+                        systemImage: appManagementPermissionImage,
+                        tint: appManagementPermissionColor
+                    ) {
+                        HStack(spacing: 8) {
+                            if store.appManagementPermissionCheck?.status == .denied {
+                                Button("Open Settings") {
+                                    store.openAppManagementSettings()
+                                }
+                            }
+                            Button {
+                                Task { await store.checkAppManagementPermission() }
+                            } label: {
+                                if isCheckingAppManagementPermission {
+                                    HStack(spacing: 6) {
+                                        ProgressView().controlSize(.small)
+                                        Text("Checking…")
+                                    }
+                                } else {
+                                    Text(store.appManagementPermissionCheck == nil ? "Check Access" : "Check Again")
+                                }
+                            }
+                            .disabled(
+                                isCheckingAppManagementPermission
+                                    || store.homebrewPermissionCheckApps.isEmpty
+                            )
+                        }
+                    }
+                } header: {
+                    Text("App Management")
+                } footer: {
+                    Text("macOS App Management controls whether Upkeep can update or delete other apps. The check opens one eligible app file for modification but does not write, truncate, or change it.")
+                }
+            }
             Section {
                 sourceToggle(
                     "macOS updates",
@@ -261,13 +299,13 @@ struct SettingsView: View {
                     }
                 }
                 Section("Filter") {
-                    TextField("Search diagnostics", text: $store.diagnosticsSearchText)
+                    TextField("Search diagnostics", text: $store.diagnostics.diagnosticsSearchText)
                         .textFieldStyle(.roundedBorder)
                     HStack {
-                        Picker("Level", selection: $store.diagnosticsLevelFilter) {
+                        Picker("Level", selection: $store.diagnostics.diagnosticsLevelFilter) {
                             ForEach(DiagnosticLevelFilter.allCases) { Text($0.title).tag($0) }
                         }
-                        Picker("Category", selection: $store.diagnosticsCategoryFilter) {
+                        Picker("Category", selection: $store.diagnostics.diagnosticsCategoryFilter) {
                             Text("All Categories").tag(nil as DiagnosticCategory?)
                             ForEach(DiagnosticCategory.allCases) { category in
                                 Label(category.shortTitle, systemImage: category.systemImage)
@@ -476,6 +514,47 @@ struct SettingsView: View {
             return "Schedule update checks while Upkeep is running."
         }
         return "Next check: \(nextCheck.formatted(.dateTime.weekday(.abbreviated).hour().minute()))."
+    }
+
+    private var appManagementPermissionTitle: String {
+        if isCheckingAppManagementPermission { return "Checking App Management access" }
+        return switch store.appManagementPermissionCheck?.status {
+        case .allowed: "App Management is allowed"
+        case .denied: "App Management access is needed"
+        case .unavailable: "App Management could not be checked"
+        case nil: "Check App Management access"
+        }
+    }
+
+    private var appManagementPermissionDetail: String {
+        if store.homebrewPermissionCheckApps.isEmpty {
+            return "No eligible Homebrew-managed app is available for a safe access check."
+        }
+        return store.appManagementPermissionCheck?.detail
+            ?? "Verify that macOS allows Upkeep to modify applications managed through Homebrew."
+    }
+
+    private var appManagementPermissionImage: String {
+        if isCheckingAppManagementPermission { return "arrow.triangle.2.circlepath" }
+        return switch store.appManagementPermissionCheck?.status {
+        case .allowed: "checkmark.shield.fill"
+        case .denied: "lock.shield.fill"
+        case .unavailable: "exclamationmark.shield.fill"
+        case nil: "lock.shield"
+        }
+    }
+
+    private var appManagementPermissionColor: Color {
+        switch store.appManagementPermissionCheck?.status {
+        case .allowed: .green
+        case .denied: .orange
+        case .unavailable: .red
+        case nil: .accentColor
+        }
+    }
+
+    private var isCheckingAppManagementPermission: Bool {
+        store.isWorking(.appManagementPermissionCheck)
     }
 
     private func icon(for section: SettingsSection) -> String {

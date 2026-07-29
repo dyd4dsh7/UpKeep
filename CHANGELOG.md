@@ -4,6 +4,12 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+- Added trusted GitHub release discovery for Stats and UniGetUI, plus validated per-app repository mappings for advanced users.
+- Discovered runtime-configured Sparkle feeds and distinguished built-in updater apps from unsupported update sources.
+- Added publisher-managed update routing for Steam, Adobe Creative Cloud, JetBrains Toolbox, Epic Games, Spotify, Discord, standalone Tailscale, and macOS-managed apps.
+- Added Steam download-progress reporting and post-handoff verification so external updates remain pending until the installed bundle reports the expected version.
+- Added release provenance, Sparkle signature declarations, and Homebrew artifact matching to improve update-source transparency and cask identification.
+- Added signed, notarized release packaging, CI and release workflows, and validation scripts for reproducible distribution builds.
 - Added first-run profiles that default to focused application management and make Homebrew, global developer tooling, and local models explicit opt-ins.
 - Redesigned onboarding with clearer source profiles, a recommended starting point, and card-based Basic or Advanced view selection.
 - Added persistent Basic and Advanced views across onboarding, Settings, the sidebar, inspectors, Homebrew, macOS updates, and batch review; technical details, prereleases, dependencies, diagnostics, and developer tooling remain available in Advanced.

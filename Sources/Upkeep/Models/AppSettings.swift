@@ -242,6 +242,7 @@ final class AppSettings: ObservableObject {
     @Published private(set) var updateExclusions: [UpdateExclusion]
     @Published private(set) var ignoredHomebrewAdoptionKeys: Set<String>
     @Published private(set) var itemLastCheckedDates: [String: Date]
+    @Published private(set) var customGitHubRepositories: [String: String]
     @Published var selectedSection: SettingsSection = .general
     @Published var confirmingPrereleaseUpdates = false
     private var exclusionExpiryTask: Task<Void, Never>?
@@ -304,6 +305,8 @@ final class AppSettings: ObservableObject {
         ignoredHomebrewAdoptionKeys = Set(defaults.stringArray(forKey: "ignoredHomebrewAdoptionKeys") ?? [])
         itemLastCheckedDates = defaults.data(forKey: "itemLastCheckedDates")
             .flatMap { try? JSONDecoder().decode([String: Date].self, from: $0) } ?? [:]
+        customGitHubRepositories = defaults.dictionary(forKey: "customGitHubRepositories")
+            as? [String: String] ?? [:]
         saveExclusions()
     }
 
@@ -439,6 +442,21 @@ final class AppSettings: ObservableObject {
         if let data = try? JSONEncoder().encode(itemLastCheckedDates) {
             defaults.set(data, forKey: "itemLastCheckedDates")
         }
+    }
+
+    func githubRepository(for bundleIdentifier: String?) -> String? {
+        guard let key = bundleIdentifier?.lowercased() else { return nil }
+        return customGitHubRepositories[key]
+    }
+
+    func setGitHubRepository(_ repository: String?, for bundleIdentifier: String) {
+        let key = bundleIdentifier.lowercased()
+        if let repository, !repository.isEmpty {
+            customGitHubRepositories[key] = repository
+        } else {
+            customGitHubRepositories.removeValue(forKey: key)
+        }
+        defaults.set(customGitHubRepositories, forKey: "customGitHubRepositories")
     }
 
     func migrateExclusion(from legacyKey: String, to key: String) {

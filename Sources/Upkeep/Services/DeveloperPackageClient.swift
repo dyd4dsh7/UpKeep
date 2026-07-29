@@ -203,81 +203,32 @@ struct DeveloperPackageClient: Sendable {
         guard package.canUpdateAutomatically else {
             throw ClientError.failed("\(package.name) must be updated manually with \(package.manager.rawValue).")
         }
-        if package.manager == .node {
+        switch try DeveloperPackageInstallAdapters.plan(for: package, version: version) {
+        case .node:
             try await installNode(version: version, executablePath: package.executablePath)
-            return
-        }
-        let executable = URL(fileURLWithPath: package.executablePath)
-        let arguments: [String]
-        switch package.manager {
-        case .node: return
-        case .bun:
-            if package.name == "Bun" {
-                guard version == package.latestVersion else {
-                    throw ClientError.failed("Bun can only upgrade directly to its latest stable release.")
-                }
-                arguments = ["upgrade"]
-            } else {
-                arguments = ["add", "--global", "\(package.name)@\(version)"]
-            }
-        case .deno: arguments = ["upgrade", "--version", version]
-        case .npm: arguments = ["install", "-g", "\(package.name)@\(version)"]
-        case .pnpm: arguments = ["add", "-g", "\(package.name)@\(version)"]
-        case .yarn:
-            if package.name == "Yarn" {
-                let corepack = executable.deletingLastPathComponent().appendingPathComponent("corepack")
-                let result = await captureDeveloperCommandAsync(corepack, ["install", "--global", "yarn@\(version)"], qos: .userInitiated)
-                guard result.status == 0 else {
-                    throw ClientError.failed(String(data: result.data, encoding: .utf8) ?? "Yarn update failed")
-                }
-                return
-            }
-            arguments = ["global", "add", "\(package.name)@\(version)"]
-        case .vsCode: arguments = ["--install-extension", "\(package.registryIdentifier ?? package.name)@\(version)", "--force"]
-        case .uv:
-            if let identifier = package.registryIdentifier, identifier.hasPrefix("python:") {
-                let minor = String(identifier.dropFirst("python:".count))
-                arguments = version == package.latestVersion
-                    ? ["--preview", "python", "upgrade", minor]
-                    : ["python", "install", version]
-            } else {
-                arguments = ["tool", "install", "\(package.registryIdentifier ?? package.name)==\(version)", "--force"]
-            }
-        case .pipx: arguments = ["install", "\(package.registryIdentifier ?? package.name)==\(version)", "--force"]
-        case .python: arguments = ["-m", "pip", "install", "--user", "\(package.name)==\(version)"]
-        case .rubyGems: arguments = ["install", package.name, "--version", version, "--user-install"]
-        case .rustup:
-            if version == package.latestVersion {
-                arguments = ["update", package.registryIdentifier ?? package.name]
-            } else {
-                arguments = ["toolchain", "install", version]
-            }
-        case .cargo: arguments = ["install", package.name, "--version", version, "--force"]
-        case .githubCLI: arguments = ["extension", "install", package.registryIdentifier ?? package.name, "--pin", version, "--force"]
-        case .go: arguments = ["install", "\(package.name)@\(version)"]
-        case .composer: arguments = ["global", "require", "\(package.registryIdentifier ?? package.name):\(version)", "--no-interaction"]
-        case .dotnet: arguments = ["tool", "update", "--global", package.registryIdentifier ?? package.name, "--version", version]
-        case .macPorts: arguments = ["upgrade", package.registryIdentifier ?? package.name]
-        case .nix: arguments = ["profile", "upgrade", package.registryIdentifier ?? package.name]
-        case .mise: arguments = ["use", "--global", "\(package.registryIdentifier ?? package.name)@\(version)"]
-        case .asdf:
-            let name = package.registryIdentifier ?? package.name
-            let command = #""$1" install "$2" "$3" && "$1" set --home "$2" "$3""#
+        case let .command(executable, arguments, failureMessage):
             let result = await captureDeveloperCommandAsync(
-                URL(fileURLWithPath: "/bin/zsh"),
-                ["-c", command, "upkeep-asdf", package.executablePath, name, version],
+                executable,
+                arguments,
                 qos: .userInitiated
             )
             guard result.status == 0 else {
-                throw ClientError.failed(String(data: result.data, encoding: .utf8) ?? "asdf update failed")
+                let output = String(data: result.data, encoding: .utf8)
+                throw ClientError.failed(output?.isEmpty == false ? output! : failureMessage)
             }
-            return
-        case .volta: arguments = ["install", "\(package.registryIdentifier ?? package.name)@\(version)"]
-        case .fnm: arguments = ["install", version]
         }
-        let result = await captureDeveloperCommandAsync(executable, arguments, qos: .userInitiated)
+    }
+
+    func uninstall(_ package: DeveloperPackage) async throws {
+        let plan = try DeveloperPackageUninstallAdapters.plan(for: package)
+        let result = await captureDeveloperCommandAsync(
+            plan.executable,
+            plan.arguments,
+            qos: .userInitiated
+        )
         guard result.status == 0 else {
-            throw ClientError.failed(String(data: result.data, encoding: .utf8) ?? "Package update failed")
+            let output = String(data: result.data, encoding: .utf8)
+            throw ClientError.failed(output?.isEmpty == false ? output! : plan.failureMessage)
         }
     }
 
@@ -290,16 +241,26 @@ struct DeveloperPackageClient: Sendable {
         guard let nvmDirectory = nvmDirectory(for: executablePath) else {
             throw ClientError.failed("Automatic Node.js updates currently require an NVM-managed installation.")
         }
-        let command = nvmDefaultExecutable(named: "node") == executablePath
-            ? #"source "$1/nvm.sh" && nvm install "$2" && nvm alias default "$2""#
-            : #"source "$1/nvm.sh" && nvm install "$2""#
+        guard let currentVersion = nvmNodeVersion(for: executablePath) else {
+            throw ClientError.failed("Upkeep could not determine the installed NVM Node.js version.")
+        }
+        let targetVersion = version.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
+        guard currentVersion != targetVersion else { return }
+        let arguments = nvmNodeUpdateArguments(
+            nvmDirectory: nvmDirectory,
+            currentVersion: currentVersion,
+            targetVersion: targetVersion,
+            isDefault: nvmDefaultExecutable(named: "node") == executablePath
+        )
         let result = await captureDeveloperCommandAsync(
             URL(fileURLWithPath: "/bin/zsh"),
-            ["-c", command, "upkeep-node", nvmDirectory, version],
+            arguments,
             qos: .userInitiated
         )
         guard result.status == 0 else {
-            throw ClientError.failed(String(data: result.data, encoding: .utf8) ?? "Node.js update failed")
+            let output = String(data: result.data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            throw ClientError.failed(output?.isEmpty == false ? output! : "Node.js update failed.")
         }
     }
 }
@@ -320,7 +281,7 @@ func selectableDeveloperPackageVersions(
     return Set(allowed).sorted(by: VersionComparator.newestFirst)
 }
 
-private struct ManagerScanResult: Sendable {
+struct ManagerScanResult: Sendable {
     let manager: DeveloperPackageManager
     let packages: [DeveloperPackage]
     let warning: String?
@@ -339,46 +300,7 @@ private struct ManagerScanResult: Sendable {
     }
 }
 
-private func scanDeveloperTarget(
-    manager: DeveloperPackageManager,
-    path: String,
-    defaultNode: String?
-) async -> ManagerScanResult {
-    let result: ManagerScanResult
-    switch manager {
-    case .node: result = await scanNode(path, preferLatestMajor: path == defaultNode)
-    case .bun: result = await scanBun(path)
-    case .deno: result = await scanJavaScriptRuntime(.deno, name: "Deno", path: path, repository: "denoland/deno")
-    case .npm: result = await scanNPM(path)
-    case .pnpm: result = await scanPNPM(path)
-    case .yarn: result = await scanYarn(path)
-    case .vsCode: result = await scanVSCodeExtensions(path)
-    case .uv: result = await scanUVTools(path)
-    case .pipx: result = await scanPipxTools(path)
-    case .python: result = await scanPython(path)
-    case .rubyGems: result = await scanGems(path)
-    case .rustup: result = await scanRustup(path)
-    case .cargo: result = await scanCargo(path)
-    case .githubCLI: result = await scanGitHubCLIExtensions(path)
-    case .go: result = await scanGoTools(path)
-    case .composer: result = await scanComposer(path)
-    case .dotnet: result = await scanDotnetTools(path)
-    case .macPorts: result = await scanMacPorts(path)
-    case .nix: result = await scanNixProfile(path)
-    case .mise: result = await scanMise(path)
-    case .asdf: result = await scanASDF(path)
-    case .volta: result = await scanVolta(path)
-    case .fnm: result = await scanFNM(path)
-    }
-    return ManagerScanResult(
-        manager: result.manager,
-        packages: result.packages,
-        warning: result.warning,
-        executablePath: path
-    )
-}
-
-private func scanNode(_ path: String, preferLatestMajor: Bool) async -> ManagerScanResult {
+func scanNode(_ path: String, preferLatestMajor: Bool) async -> ManagerScanResult {
     let installedResult = await captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["--version"])
     guard installedResult.status == 0,
           let installedOutput = String(data: installedResult.data, encoding: .utf8)?
@@ -414,7 +336,7 @@ private func scanNode(_ path: String, preferLatestMajor: Bool) async -> ManagerS
     )
 }
 
-private func scanBun(_ path: String) async -> ManagerScanResult {
+func scanBun(_ path: String) async -> ManagerScanResult {
     let runtime = await scanJavaScriptRuntime(.bun, name: "Bun", path: path, repository: "oven-sh/bun")
     let manifest = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".bun/install/global/package.json")
@@ -430,7 +352,7 @@ private func scanBun(_ path: String) async -> ManagerScanResult {
     return ManagerScanResult(manager: .bun, packages: runtime.packages + globals.packages, warning: joinedWarnings(runtime.warning, globals.warning))
 }
 
-private func scanJavaScriptRuntime(
+func scanJavaScriptRuntime(
     _ manager: DeveloperPackageManager,
     name: String,
     path: String,
@@ -457,7 +379,7 @@ private func scanJavaScriptRuntime(
     )
 }
 
-private func scanYarn(_ path: String) async -> ManagerScanResult {
+func scanYarn(_ path: String) async -> ManagerScanResult {
     let installedResult = await captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["--version"])
     guard installedResult.status == 0,
           let output = String(data: installedResult.data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -498,7 +420,7 @@ func normalizedJavaScriptRuntimeVersion(_ value: String) -> String {
         .trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
 }
 
-private func scanNPM(_ path: String) async -> ManagerScanResult {
+func scanNPM(_ path: String) async -> ManagerScanResult {
     let installedResult = await captureDeveloperCommandAsync(
         URL(fileURLWithPath: path), ["ls", "-g", "--depth=0", "--json"]
     )
@@ -523,7 +445,7 @@ private func scanNPM(_ path: String) async -> ManagerScanResult {
     )
 }
 
-private func scanPNPM(_ path: String) async -> ManagerScanResult {
+func scanPNPM(_ path: String) async -> ManagerScanResult {
     let installedResult = await captureDeveloperCommandAsync(
         URL(fileURLWithPath: path), ["list", "-g", "--depth=0", "--json"]
     )
@@ -548,7 +470,7 @@ private func scanPNPM(_ path: String) async -> ManagerScanResult {
     )
 }
 
-private func scanPython(_ path: String) async -> ManagerScanResult {
+func scanPython(_ path: String) async -> ManagerScanResult {
     let installedResult = await captureDeveloperCommandAsync(
         URL(fileURLWithPath: path), ["-m", "pip", "list", "--format=json", "--disable-pip-version-check"]
     )
@@ -571,7 +493,7 @@ private func scanPython(_ path: String) async -> ManagerScanResult {
     )
 }
 
-private func scanGems(_ path: String) async -> ManagerScanResult {
+func scanGems(_ path: String) async -> ManagerScanResult {
     let installedResult = await captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["list", "--local"])
     guard installedResult.status == 0 else { return failedManagerScan(.rubyGems, command: "inventory", result: installedResult) }
     let installedOutput = String(data: installedResult.data, encoding: .utf8) ?? ""
@@ -605,7 +527,7 @@ private func parseGemOutdated(_ output: String) -> [String: String] {
     }
 }
 
-private func scanCargo(_ path: String) async -> ManagerScanResult {
+func scanCargo(_ path: String) async -> ManagerScanResult {
     let installedResult = await captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["install", "--list"])
     guard installedResult.status == 0 else { return failedManagerScan(.cargo, command: "inventory", result: installedResult) }
     let output = String(data: installedResult.data, encoding: .utf8) ?? ""
@@ -636,7 +558,7 @@ private func scanCargo(_ path: String) async -> ManagerScanResult {
     )
 }
 
-private func scanVSCodeExtensions(_ path: String) async -> ManagerScanResult {
+func scanVSCodeExtensions(_ path: String) async -> ManagerScanResult {
     let result = await captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["--list-extensions", "--show-versions"])
     guard result.status == 0 else { return failedManagerScan(.vsCode, command: "inventory", result: result) }
     let installed = parseExtensionInventory(result.data)
@@ -668,7 +590,7 @@ private func scanVSCodeExtensions(_ path: String) async -> ManagerScanResult {
     )
 }
 
-private func scanUVTools(_ path: String) async -> ManagerScanResult {
+func scanUVTools(_ path: String) async -> ManagerScanResult {
     let result = await captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["tool", "list", "--show-version-specifiers"])
     guard result.status == 0 else { return failedManagerScan(.uv, command: "tool inventory", result: result) }
     async let toolScan = scanPyPIToolInventory(parseSimpleToolList(result.data), manager: .uv, executablePath: path)
@@ -712,7 +634,7 @@ private func scanUVManagedPythons(_ path: String) async -> ManagerScanResult {
     return ManagerScanResult(manager: .uv, packages: values, warning: nil)
 }
 
-private func scanPipxTools(_ path: String) async -> ManagerScanResult {
+func scanPipxTools(_ path: String) async -> ManagerScanResult {
     let result = await captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["list", "--json"])
     guard result.status == 0,
           let root = try? JSONDecoder().decode(PipxList.self, from: result.data) else {
@@ -754,7 +676,7 @@ private func scanPyPIToolInventory(
     )
 }
 
-private func scanRustup(_ path: String) async -> ManagerScanResult {
+func scanRustup(_ path: String) async -> ManagerScanResult {
     let result = await captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["check"])
     guard result.status == 0 else { return failedManagerScan(.rustup, command: "toolchain check", result: result) }
     let packages = parseRustupCheck(result.data).filter { $0.name != "rustup" }.map { toolchain in
@@ -770,7 +692,7 @@ private func scanRustup(_ path: String) async -> ManagerScanResult {
     return ManagerScanResult(manager: .rustup, packages: packages, warning: nil)
 }
 
-private func scanGitHubCLIExtensions(_ path: String) async -> ManagerScanResult {
+func scanGitHubCLIExtensions(_ path: String) async -> ManagerScanResult {
     let listResult = await captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["extension", "list"])
     guard listResult.status == 0 else { return failedManagerScan(.githubCLI, command: "extension inventory", result: listResult) }
     let installed = parseGitHubExtensionList(listResult.data)
@@ -793,7 +715,7 @@ private func scanGitHubCLIExtensions(_ path: String) async -> ManagerScanResult 
     )
 }
 
-private func scanGoTools(_ path: String) async -> ManagerScanResult {
+func scanGoTools(_ path: String) async -> ManagerScanResult {
     async let environmentCommand = captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["env", "GOBIN", "GOPATH"])
     async let versionCommand = captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["version"])
     async let latestRelease = latestGoReleaseVersion()
@@ -843,7 +765,7 @@ private func scanGoTools(_ path: String) async -> ManagerScanResult {
     return ManagerScanResult(manager: .go, packages: packages, warning: failures == 0 ? nil : "Go: module checks failed for \(failures) tool\(failures == 1 ? "" : "s").")
 }
 
-private func scanComposer(_ path: String) async -> ManagerScanResult {
+func scanComposer(_ path: String) async -> ManagerScanResult {
     let result = await captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["global", "outdated", "--all", "--direct", "--format=json", "--no-interaction"])
     guard result.status == 0 || !result.data.isEmpty,
           let root = try? JSONDecoder().decode(ComposerOutdated.self, from: result.data) else {
@@ -859,7 +781,7 @@ private func scanComposer(_ path: String) async -> ManagerScanResult {
     return ManagerScanResult(manager: .composer, packages: packages, warning: nil)
 }
 
-private func scanDotnetTools(_ path: String) async -> ManagerScanResult {
+func scanDotnetTools(_ path: String) async -> ManagerScanResult {
     let result = await captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["tool", "list", "--global"])
     guard result.status == 0 else { return failedManagerScan(.dotnet, command: "global tool inventory", result: result) }
     let installed = parseDotnetToolList(result.data)
@@ -881,7 +803,7 @@ private func scanDotnetTools(_ path: String) async -> ManagerScanResult {
     return ManagerScanResult(manager: .dotnet, packages: values.map(\.0), warning: failures == 0 ? nil : ".NET: NuGet checks failed for \(failures) tool\(failures == 1 ? "" : "s").")
 }
 
-private func scanMacPorts(_ path: String) async -> ManagerScanResult {
+func scanMacPorts(_ path: String) async -> ManagerScanResult {
     async let installedCommand = captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["installed", "requested"])
     async let outdatedCommand = captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["outdated"])
     let (installedResult, outdatedResult) = await (installedCommand, outdatedCommand)
@@ -899,7 +821,7 @@ private func scanMacPorts(_ path: String) async -> ManagerScanResult {
     return ManagerScanResult(manager: .macPorts, packages: packages, warning: nil)
 }
 
-private func scanNixProfile(_ path: String) async -> ManagerScanResult {
+func scanNixProfile(_ path: String) async -> ManagerScanResult {
     async let listCommand = captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["profile", "list", "--json"])
     async let updateCommand = captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["profile", "upgrade", "--all", "--dry-run"])
     let (listResult, updateResult) = await (listCommand, updateCommand)
@@ -916,7 +838,7 @@ private func scanNixProfile(_ path: String) async -> ManagerScanResult {
     return ManagerScanResult(manager: .nix, packages: packages, warning: nil)
 }
 
-private func scanMise(_ path: String) async -> ManagerScanResult {
+func scanMise(_ path: String) async -> ManagerScanResult {
     async let installedCommand = captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["ls", "--json", "--installed"])
     async let outdatedCommand = captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["outdated", "--json", "--inactive"])
     let (installedResult, outdatedResult) = await (installedCommand, outdatedCommand)
@@ -933,7 +855,7 @@ private func scanMise(_ path: String) async -> ManagerScanResult {
     return ManagerScanResult(manager: .mise, packages: packages, warning: nil)
 }
 
-private func scanASDF(_ path: String) async -> ManagerScanResult {
+func scanASDF(_ path: String) async -> ManagerScanResult {
     let configURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".tool-versions")
     let configData = (try? Data(contentsOf: configURL)) ?? Data()
     let installed = parseASDFCurrent(configData)
@@ -957,7 +879,7 @@ private func scanASDF(_ path: String) async -> ManagerScanResult {
     return ManagerScanResult(manager: .asdf, packages: values, warning: nil)
 }
 
-private func scanVolta(_ path: String) async -> ManagerScanResult {
+func scanVolta(_ path: String) async -> ManagerScanResult {
     let result = await captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["list", "--format", "plain", "--all"])
     guard result.status == 0 else { return failedManagerScan(.volta, command: "tool inventory", result: result) }
     let installed = parseVoltaList(result.data)
@@ -981,7 +903,7 @@ private func scanVolta(_ path: String) async -> ManagerScanResult {
     return ManagerScanResult(manager: .volta, packages: packages, warning: nil)
 }
 
-private func scanFNM(_ path: String) async -> ManagerScanResult {
+func scanFNM(_ path: String) async -> ManagerScanResult {
     let result = await captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["list"])
     guard result.status == 0 else { return failedManagerScan(.fnm, command: "runtime inventory", result: result) }
     let installed = parseFNMList(result.data)
@@ -1471,6 +1393,41 @@ func preferredNVMExecutable(candidates: [String], alias: String) -> String? {
 func nvmDirectory(for executablePath: String) -> String? {
     guard let marker = executablePath.range(of: "/.nvm/versions/node/") else { return nil }
     return String(executablePath[..<marker.lowerBound]) + "/.nvm"
+}
+
+func nvmNodeVersion(for executablePath: String) -> String? {
+    guard nvmDirectory(for: executablePath) != nil else { return nil }
+    let version = URL(fileURLWithPath: executablePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .lastPathComponent
+        .trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
+    return version.first?.isNumber == true ? version : nil
+}
+
+func nvmNodeUpdateArguments(
+    nvmDirectory: String,
+    currentVersion: String,
+    targetVersion: String,
+    isDefault: Bool
+) -> [String] {
+    let command = #"""
+    source "$1/nvm.sh" &&
+    target="$(nvm version "$3" 2>/dev/null || true)" &&
+    if [ "$target" = "N/A" ]; then
+        nvm install "$3" --reinstall-packages-from="$2"
+    else
+        nvm use "$target" && nvm reinstall-packages "$2"
+    fi &&
+    if [ "$4" = "default" ]; then
+        nvm alias default "$3"
+    fi &&
+    nvm uninstall "$2"
+    """#
+    return [
+        "-c", command, "upkeep-node", nvmDirectory,
+        currentVersion, targetVersion, isDefault ? "default" : "secondary"
+    ]
 }
 
 func captureDeveloperCommand(
