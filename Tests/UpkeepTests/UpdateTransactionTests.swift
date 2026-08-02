@@ -3,6 +3,42 @@ import Testing
 @testable import Upkeep
 
 @MainActor
+@Test func updatedApplicationsAreReopenedAtTheirInstalledPaths() async throws {
+    let defaultsName = "UpdateRelaunchTests.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: defaultsName))
+    defer { defaults.removePersistentDomain(forName: defaultsName) }
+    let app = InstalledApp(
+        name: "Example",
+        bundleIdentifier: "com.example.relaunch",
+        installedVersion: "1.0.0",
+        buildVersion: nil,
+        url: URL(fileURLWithPath: "/Applications/Example.app"),
+        sparkleFeedURL: nil,
+        githubRepository: nil,
+        hasAppStoreReceipt: false
+    )
+    let opener = RecordingTransactionExternalOpener()
+    let recorder = TransactionRecorder()
+    let store = UpkeepStore(
+        settings: AppSettings(defaults: defaults),
+        dependencies: UpkeepDependencies(
+            scanner: TransactionScanner(recorder: recorder),
+            applicationDiscovery: TransactionDiscovery(app: app),
+            homebrew: TransactionHomebrew(recorder: recorder),
+            developerPackages: TransactionDeveloperPackages(),
+            localModels: TransactionLocalModels(),
+            history: TransactionHistory(recorder: recorder),
+            externalOpener: opener
+        )
+    )
+
+    store.reopenApplications([app])
+
+    #expect(opener.openedURLs == [app.url])
+    #expect(store.errorMessage == nil)
+}
+
+@MainActor
 @Test func applicationUpdateTransactionBacksUpExecutesRecordsRescansAndRestores() async throws {
     let recorder = TransactionRecorder()
     let scanner = TransactionScanner(recorder: recorder)
@@ -373,4 +409,14 @@ private struct TransactionLocalModels: LocalModelManaging {
 @MainActor
 private struct TransactionExternalOpener: ExternalOpening {
     func open(_ url: URL) -> Bool { true }
+}
+
+@MainActor
+private final class RecordingTransactionExternalOpener: ExternalOpening, @unchecked Sendable {
+    private(set) var openedURLs: [URL] = []
+
+    func open(_ url: URL) -> Bool {
+        openedURLs.append(url)
+        return true
+    }
 }

@@ -47,6 +47,7 @@ private struct UpkeepRelease: Identifiable {
 
     static let all = [
         UpkeepRelease(version: "Next", date: "In development", changes: [
+            "Automatically reopens applications that Upkeep temporarily quits after successful single or batch updates.",
             "Adds trusted GitHub release discovery for Stats and UniGetUI plus validated, user-supplied repository mappings.",
             "Finds runtime-configured Sparkle feeds and identifies apps that own their updater without incorrectly calling them unsupported.",
             "Routes Steam, Adobe Creative Cloud, JetBrains Toolbox, Epic Games, Spotify, Discord, standalone Tailscale, and macOS-managed apps to their publisher-owned updater.",

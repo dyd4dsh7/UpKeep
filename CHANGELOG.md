@@ -4,6 +4,7 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+- Automatically reopens applications that Upkeep temporarily quits after successful single or batch updates.
 - Added trusted GitHub release discovery for Stats and UniGetUI, plus validated per-app repository mappings for advanced users.
 - Discovered runtime-configured Sparkle feeds and distinguished built-in updater apps from unsupported update sources.
 - Added publisher-managed update routing for Steam, Adobe Creative Cloud, JetBrains Toolbox, Epic Games, Spotify, Discord, standalone Tailscale, and macOS-managed apps.
