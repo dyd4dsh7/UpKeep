@@ -73,8 +73,7 @@ struct HomebrewClient: Sendable {
             request.timeoutInterval = 30
             request.cachePolicy = .returnCacheDataElseLoad
             request.setValue("Upkeep/0.2", forHTTPHeaderField: "User-Agent")
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse else { throw UpdateSourceError.invalidResponse }
+            let (data, http) = try await PublisherHTTPClient.data(for: request)
             guard 200..<300 ~= http.statusCode else { throw UpdateSourceError.httpStatus(http.statusCode) }
             let catalog: [CatalogCask]
             do { catalog = try JSONDecoder().decode([CatalogCask].self, from: data) }
@@ -223,6 +222,8 @@ private func cachedCaskCatalog(maximumAge: TimeInterval) -> [CatalogCask]? {
     guard let url = caskCatalogCacheURL(),
           let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
           let modified = attributes[.modificationDate] as? Date,
+          let size = attributes[.size] as? NSNumber,
+          size.intValue <= PublisherHTTPClient.metadataLimit,
           Date().timeIntervalSince(modified) <= maximumAge,
           let data = try? Data(contentsOf: url) else { return nil }
     return try? JSONDecoder().decode([CatalogCask].self, from: data)
@@ -310,7 +311,6 @@ private func runInTerminal(
     let fileManager = FileManager.default
     let directory = fileManager.temporaryDirectory
         .appendingPathComponent("Upkeep-Homebrew-\(UUID().uuidString)", isDirectory: true)
-    let scriptURL = directory.appendingPathComponent("Continue Homebrew Update.command")
     let outputURL = directory.appendingPathComponent("output.log")
     let statusURL = directory.appendingPathComponent("status")
     try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -340,8 +340,7 @@ private func runInTerminal(
     }
 
     let outputMode = permissionRepairURL == nil ? "" : "-a "
-    let script = """
-    #!/bin/zsh
+    let terminalCommand = """
     set -o pipefail
     typeset -i upkeep_status=1
     trap 'print -r -- "$upkeep_status" > \(shellQuote(statusURL.path))' EXIT HUP INT TERM
@@ -362,8 +361,6 @@ private func runInTerminal(
     fi
     exit $upkeep_status
     """
-    try script.write(to: scriptURL, atomically: true, encoding: .utf8)
-    try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: scriptURL.path)
 
     DiagnosticsStore.shared.record(.info, category: .command, "Homebrew needs interactive authorization", metadata: [
         "Command": "brew " + arguments.joined(separator: " "),
@@ -374,8 +371,8 @@ private func runInTerminal(
     ])
 
     let opener = Process()
-    opener.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-    opener.arguments = ["-a", "Terminal", scriptURL.path]
+    opener.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+    opener.arguments = terminalAppleScriptArguments(command: terminalCommand)
     do {
         try opener.run()
         opener.waitUntilExit()
@@ -409,6 +406,18 @@ private func runInTerminal(
         )
     }
     return data
+}
+
+func terminalAppleScriptArguments(command: String) -> [String] {
+    [
+        "-e", "on run argv",
+        "-e", "tell application \"Terminal\"",
+        "-e", "do script (item 1 of argv)",
+        "-e", "activate",
+        "-e", "end tell",
+        "-e", "end run",
+        command
+    ]
 }
 
 private func shellQuote(_ value: String) -> String {

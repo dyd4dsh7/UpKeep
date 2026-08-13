@@ -14,8 +14,7 @@ struct AppStoreClient: Sendable {
             var request = URLRequest(url: url)
             request.timeoutInterval = 15
             request.setValue("Upkeep/1.0", forHTTPHeaderField: "User-Agent")
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse else { throw UpdateSourceError.invalidResponse }
+            let (data, http) = try await PublisherHTTPClient.data(for: request)
             guard 200..<300 ~= http.statusCode else { throw UpdateSourceError.httpStatus(http.statusCode) }
             let lookup: LookupResponse
             do { lookup = try JSONDecoder().decode(LookupResponse.self, from: data) }

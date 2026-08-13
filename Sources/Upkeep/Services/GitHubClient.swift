@@ -72,10 +72,7 @@ struct GitHubClient: Sendable {
                 request.timeoutInterval = 15
                 request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
                 request.setValue("Upkeep/1.0", forHTTPHeaderField: "User-Agent")
-                let (data, response) = try await URLSession.shared.data(for: request)
-                guard let http = response as? HTTPURLResponse else {
-                    throw UpdateSourceError.invalidResponse
-                }
+                let (data, http) = try await PublisherHTTPClient.data(for: request)
                 // GitHub uses 404 when a valid repository has no published releases.
                 if http.statusCode == 404 { return Data("[]".utf8) }
                 guard http.statusCode == 200 else {

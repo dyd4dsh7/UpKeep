@@ -1624,9 +1624,8 @@ private actor RegistryRequestCache {
         }
         if let task = inFlight[key] { return await task.value }
         let task = Task<Data?, Never> {
-            guard let (data, response) = try? await URLSession.shared.data(for: request),
-                  let http = response as? HTTPURLResponse,
-                  200..<300 ~= http.statusCode else { return nil }
+            guard let (data, response) = try? await PublisherHTTPClient.data(for: request),
+                  200..<300 ~= response.statusCode else { return nil }
             return data
         }
         inFlight[key] = task

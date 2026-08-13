@@ -253,18 +253,18 @@ private func ollamaManifest(for model: String) async -> OllamaManifest? {
     var request = URLRequest(url: url)
     request.timeoutInterval = 20
     request.setValue("application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json", forHTTPHeaderField: "Accept")
-    guard var (data, response) = try? await URLSession.shared.data(for: request),
-          var http = response as? HTTPURLResponse else { return nil }
+    guard var (data, response) = try? await PublisherHTTPClient.data(for: request) else { return nil }
+    var http = response
 
     if http.statusCode == 401,
        let challenge = http.value(forHTTPHeaderField: "WWW-Authenticate"),
        let tokenURL = ollamaTokenURL(from: challenge, repository: parsed.repository),
-       let (tokenData, tokenResponse) = try? await URLSession.shared.data(from: tokenURL),
-       (tokenResponse as? HTTPURLResponse)?.statusCode == 200,
+       let (tokenData, tokenResponse) = try? await PublisherHTTPClient.data(for: URLRequest(url: tokenURL)),
+       tokenResponse.statusCode == 200,
        let token = (try? JSONDecoder().decode(OllamaToken.self, from: tokenData))?.token {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        guard let authenticated = try? await URLSession.shared.data(for: request),
-              let authenticatedHTTP = authenticated.1 as? HTTPURLResponse else { return nil }
+        guard let authenticated = try? await PublisherHTTPClient.data(for: request) else { return nil }
+        let authenticatedHTTP = authenticated.1
         (data, response) = authenticated
         http = authenticatedHTTP
     }
@@ -353,8 +353,8 @@ private func huggingFaceFileModifiedAt(_ repository: String, filename: String) a
     var request = URLRequest(url: url)
     request.timeoutInterval = 20
     request.setValue("Upkeep/0.9", forHTTPHeaderField: "User-Agent")
-    guard let (data, response) = try? await URLSession.shared.data(for: request),
-          let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode,
+    guard let (data, response) = try? await PublisherHTTPClient.data(for: request),
+          200..<300 ~= response.statusCode,
           let entries = try? JSONDecoder().decode([HuggingFaceTreeEntry].self, from: data),
           let value = entries.first(where: { URL(fileURLWithPath: $0.path).lastPathComponent == filename })?.lastCommit?.date
     else { return nil }

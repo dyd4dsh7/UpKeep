@@ -20,10 +20,7 @@ enum GitHubAtomClient {
             request.timeoutInterval = 15
             request.setValue("application/atom+xml", forHTTPHeaderField: "Accept")
             request.setValue("Upkeep/1.0", forHTTPHeaderField: "User-Agent")
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse else {
-                throw UpdateSourceError.invalidResponse
-            }
+            let (data, http) = try await PublisherHTTPClient.data(for: request)
             guard http.statusCode == 200 else {
                 throw UpdateSourceError.httpStatus(http.statusCode)
             }
@@ -42,6 +39,8 @@ enum GitHubAtomClient {
 }
 
 private final class GitHubAtomParser: NSObject, XMLParserDelegate {
+    private static let maximumEntries = 1_000
+    private static let maximumFieldCharacters = 256_000
     private let data: Data
     private(set) var entries: [GitHubAtomEntry] = []
     private var inEntry = false
@@ -82,11 +81,11 @@ private final class GitHubAtomParser: NSObject, XMLParserDelegate {
     }
 
     func parser(_ parser: XMLParser, foundCharacters string: String) {
-        if inEntry { currentText += string }
+        append(string, parser: parser)
     }
 
     func parser(_ parser: XMLParser, foundCDATA CDATABlock: Data) {
-        if inEntry { currentText += String(decoding: CDATABlock, as: UTF8.self) }
+        append(String(decoding: CDATABlock, as: UTF8.self), parser: parser)
     }
 
     func parser(
@@ -106,6 +105,10 @@ private final class GitHubAtomParser: NSObject, XMLParserDelegate {
                 options: .regularExpression
             )
         } else if elementName == "entry" {
+            guard entries.count < Self.maximumEntries else {
+                parser.abortParsing()
+                return
+            }
             let tagName = URL(string: htmlURL)?.lastPathComponent.removingPercentEncoding
                 ?? title
             if !tagName.isEmpty, !htmlURL.isEmpty {
@@ -120,5 +123,15 @@ private final class GitHubAtomParser: NSObject, XMLParserDelegate {
         }
         currentText = ""
         currentElement = ""
+    }
+
+    private func append(_ string: String, parser: XMLParser) {
+        guard inEntry else { return }
+        guard string.count <= Self.maximumFieldCharacters,
+              currentText.count <= Self.maximumFieldCharacters - string.count else {
+            parser.abortParsing()
+            return
+        }
+        currentText += string
     }
 }

@@ -235,10 +235,7 @@ struct MozillaUpdateClient: Sendable {
         request.timeoutInterval = 15
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("Upkeep/1.0", forHTTPHeaderField: "User-Agent")
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw UpdateSourceError.invalidResponse
-        }
+        let (data, http) = try await PublisherHTTPClient.data(for: request)
         guard http.statusCode == 200 else {
             throw UpdateSourceError.httpStatus(http.statusCode)
         }
@@ -268,10 +265,7 @@ private func fetchPublisherData(_ url: URL) async throws -> Data {
     request.timeoutInterval = 15
     request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
     request.setValue("Upkeep/1.0", forHTTPHeaderField: "User-Agent")
-    let (data, response) = try await URLSession.shared.data(for: request)
-    guard let http = response as? HTTPURLResponse else {
-        throw UpdateSourceError.invalidResponse
-    }
+    let (data, http) = try await PublisherHTTPClient.data(for: request)
     guard http.statusCode == 200 else {
         throw UpdateSourceError.httpStatus(http.statusCode)
     }

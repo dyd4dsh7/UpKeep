@@ -37,13 +37,16 @@ actor PublisherResponseCache {
         guard let url = cacheURL(for: key),
               let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
               let modifiedAt = attributes[.modificationDate] as? Date,
+              let size = attributes[.size] as? NSNumber,
+              size.intValue <= PublisherHTTPClient.metadataLimit,
               Date().timeIntervalSince(modifiedAt) <= maximumAge
         else { return nil }
         return try? Data(contentsOf: url)
     }
 
     private func store(_ data: Data, for key: String) {
-        guard let url = cacheURL(for: key) else { return }
+        guard data.count <= PublisherHTTPClient.metadataLimit,
+              let url = cacheURL(for: key) else { return }
         do {
             try FileManager.default.createDirectory(
                 at: url.deletingLastPathComponent(),

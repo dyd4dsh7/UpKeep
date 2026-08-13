@@ -7,8 +7,7 @@ struct SparkleClient: Sendable {
             var request = URLRequest(url: feedURL)
             request.timeoutInterval = 15
             request.setValue("Upkeep/1.0", forHTTPHeaderField: "User-Agent")
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse else { throw UpdateSourceError.invalidResponse }
+            let (data, http) = try await PublisherHTTPClient.data(for: request)
             guard 200..<300 ~= http.statusCode else { throw UpdateSourceError.httpStatus(http.statusCode) }
 
             let parser = SparkleFeedParser(data: data, baseURL: feedURL)
@@ -63,6 +62,8 @@ struct SparkleFeedItem: Equatable {
 }
 
 final class SparkleFeedParser: NSObject, XMLParserDelegate {
+    private static let maximumItems = 1_000
+    private static let maximumFieldCharacters = 256_000
     private let data: Data
     private let baseURL: URL
     private var items: [SparkleFeedItem] = []
@@ -152,12 +153,11 @@ final class SparkleFeedParser: NSObject, XMLParserDelegate {
     }
 
     func parser(_ parser: XMLParser, foundCharacters string: String) {
-        if inItem { currentText += string }
+        append(string, parser: parser)
     }
 
     func parser(_ parser: XMLParser, foundCDATA CDATABlock: Data) {
-        guard inItem else { return }
-        currentText += String(decoding: CDATABlock, as: UTF8.self)
+        append(String(decoding: CDATABlock, as: UTF8.self), parser: parser)
     }
 
     func parser(
@@ -184,6 +184,10 @@ final class SparkleFeedParser: NSObject, XMLParserDelegate {
         } else if elementName == "description" {
             releaseNotes = text.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
         } else if elementName == "item" {
+            guard items.count < Self.maximumItems else {
+                parser.abortParsing()
+                return
+            }
             if let version {
                 items.append(SparkleFeedItem(
                     version: version,
@@ -201,5 +205,15 @@ final class SparkleFeedParser: NSObject, XMLParserDelegate {
         }
         currentElement = ""
         currentText = ""
+    }
+
+    private func append(_ string: String, parser: XMLParser) {
+        guard inItem else { return }
+        guard string.count <= Self.maximumFieldCharacters,
+              currentText.count <= Self.maximumFieldCharacters - string.count else {
+            parser.abortParsing()
+            return
+        }
+        currentText += string
     }
 }

@@ -27,8 +27,11 @@ struct DirectAppInstaller: DirectAppInstalling, Sendable {
         try fileManager.createDirectory(at: workspace, withIntermediateDirectories: true)
         defer { try? fileManager.removeItem(at: workspace) }
 
-        let (temporaryDownload, response) = try await URLSession.shared.download(from: downloadURL)
-        guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
+        var request = URLRequest(url: downloadURL)
+        request.timeoutInterval = 120
+        let (temporaryDownload, response) = try await PublisherHTTPClient.download(for: request)
+        defer { try? fileManager.removeItem(at: temporaryDownload) }
+        guard 200..<300 ~= response.statusCode else {
             throw InstallError.downloadFailed
         }
         let archive = workspace.appendingPathComponent(
@@ -46,6 +49,7 @@ struct DirectAppInstaller: DirectAppInstalling, Sendable {
         let extractedRoot: URL
         switch downloadURL.pathExtension.lowercased() {
         case "zip":
+            try ZIPArchiveInspector.validate(archive)
             extractedRoot = workspace.appendingPathComponent("Expanded", isDirectory: true)
             try fileManager.createDirectory(at: extractedRoot, withIntermediateDirectories: true)
             try run("/usr/bin/ditto", ["-x", "-k", archive.path, extractedRoot.path])
@@ -65,8 +69,7 @@ struct DirectAppInstaller: DirectAppInstalling, Sendable {
             under: extractedRoot,
             bundleIdentifier: update.app.bundleIdentifier
         )
-        try validate(replacement, for: update)
-        try replace(update.app.url, with: replacement)
+        try replace(update.app.url, with: replacement, for: update)
     }
 
     private func matchingApplication(
@@ -115,14 +118,22 @@ struct DirectAppInstaller: DirectAppInstalling, Sendable {
         }
     }
 
-    private func replace(_ installed: URL, with replacement: URL) throws {
+    private func replace(_ installed: URL, with replacement: URL, for update: AvailableUpdate) throws {
         let fileManager = FileManager.default
         let staged = installed.deletingLastPathComponent()
             .appendingPathComponent(".Upkeep-\(UUID().uuidString)-\(installed.lastPathComponent)")
         defer { try? fileManager.removeItem(at: staged) }
         do {
-            try fileManager.copyItem(at: replacement, to: staged)
-            _ = try fileManager.replaceItemAt(installed, withItemAt: staged)
+            try StagedReplacementTransaction.perform(
+                replacement: replacement,
+                staged: staged,
+                installed: installed,
+                copy: { try fileManager.copyItem(at: $0, to: $1) },
+                validate: { try validate($0, for: update) },
+                replace: { _ = try fileManager.replaceItemAt($0, withItemAt: $1) }
+            )
+        } catch let error as InstallError {
+            throw error
         } catch {
             throw InstallError.couldNotReplace(error.localizedDescription)
         }
@@ -205,5 +216,20 @@ struct DirectAppInstaller: DirectAppInstalling, Sendable {
                 "macOS blocked the app replacement: \(message). Allow Upkeep in Privacy & Security → App Management, then try again."
             }
         }
+    }
+}
+
+enum StagedReplacementTransaction {
+    static func perform(
+        replacement: URL,
+        staged: URL,
+        installed: URL,
+        copy: (URL, URL) throws -> Void,
+        validate: (URL) throws -> Void,
+        replace: (URL, URL) throws -> Void
+    ) throws {
+        try copy(replacement, staged)
+        try validate(staged)
+        try replace(installed, staged)
     }
 }

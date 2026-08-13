@@ -308,7 +308,7 @@ enum AppDiscovery {
         return (infoCandidates + preferenceCandidates)
             .compactMap { $0 }
             .compactMap(URL.init(string:))
-            .first { ["https", "http"].contains($0.scheme?.lowercased()) }
+            .first { $0.scheme?.lowercased() == "https" }
     }
 
     private static func managedUpdateStatus(

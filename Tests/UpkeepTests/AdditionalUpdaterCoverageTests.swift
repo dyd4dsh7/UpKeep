@@ -42,6 +42,14 @@ import Testing
     )?.absoluteString == "https://updates.example.com/appcast.xml")
 }
 
+@Test func runtimeSparkleFeedDiscoveryRejectsPlainHTTPFeeds() {
+    #expect(AppDiscovery.sparkleFeedURL(
+        info: ["SUFeedURL": "http://127.0.0.1/appcast.xml"],
+        bundleIdentifier: nil,
+        defaults: .standard
+    ) == nil)
+}
+
 @Test func safariIsClassifiedAsMacOSManaged() {
     #expect(AppDiscovery.updateManagement(
         bundleIdentifier: "com.apple.Safari",

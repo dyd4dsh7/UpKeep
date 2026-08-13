@@ -199,3 +199,18 @@ import Testing
 
     #expect(try #require(parser.parse()).releaseNotes == "Important fixes & improvements.")
 }
+
+@Test func rejectsOversizedSparkleFields() throws {
+    let oversized = String(repeating: "A", count: 256_001)
+    let xml = """
+    <rss><channel><item><description>\(oversized)</description>
+    <enclosure url="https://example.com/app.zip" sparkle:shortVersionString="2.0" />
+    </item></channel></rss>
+    """
+    let parser = SparkleFeedParser(
+        data: try #require(xml.data(using: .utf8)),
+        baseURL: try #require(URL(string: "https://example.com/appcast.xml"))
+    )
+
+    #expect(parser.parse() == nil)
+}
