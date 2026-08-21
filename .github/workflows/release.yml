@@ -9,7 +9,7 @@ jobs:
   sign-notarize-and-package:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Import Developer ID certificate
         env:
           DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
@@ -42,7 +42,7 @@ jobs:
           UPKEEP_SIGNING_IDENTITY: ${{ secrets.UPKEEP_SIGNING_IDENTITY }}
           UPKEEP_NOTARY_PROFILE: upkeep-ci
         run: ./scripts/release.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Upkeep
           path: outputs/Upkeep.zip
