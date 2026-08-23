@@ -104,16 +104,7 @@ struct DeveloperPackageClient: Sendable {
                         let latest = versions.first(where: {
                             VersionComparator.isNewer($0, than: package.currentVersion)
                         }) ?? package.latestVersion
-                        return DeveloperPackage(
-                            name: package.name,
-                            currentVersion: package.currentVersion,
-                            latestVersion: latest,
-                            manager: package.manager,
-                            executablePath: package.executablePath,
-                            registryIdentifier: package.registryIdentifier,
-                            installationContext: package.installationContext,
-                            canUpdateAutomatically: package.canUpdateAutomatically
-                        )
+                        return package.replacingLatestVersion(with: latest)
                     }
                 }
             }

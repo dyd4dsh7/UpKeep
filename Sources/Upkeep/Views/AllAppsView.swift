@@ -16,6 +16,10 @@ struct AllAppsView: View {
             } else {
                 List(selection: selectedAppID) {
                     ForEach(visibleApps) { app in
+                    let update = store.update(for: app)
+                    let visibleUpdate = store.visibleUpdate(for: app)
+                    let exclusion = activeExclusion(for: app, update: update)
+                    let hasAdoptionOption = hasHomebrewAdoptionOption(for: app, update: update)
                     StandardItemRow {
                         AppIcon(url: app.url, size: 36)
                     } content: {
@@ -23,29 +27,34 @@ struct AllAppsView: View {
                             title: app.name,
                             detail: sourceSummary(for: app),
                             isRunning: store.isRunning(app),
-                            prereleaseChannel: update(for: app)?.prereleaseChannel ?? app.prereleaseChannel,
-                            prereleaseIsInstalled: update(for: app)?.prereleaseIsInstalled ?? (app.prereleaseChannel != nil)
+                            prereleaseChannel: update?.prereleaseChannel ?? app.prereleaseChannel,
+                            prereleaseIsInstalled: update?.prereleaseIsInstalled ?? (app.prereleaseChannel != nil)
                         )
                     } accessories: {
                         if store.isRefreshing(app) {
                             RefreshingIndicator(itemName: app.name)
                         }
-                        versions(for: app)
+                        UpdateVersionAccessory(
+                            currentVersion: app.installedVersion,
+                            availableVersion: visibleUpdate?.availableVersion ?? app.installedVersion,
+                            showsUpdate: visibleUpdate != nil,
+                            exclusion: exclusion
+                        )
                     }
                     .tag(app.id)
                     .contentShape(Rectangle())
                     .contextMenu {
-                        if let update = store.update(for: app) {
+                        if let update {
                             Button(update.actionTitle) { Task { await store.performUpdate(update) } }
                                 .disabled(store.isUpdating(update))
                         }
                         Button("Refresh") { Task { await store.refresh(app) } }
                             .disabled(store.isWorking(.applicationRefresh(app.id)))
                         Divider()
-                        if let exclusion = activeExclusion(for: app) {
+                        if let exclusion {
                             Button("Restore Updates") { store.restore(exclusion) }
                         } else {
-                            if let update = store.update(for: app) {
+                            if let update {
                                 UpdateExclusionOptions(
                                     skipTitle: "Skip Version \(update.availableVersion)",
                                     ignoreTitle: "Ignore \(app.name) Indefinitely",
@@ -63,7 +72,7 @@ struct AllAppsView: View {
                                 }
                             }
                         }
-                        if hasHomebrewAdoptionOption(for: app) {
+                        if hasAdoptionOption {
                             if store.isHomebrewAdoptionIgnored(app) {
                                 Button("Restore Homebrew Adoption") { store.restoreHomebrewAdoption(app) }
                             } else {
@@ -85,9 +94,12 @@ struct AllAppsView: View {
         .toolbar { listToolbar }
     }
 
-    private func hasHomebrewAdoptionOption(for app: InstalledApp) -> Bool {
+    private func hasHomebrewAdoptionOption(
+        for app: InstalledApp,
+        update: AvailableUpdate?
+    ) -> Bool {
         store.adoptableApp(for: app) != nil ||
-            store.update(for: app)?.candidates.contains(where: \.requiresHomebrewAdoption) == true
+            update?.candidates.contains(where: \.requiresHomebrewAdoption) == true
     }
 
     @ToolbarContentBuilder private var listToolbar: some ToolbarContent {
@@ -293,8 +305,11 @@ struct AllAppsView: View {
         )
     }
 
-    private func activeExclusion(for app: InstalledApp) -> UpdateExclusion? {
-        if let update = store.updates.first(where: { $0.app.id == app.id }),
+    private func activeExclusion(
+        for app: InstalledApp,
+        update: AvailableUpdate?
+    ) -> UpdateExclusion? {
+        if let update,
            let exclusion = store.exclusion(for: app, version: update.availableVersion) { return exclusion }
         return store.ignoredExclusion(for: app)
     }
@@ -312,21 +327,6 @@ struct AllAppsView: View {
         return sources.count == 1 ? first.rawValue : "\(first.rawValue) + \(sources.count - 1) more"
     }
 
-    @ViewBuilder
-    private func versions(for app: InstalledApp) -> some View {
-        if let exclusion = activeExclusion(for: app) {
-            ItemStatusView(
-                title: exclusion.mode.rawValue,
-                systemImage: exclusion.mode == .ignored ? "eye.slash" : "forward.end",
-                color: .orange
-            )
-            InstalledVersionView(version: app.installedVersion)
-        } else if let update = store.visibleUpdate(for: app) {
-            VersionTransitionView(current: app.installedVersion, latest: update.availableVersion)
-        } else {
-            InstalledVersionView(version: app.installedVersion)
-        }
-    }
 }
 
 struct AppDetailView: View {
@@ -607,12 +607,7 @@ struct AppDetailView: View {
             }
             actionGrid
         }
-        .padding(16)
-        .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 14))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(.separator.opacity(0.55), lineWidth: 0.5)
-        }
+        .upkeepOutlinedInspectorCard()
         .upkeepAnimated(for: statusTitle)
     }
 

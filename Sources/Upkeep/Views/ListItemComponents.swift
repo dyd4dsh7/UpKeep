@@ -329,6 +329,41 @@ struct VersionTransitionView: View {
     }
 }
 
+struct UpdateVersionAccessory: View {
+    let currentVersion: String
+    let availableVersion: String
+    let showsUpdate: Bool
+    let exclusion: UpdateExclusion?
+
+    var body: some View {
+        if let exclusion {
+            ItemStatusView(
+                title: exclusion.mode.rawValue,
+                systemImage: exclusion.mode == .ignored ? "eye.slash" : "forward.end",
+                color: .orange
+            )
+            InstalledVersionView(version: currentVersion)
+        } else if showsUpdate {
+            VersionTransitionView(current: currentVersion, latest: availableVersion)
+        } else {
+            InstalledVersionView(version: currentVersion)
+        }
+    }
+}
+
+struct LocalModelIdentityView: View {
+    let model: LocalLLMModel
+
+    var body: some View {
+        ItemIdentityView(
+            title: model.name,
+            detail: model.variant.map { "\(model.runtime.rawValue) · \($0)" }
+                ?? model.runtime.rawValue,
+            prereleaseChannel: model.prereleaseChannel
+        )
+    }
+}
+
 struct ListRowPrimaryAction: ViewModifier {
     func body(content: Content) -> some View {
         content
@@ -418,13 +453,26 @@ struct InspectorUpdateStatusCard<Actions: View, Options: View>: View {
             Divider()
             HStack(spacing: 10) { actions }
         }
-        .padding(16)
-        .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 14))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(.separator.opacity(0.55), lineWidth: 0.5)
-        }
+        .upkeepOutlinedInspectorCard()
         .upkeepAnimated(for: title)
+    }
+}
+
+private struct OutlinedInspectorCardStyle: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .padding(16)
+            .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 14))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(.separator.opacity(0.55), lineWidth: 0.5)
+            }
+    }
+}
+
+extension View {
+    func upkeepOutlinedInspectorCard() -> some View {
+        modifier(OutlinedInspectorCardStyle())
     }
 }
 

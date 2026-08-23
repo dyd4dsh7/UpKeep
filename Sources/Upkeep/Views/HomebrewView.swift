@@ -7,13 +7,7 @@ struct HomebrewView: View {
 
     var body: some View {
         let packages = sortedPackages
-        VStack(spacing: 0) {
-            if let cleanupResult {
-                PackageCleanupResultBanner(result: cleanupResult) {
-                    self.cleanupResult = nil
-                }
-                Divider()
-            }
+        PackageCleanupContainer(result: $cleanupResult, contentIdentity: packages.map(\.id)) {
             if HomebrewClient.brewURL == nil {
                 ContentUnavailableView("Homebrew not installed", systemImage: "terminal", description: Text("Install Homebrew to manage packages here."))
                     .upkeepStateTransition()
@@ -22,8 +16,6 @@ struct HomebrewView: View {
                     .upkeepStateTransition()
             }
         }
-        .upkeepAnimated(for: packages.map(\.id))
-        .upkeepAnimated(for: cleanupResult?.id)
         .toolbar { packageToolbar }
     }
 
@@ -206,7 +198,12 @@ private struct PackageRow: View, Equatable {
                     .help("No matching app bundle was found. This may be a command-line or non-GUI cask.")
                     .accessibilityLabel("Unmapped Homebrew cask")
             }
-            packageVersions
+            UpdateVersionAccessory(
+                currentVersion: package.installedVersion,
+                availableVersion: package.currentVersion,
+                showsUpdate: package.isOutdated,
+                exclusion: exclusion
+            )
             if package.isOutdated && exclusion == nil {
                 Button { Task { await store.updatePackage(package) } } label: {
                     WorkingActionLabel(
@@ -250,20 +247,6 @@ private struct PackageRow: View, Equatable {
         return details.joined(separator: " · ")
     }
 
-    @ViewBuilder private var packageVersions: some View {
-        if let exclusion {
-            ItemStatusView(
-                title: exclusion.mode.rawValue,
-                systemImage: exclusion.mode == .ignored ? "eye.slash" : "forward.end",
-                color: .orange
-            )
-            InstalledVersionView(version: package.installedVersion)
-        } else if package.isOutdated {
-            VersionTransitionView(current: package.installedVersion, latest: package.currentVersion)
-        } else {
-            InstalledVersionView(version: package.installedVersion)
-        }
-    }
 }
 
 struct PackageDetail: View {

@@ -155,6 +155,31 @@ import Testing
     #expect(first.id != second.id)
 }
 
+@Test func replacingLatestDeveloperPackageVersionPreservesIdentityAndMetadata() {
+    let package = DeveloperPackage(
+        name: "typescript",
+        currentVersion: "5.9.0",
+        latestVersion: "5.9.2",
+        manager: .npm,
+        executablePath: "/nvm/v24/npm",
+        registryIdentifier: "typescript",
+        installationContext: "Node 24",
+        canUpdateAutomatically: false
+    )
+
+    let updated = package.replacingLatestVersion(with: "6.0.0-beta.1")
+
+    #expect(updated.id == package.id)
+    #expect(updated.name == package.name)
+    #expect(updated.currentVersion == package.currentVersion)
+    #expect(updated.latestVersion == "6.0.0-beta.1")
+    #expect(updated.manager == package.manager)
+    #expect(updated.executablePath == package.executablePath)
+    #expect(updated.registryIdentifier == package.registryIdentifier)
+    #expect(updated.installationContext == package.installationContext)
+    #expect(updated.canUpdateAutomatically == package.canUpdateAutomatically)
+}
+
 @Test func partialManagerFailureRetainsOnlyTheFailedInstallation() {
     let old24 = DeveloperPackage(name: "npm", currentVersion: "10.0.0", latestVersion: "10.0.0", manager: .npm, executablePath: "/nvm/v24/npm", installationContext: "Node 24")
     let old26 = DeveloperPackage(name: "npm", currentVersion: "11.0.0", latestVersion: "11.0.0", manager: .npm, executablePath: "/nvm/v26/npm", installationContext: "Node 26")

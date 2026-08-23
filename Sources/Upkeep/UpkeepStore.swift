@@ -177,7 +177,7 @@ final class UpkeepStore: ObservableObject {
             DiagnosticsStore.shared.record(.info, category: .command, "Package cleanup scan completed", metadata: [
                 "Manager": target.title,
                 "Scanned size": ByteCountFormatter.string(fromByteCount: estimate.bytes, countStyle: .file),
-                "Duration": diagnosticDuration(since: startedAt)
+                "Duration": formattedDiagnosticDuration(since: startedAt)
             ])
             refreshDiagnostics()
             return estimate
@@ -185,7 +185,7 @@ final class UpkeepStore: ObservableObject {
             errorMessage = error.localizedDescription
             DiagnosticsStore.shared.record(.error, category: .command, "Package cleanup scan failed", metadata: [
                 "Manager": target.title,
-                "Duration": diagnosticDuration(since: startedAt),
+                "Duration": formattedDiagnosticDuration(since: startedAt),
                 "Error": error.localizedDescription
             ])
             refreshDiagnostics()
@@ -207,7 +207,7 @@ final class UpkeepStore: ObservableObject {
                 "Manager": target.title,
                 "Command": target.commandDescription,
                 "Freed": ByteCountFormatter.string(fromByteCount: result.bytesFreed, countStyle: .file),
-                "Duration": diagnosticDuration(since: startedAt)
+                "Duration": formattedDiagnosticDuration(since: startedAt)
             ])
             refreshDiagnostics()
             return result
@@ -216,7 +216,7 @@ final class UpkeepStore: ObservableObject {
             DiagnosticsStore.shared.record(.error, category: .command, "Package cleanup failed", metadata: [
                 "Manager": target.title,
                 "Command": target.commandDescription,
-                "Duration": diagnosticDuration(since: startedAt),
+                "Duration": formattedDiagnosticDuration(since: startedAt),
                 "Error": error.localizedDescription
             ])
             refreshDiagnostics()
@@ -518,16 +518,7 @@ final class UpkeepStore: ObservableObject {
             errorMessage = "No published versions were returned for \(package.name)."
             return
         }
-        let refreshed = DeveloperPackage(
-            name: package.name,
-            currentVersion: package.currentVersion,
-            latestVersion: latest,
-            manager: package.manager,
-            executablePath: package.executablePath,
-            registryIdentifier: package.registryIdentifier,
-            installationContext: package.installationContext,
-            canUpdateAutomatically: package.canUpdateAutomatically
-        )
+        let refreshed = package.replacingLatestVersion(with: latest)
         if let index = developerPackages.firstIndex(where: { $0.id == package.id }) {
             developerPackages[index] = refreshed
         }
@@ -852,7 +843,7 @@ final class UpkeepStore: ObservableObject {
             errorMessage == nil ? "Homebrew batch update completed" : "Homebrew batch update needs attention",
             metadata: [
                 "Attempted": "\(attempted.count)",
-                "Duration": diagnosticDuration(since: startedAt),
+                "Duration": formattedDiagnosticDuration(since: startedAt),
                 "Result": errorMessage ?? "All attempted packages refreshed successfully"
             ]
         )
@@ -1524,7 +1515,7 @@ final class UpkeepStore: ObservableObject {
             try await operation()
             DiagnosticsStore.shared.record(.info, category: .update, "Update action completed", metadata: metadata.merging([
                 "Item": label,
-                "Duration": diagnosticDuration(since: startedAt)
+                "Duration": formattedDiagnosticDuration(since: startedAt)
             ]) { _, new in new })
             refreshDiagnostics()
             return true
@@ -1532,7 +1523,7 @@ final class UpkeepStore: ObservableObject {
             errorMessage = error.localizedDescription
             DiagnosticsStore.shared.record(.error, category: .update, "Update action failed", metadata: metadata.merging([
                 "Item": label,
-                "Duration": diagnosticDuration(since: startedAt),
+                "Duration": formattedDiagnosticDuration(since: startedAt),
                 "Error": error.localizedDescription
             ]) { _, new in new })
             refreshDiagnostics()
@@ -1833,24 +1824,12 @@ final class UpkeepStore: ObservableObject {
     }
 
     private func enabledUpdateSources(for app: InstalledApp) -> Set<UpdateSource> {
-        switch app.updateManagement {
-        case .appStore:
-            return settings.checkAppStore ? [.appStore] : []
-        case .direct:
-            var sources = Set<UpdateSource>()
-            if app.mozillaUpdateChannel != nil
-                || app.chromiumUpdateChannel != nil
-                || app.braveUpdateChannel != nil {
-                sources.insert(.developer)
-            }
-            if settings.checkSparkle, app.sparkleFeedURL != nil { sources.insert(.sparkle) }
-            if settings.checkGitHub, app.githubRepository != nil { sources.insert(.github) }
-            return sources
-        case .testFlight, .setapp, .microsoftAutoUpdate, .steam,
-             .adobeCreativeCloud, .jetBrainsToolbox, .spotify, .discord, .epicGames,
-             .tailscale, .macOS:
-            return []
-        }
+        Set(enabledAppUpdateSources(
+            for: app,
+            checkAppStore: settings.checkAppStore,
+            checkSparkle: settings.checkSparkle,
+            checkGitHub: settings.checkGitHub
+        ).map(\.source))
     }
 
     private func replaceHomebrewPackage(_ package: HomebrewPackage) {
@@ -1862,10 +1841,6 @@ final class UpkeepStore: ObservableObject {
         homebrewPackages.sort {
             $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
         }
-    }
-
-    private func diagnosticDuration(since date: Date) -> String {
-        String(format: "%.0f ms", Date().timeIntervalSince(date) * 1_000)
     }
 
     private func mergedUpdates(from report: ScanReport) -> [AvailableUpdate] {

@@ -14,6 +14,33 @@ enum PublisherHTTPClient {
         return (try Data(contentsOf: result.bodyURL), result.response)
     }
 
+    static func data(
+        for request: URLRequest,
+        requiring statusCode: Int,
+        maximumBytes: Int = metadataLimit
+    ) async throws -> Data {
+        let (data, response) = try await data(for: request, maximumBytes: maximumBytes)
+        guard response.statusCode == statusCode else {
+            throw UpdateSourceError.httpStatus(response.statusCode)
+        }
+        return data
+    }
+
+    static func data(
+        from url: URL,
+        accepting contentType: String? = nil,
+        timeout: TimeInterval = 15,
+        requiring statusCode: Int = 200
+    ) async throws -> Data {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = timeout
+        if let contentType {
+            request.setValue(contentType, forHTTPHeaderField: "Accept")
+        }
+        request.setValue("Upkeep/1.0", forHTTPHeaderField: "User-Agent")
+        return try await data(for: request, requiring: statusCode)
+    }
+
     static func download(for request: URLRequest, maximumBytes: Int64 = archiveLimit) async throws -> (URL, HTTPURLResponse) {
         let result = try await PublisherCurlTransport.load(request, maximumBytes: maximumBytes)
         return (result.bodyURL, result.response)

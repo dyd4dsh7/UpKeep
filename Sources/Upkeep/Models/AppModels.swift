@@ -981,4 +981,17 @@ struct DeveloperPackage: Identifiable, Hashable, Sendable {
     var prereleaseIsInstalled: Bool {
         availablePrereleaseChannel == nil && VersionComparator.isPrerelease(currentVersion)
     }
+
+    func replacingLatestVersion(with version: String) -> DeveloperPackage {
+        DeveloperPackage(
+            name: name,
+            currentVersion: currentVersion,
+            latestVersion: version,
+            manager: manager,
+            executablePath: executablePath,
+            registryIdentifier: registryIdentifier,
+            installationContext: installationContext,
+            canUpdateAutomatically: canUpdateAutomatically
+        )
+    }
 }

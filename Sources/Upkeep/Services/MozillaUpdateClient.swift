@@ -203,7 +203,10 @@ struct MozillaUpdateClient: Sendable {
                 for: "github-brave_brave-browser",
                 maximumAge: 30 * 60
             ) {
-                try await fetchPublisherData(url)
+                try await PublisherHTTPClient.data(
+                    from: url,
+                    accepting: "application/vnd.github+json"
+                )
             }
             releases = try JSONDecoder().decode([BraveRelease].self, from: data)
         } catch {
@@ -231,15 +234,10 @@ struct MozillaUpdateClient: Sendable {
     }
 
     private func fetch(_ url: URL) async throws -> Data {
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 15
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue("Upkeep/1.0", forHTTPHeaderField: "User-Agent")
-        let (data, http) = try await PublisherHTTPClient.data(for: request)
-        guard http.statusCode == 200 else {
-            throw UpdateSourceError.httpStatus(http.statusCode)
-        }
-        return data
+        try await PublisherHTTPClient.data(
+            from: url,
+            accepting: "application/vnd.github+json"
+        )
     }
 
     struct BraveRelease: Decodable, Equatable {
@@ -258,16 +256,4 @@ struct MozillaUpdateClient: Sendable {
         struct Version: Decodable { let version: String }
         let versions: [Version]
     }
-}
-
-private func fetchPublisherData(_ url: URL) async throws -> Data {
-    var request = URLRequest(url: url)
-    request.timeoutInterval = 15
-    request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-    request.setValue("Upkeep/1.0", forHTTPHeaderField: "User-Agent")
-    let (data, http) = try await PublisherHTTPClient.data(for: request)
-    guard http.statusCode == 200 else {
-        throw UpdateSourceError.httpStatus(http.statusCode)
-    }
-    return data
 }

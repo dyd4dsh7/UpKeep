@@ -61,7 +61,7 @@ struct SparkleFeedItem: Equatable {
     }
 }
 
-final class SparkleFeedParser: NSObject, XMLParserDelegate {
+final class SparkleFeedParser: XMLTextParser {
     private static let maximumItems = 1_000
     private static let maximumFieldCharacters = 256_000
     private let data: Data
@@ -152,14 +152,6 @@ final class SparkleFeedParser: NSObject, XMLParserDelegate {
         }
     }
 
-    func parser(_ parser: XMLParser, foundCharacters string: String) {
-        append(string, parser: parser)
-    }
-
-    func parser(_ parser: XMLParser, foundCDATA CDATABlock: Data) {
-        append(String(decoding: CDATABlock, as: UTF8.self), parser: parser)
-    }
-
     func parser(
         _ parser: XMLParser,
         didEndElement elementName: String,
@@ -207,7 +199,7 @@ final class SparkleFeedParser: NSObject, XMLParserDelegate {
         currentText = ""
     }
 
-    private func append(_ string: String, parser: XMLParser) {
+    override func appendXMLText(_ string: String, parser: XMLParser) {
         guard inItem else { return }
         guard string.count <= Self.maximumFieldCharacters,
               currentText.count <= Self.maximumFieldCharacters - string.count else {

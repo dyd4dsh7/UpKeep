@@ -1,5 +1,35 @@
 import SwiftUI
 
+struct PackageCleanupContainer<Content: View>: View {
+    @Binding var result: PackageCleanupResult?
+    let contentIdentity: [String]
+    @ViewBuilder let content: Content
+
+    init(
+        result: Binding<PackageCleanupResult?>,
+        contentIdentity: [String],
+        @ViewBuilder content: () -> Content
+    ) {
+        _result = result
+        self.contentIdentity = contentIdentity
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let result {
+                PackageCleanupResultBanner(result: result) {
+                    self.result = nil
+                }
+                Divider()
+            }
+            content
+        }
+        .upkeepAnimated(for: contentIdentity)
+        .upkeepAnimated(for: result?.id)
+    }
+}
+
 struct PackageCleanupMenu: View {
     @EnvironmentObject private var store: UpkeepStore
     let targets: [PackageCleanupTarget]

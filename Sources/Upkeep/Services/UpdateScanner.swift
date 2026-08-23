@@ -1,5 +1,47 @@
 import Foundation
 
+enum AppUpdateSource: Sendable {
+    case appStore
+    case developer
+    case sparkle
+    case github
+
+    var source: UpdateSource {
+        switch self {
+        case .appStore: .appStore
+        case .developer: .developer
+        case .sparkle: .sparkle
+        case .github: .github
+        }
+    }
+}
+
+func enabledAppUpdateSources(
+    for app: InstalledApp,
+    checkAppStore: Bool,
+    checkSparkle: Bool,
+    checkGitHub: Bool
+) -> [AppUpdateSource] {
+    switch app.updateManagement {
+    case .appStore:
+        return checkAppStore ? [.appStore] : []
+    case .direct:
+        var sources: [AppUpdateSource] = []
+        if app.mozillaUpdateChannel != nil
+            || app.chromiumUpdateChannel != nil
+            || app.braveUpdateChannel != nil {
+            sources.append(.developer)
+        }
+        if checkSparkle, app.sparkleFeedURL != nil { sources.append(.sparkle) }
+        if checkGitHub, app.githubRepository != nil { sources.append(.github) }
+        return sources
+    case .testFlight, .setapp, .microsoftAutoUpdate, .steam,
+         .adobeCreativeCloud, .jetBrainsToolbox, .spotify, .discord, .epicGames,
+         .tailscale, .macOS:
+        return []
+    }
+}
+
 struct UpdateScanner: Sendable {
     private let dependencies: UpdateScannerDependencies
 
@@ -252,7 +294,7 @@ struct UpdateScanner: Sendable {
             category: .scan,
             "Update scan completed",
             metadata: [
-                "Duration": diagnosticDuration(since: scanStartedAt),
+                "Duration": formattedDiagnosticDuration(since: scanStartedAt),
                 "Applications": "\(apps.count)",
                 "Application updates": "\(consolidatedUpdates.count)",
                 "Homebrew packages": "\(packages.count)",
@@ -282,22 +324,6 @@ struct UpdateScanner: Sendable {
         let source: UpdateSource
         let update: AvailableUpdate?
         let warning: ScanWarning?
-    }
-
-    private enum AppUpdateSource: Sendable {
-        case appStore
-        case developer
-        case sparkle
-        case github
-
-        var source: UpdateSource {
-            switch self {
-            case .appStore: .appStore
-            case .developer: .developer
-            case .sparkle: .sparkle
-            case .github: .github
-            }
-        }
     }
 
     private func checkApps(_ apps: [InstalledApp], settings: ScanSettings) async -> ApplicationCheckResults {
@@ -357,24 +383,12 @@ struct UpdateScanner: Sendable {
     }
 
     private func enabledSources(for app: InstalledApp, settings: ScanSettings) -> [AppUpdateSource] {
-        switch app.updateManagement {
-        case .appStore:
-            return settings.checkAppStore ? [.appStore] : []
-        case .direct:
-            var sources: [AppUpdateSource] = []
-            if app.mozillaUpdateChannel != nil
-                || app.chromiumUpdateChannel != nil
-                || app.braveUpdateChannel != nil {
-                sources.append(.developer)
-            }
-            if settings.checkSparkle, app.sparkleFeedURL != nil { sources.append(.sparkle) }
-            if settings.checkGitHub, app.githubRepository != nil { sources.append(.github) }
-            return sources
-        case .testFlight, .setapp, .microsoftAutoUpdate, .steam,
-             .adobeCreativeCloud, .jetBrainsToolbox, .spotify, .discord, .epicGames,
-             .tailscale, .macOS:
-            return []
-        }
+        enabledAppUpdateSources(
+            for: app,
+            checkAppStore: settings.checkAppStore,
+            checkSparkle: settings.checkSparkle,
+            checkGitHub: settings.checkGitHub
+        )
     }
 
     private func checkSource(
@@ -463,7 +477,7 @@ private func recordAppSourceCheck(
     var metadata = [
         "Item": app.name,
         "Installed": app.installedVersion,
-        "Duration": diagnosticDuration(since: startedAt),
+        "Duration": formattedDiagnosticDuration(since: startedAt),
         "Result": update == nil ? "Current" : "Update available"
     ]
     if let update { metadata["Available"] = update.availableVersion }
@@ -479,13 +493,9 @@ private func recordAppSourceFailure(
     DiagnosticsStore.shared.recordBuffered(.error, category: .source, "\(source.rawValue) request failed", metadata: [
         "Item": app.name,
         "Installed": app.installedVersion,
-        "Duration": diagnosticDuration(since: startedAt),
+        "Duration": formattedDiagnosticDuration(since: startedAt),
         "Error": error.localizedDescription
     ])
-}
-
-private func diagnosticDuration(since date: Date) -> String {
-    String(format: "%.0f ms", Date().timeIntervalSince(date) * 1_000)
 }
 
 private func diagnosticDescription(_ status: ScanStatus) -> String {

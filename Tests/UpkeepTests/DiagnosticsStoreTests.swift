@@ -2,6 +2,13 @@ import Foundation
 import Testing
 @testable import Upkeep
 
+@Test func diagnosticDurationFormattingIsDeterministic() {
+    let startedAt = Date(timeIntervalSince1970: 100)
+    let finishedAt = startedAt.addingTimeInterval(1.234)
+
+    #expect(formattedDiagnosticDuration(since: startedAt, now: finishedAt) == "1234 ms")
+}
+
 @Test func diagnosticsAreRedactedBeforePersistenceAndExport() throws {
     let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent("upkeep-diagnostics-tests-\(UUID().uuidString)", isDirectory: true)

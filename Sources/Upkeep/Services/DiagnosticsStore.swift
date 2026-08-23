@@ -1,5 +1,9 @@
 import Foundation
 
+func formattedDiagnosticDuration(since date: Date, now: Date = Date()) -> String {
+    String(format: "%.0f ms", now.timeIntervalSince(date) * 1_000)
+}
+
 enum DiagnosticLevel: String, Codable, CaseIterable, Identifiable, Sendable {
     case info = "Info"
     case warning = "Warning"

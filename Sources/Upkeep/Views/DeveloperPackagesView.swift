@@ -7,13 +7,7 @@ struct DeveloperPackagesView: View {
 
     var body: some View {
         let packages = sortedPackages
-        VStack(spacing: 0) {
-            if let cleanupResult {
-                PackageCleanupResultBanner(result: cleanupResult) {
-                    self.cleanupResult = nil
-                }
-                Divider()
-            }
+        PackageCleanupContainer(result: $cleanupResult, contentIdentity: packages.map(\.id)) {
             if packages.isEmpty {
                 ContentUnavailableView(
                     "No packages found", systemImage: "checkmark.seal.fill",
@@ -25,8 +19,6 @@ struct DeveloperPackagesView: View {
                     .upkeepStateTransition()
             }
         }
-        .upkeepAnimated(for: packages.map(\.id))
-        .upkeepAnimated(for: cleanupResult?.id)
         .toolbar { packageToolbar }
     }
 
@@ -201,7 +193,12 @@ private struct DeveloperPackageRow: View, Equatable {
             if isRefreshing {
                 RefreshingIndicator(itemName: package.name)
             }
-            packageVersions
+            UpdateVersionAccessory(
+                currentVersion: package.currentVersion,
+                availableVersion: package.latestVersion,
+                showsUpdate: package.isOutdated,
+                exclusion: exclusion
+            )
             if package.isOutdated && exclusion == nil {
                 Button { Task { await store.updateDeveloperPackage(package) } } label: {
                     WorkingActionLabel(
@@ -246,20 +243,6 @@ private struct DeveloperPackageRow: View, Equatable {
             .joined(separator: " · ")
     }
 
-    @ViewBuilder private var packageVersions: some View {
-        if let exclusion {
-            ItemStatusView(
-                title: exclusion.mode.rawValue,
-                systemImage: exclusion.mode == .ignored ? "eye.slash" : "forward.end",
-                color: .orange
-            )
-            InstalledVersionView(version: package.currentVersion)
-        } else if package.isOutdated {
-            VersionTransitionView(current: package.currentVersion, latest: package.latestVersion)
-        } else {
-            InstalledVersionView(version: package.currentVersion)
-        }
-    }
 }
 
 struct DeveloperPackageDetail: View {

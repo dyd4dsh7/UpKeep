@@ -883,11 +883,7 @@ private struct LocalModelUpdateCard: View {
         StandardItemRow {
             LocalModelRuntimeIcon(runtime: model.runtime, size: 36)
         } content: {
-            ItemIdentityView(
-                title: model.name,
-                detail: model.variant.map { "\(model.runtime.rawValue) · \($0)" } ?? model.runtime.rawValue,
-                prereleaseChannel: model.prereleaseChannel
-            )
+            LocalModelIdentityView(model: model)
         } accessories: {
             VersionTransitionView(current: model.installedRevision, latest: model.latestRevision)
             Button { Task { await store.updateLocalModel(model) } } label: {

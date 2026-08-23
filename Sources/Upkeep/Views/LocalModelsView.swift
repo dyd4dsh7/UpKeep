@@ -75,24 +75,14 @@ private struct LocalModelRow: View, Equatable {
         StandardItemRow {
             LocalModelRuntimeIcon(runtime: model.runtime, size: 36)
         } content: {
-            ItemIdentityView(
-                title: model.name,
-                detail: model.variant.map { "\(model.runtime.rawValue) · \($0)" } ?? model.runtime.rawValue,
-                prereleaseChannel: model.prereleaseChannel
-            )
+            LocalModelIdentityView(model: model)
         } accessories: {
-            if let exclusion {
-                ItemStatusView(
-                    title: exclusion.mode.rawValue,
-                    systemImage: exclusion.mode == .ignored ? "eye.slash" : "forward.end",
-                    color: .orange
-                )
-                InstalledVersionView(version: model.installedRevision)
-            } else if model.isOutdated {
-                VersionTransitionView(current: model.installedRevision, latest: model.latestRevision)
-            } else {
-                InstalledVersionView(version: model.installedRevision)
-            }
+            UpdateVersionAccessory(
+                currentVersion: model.installedRevision,
+                availableVersion: model.latestRevision,
+                showsUpdate: model.isOutdated,
+                exclusion: exclusion
+            )
             if model.isOutdated && exclusion == nil {
                 Button { Task { await store.updateLocalModel(model) } } label: {
                     WorkingActionLabel(

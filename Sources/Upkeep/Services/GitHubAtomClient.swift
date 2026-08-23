@@ -16,15 +16,7 @@ enum GitHubAtomClient {
             for: "github-atom-\(repository.lowercased())",
             maximumAge: 30 * 60
         ) {
-            var request = URLRequest(url: url)
-            request.timeoutInterval = 15
-            request.setValue("application/atom+xml", forHTTPHeaderField: "Accept")
-            request.setValue("Upkeep/1.0", forHTTPHeaderField: "User-Agent")
-            let (data, http) = try await PublisherHTTPClient.data(for: request)
-            guard http.statusCode == 200 else {
-                throw UpdateSourceError.httpStatus(http.statusCode)
-            }
-            return data
+            try await PublisherHTTPClient.data(from: url, accepting: "application/atom+xml")
         }
         return try entries(data: data)
     }
@@ -38,7 +30,7 @@ enum GitHubAtomClient {
     }
 }
 
-private final class GitHubAtomParser: NSObject, XMLParserDelegate {
+private final class GitHubAtomParser: XMLTextParser {
     private static let maximumEntries = 1_000
     private static let maximumFieldCharacters = 256_000
     private let data: Data
@@ -80,14 +72,6 @@ private final class GitHubAtomParser: NSObject, XMLParserDelegate {
         }
     }
 
-    func parser(_ parser: XMLParser, foundCharacters string: String) {
-        append(string, parser: parser)
-    }
-
-    func parser(_ parser: XMLParser, foundCDATA CDATABlock: Data) {
-        append(String(decoding: CDATABlock, as: UTF8.self), parser: parser)
-    }
-
     func parser(
         _ parser: XMLParser,
         didEndElement elementName: String,
@@ -125,7 +109,7 @@ private final class GitHubAtomParser: NSObject, XMLParserDelegate {
         currentElement = ""
     }
 
-    private func append(_ string: String, parser: XMLParser) {
+    override func appendXMLText(_ string: String, parser: XMLParser) {
         guard inEntry else { return }
         guard string.count <= Self.maximumFieldCharacters,
               currentText.count <= Self.maximumFieldCharacters - string.count else {
