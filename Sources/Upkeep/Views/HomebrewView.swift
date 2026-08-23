@@ -6,6 +6,7 @@ struct HomebrewView: View {
     @State private var cleanupResult: PackageCleanupResult?
 
     var body: some View {
+        let packages = sortedPackages
         VStack(spacing: 0) {
             if let cleanupResult {
                 PackageCleanupResultBanner(result: cleanupResult) {
@@ -15,22 +16,32 @@ struct HomebrewView: View {
             }
             if HomebrewClient.brewURL == nil {
                 ContentUnavailableView("Homebrew not installed", systemImage: "terminal", description: Text("Install Homebrew to manage packages here."))
+                    .upkeepStateTransition()
             } else {
-                packageList
+                packageList(packages)
+                    .upkeepStateTransition()
             }
         }
+        .upkeepAnimated(for: packages.map(\.id))
+        .upkeepAnimated(for: cleanupResult?.id)
         .toolbar { packageToolbar }
     }
 
     @ToolbarContentBuilder private var packageToolbar: some ToolbarContent {
-        ToolbarItemGroup(placement: .primaryAction) {
+        ToolbarItem(placement: .primaryAction) {
             PackageCleanupMenu(
                 targets: store.packageCleanupTargets.filter { $0.kind == .homebrew },
                 result: $cleanupResult
             )
+        }
+        upkeepToolbarSpacer()
+        ToolbarItemGroup(placement: .primaryAction) {
             homebrewSortMenu
             homebrewFilterMenu
             ListDensityButton()
+        }
+        upkeepToolbarSpacer()
+        ToolbarItem(placement: .primaryAction) {
             ScanToolbarButton()
         }
     }
@@ -93,16 +104,25 @@ struct HomebrewView: View {
         }
     }
 
-    private var packageList: some View {
-        List(sortedPackages, selection: $store.navigation.selectedPackageID) { package in
-            PackageRow(package: package).tag(package.id)
+    private func packageList(_ packages: [HomebrewPackage]) -> some View {
+        List(packages, selection: $store.navigation.selectedPackageID) { package in
+            PackageRow(
+                store: store,
+                package: package,
+                isRefreshing: store.isRefreshing(package),
+                isUnmapped: store.isUnmapped(package),
+                exclusion: store.exclusion(for: package),
+                isWorking: store.isWorking(.homebrewPackage(package.id))
+            )
+            .equatable()
+            .tag(package.id)
         }
         .listStyle(.inset)
-        .onAppear { normalizeBasicFilter(); ensurePackageSelection() }
-        .onChange(of: visiblePackages.map(\.id)) { _, _ in ensurePackageSelection() }
+        .onAppear { normalizeBasicFilter(); ensurePackageSelection(in: packages) }
+        .onChange(of: packages.map(\.id)) { _, _ in ensurePackageSelection(in: packages) }
         .onChange(of: settings.sidebarViewMode) { _, _ in
             normalizeBasicFilter()
-            ensurePackageSelection()
+            ensurePackageSelection(in: packages)
         }
     }
 
@@ -144,15 +164,27 @@ struct HomebrewView: View {
         }
     }
 
-    private func ensurePackageSelection() {
-        guard !visiblePackages.contains(where: { $0.id == store.selectedPackageID }) else { return }
-        store.selectedPackageID = visiblePackages.first?.id
+    private func ensurePackageSelection(in packages: [HomebrewPackage]) {
+        guard !packages.contains(where: { $0.id == store.selectedPackageID }) else { return }
+        store.selectedPackageID = packages.first?.id
     }
 }
 
-private struct PackageRow: View {
-    @EnvironmentObject private var store: UpkeepStore
+private struct PackageRow: View, Equatable {
+    let store: UpkeepStore
     let package: HomebrewPackage
+    let isRefreshing: Bool
+    let isUnmapped: Bool
+    let exclusion: UpdateExclusion?
+    let isWorking: Bool
+
+    nonisolated static func == (left: Self, right: Self) -> Bool {
+        left.package == right.package
+            && left.isRefreshing == right.isRefreshing
+            && left.isUnmapped == right.isUnmapped
+            && left.exclusion == right.exclusion
+            && left.isWorking == right.isWorking
+    }
 
     var body: some View {
         StandardItemRow {
@@ -165,40 +197,39 @@ private struct PackageRow: View {
                 prereleaseIsInstalled: package.prereleaseIsInstalled
             )
         } accessories: {
-            if store.isRefreshing(package) {
-                ProgressView().controlSize(.small)
-                    .accessibilityLabel("Refreshing \(package.displayName)")
+            if isRefreshing {
+                RefreshingIndicator(itemName: package.displayName)
             }
-            if store.isUnmapped(package) {
+            if isUnmapped {
                 Image(systemName: "questionmark.diamond.fill")
                     .foregroundStyle(.orange)
                     .help("No matching app bundle was found. This may be a command-line or non-GUI cask.")
                     .accessibilityLabel("Unmapped Homebrew cask")
             }
             packageVersions
-            if package.isOutdated && !store.isExcluded(package) {
+            if package.isOutdated && exclusion == nil {
                 Button { Task { await store.updatePackage(package) } } label: {
                     WorkingActionLabel(
-                        isWorking: store.isWorking(.homebrewPackage(package.id)),
+                        isWorking: isWorking,
                         idleTitle: "Update"
                     )
                 }
                     .listRowPrimaryAction()
-                    .disabled(store.isWorking(.homebrewPackage(package.id)))
+                    .disabled(isWorking)
             } else {
                 Color.clear.frame(width: 108, height: 1).accessibilityHidden(true)
             }
         }
         .contextMenu {
             Button("Refresh") { Task { await store.refresh(package) } }
-                .disabled(store.isWorking(.homebrewRefresh(package.id)))
+                .disabled(isRefreshing)
             Divider()
-            if let exclusion = store.exclusion(for: package) {
+            if let exclusion {
                 Button("Restore Updates") { store.restore(exclusion) }
             } else {
                 if package.isOutdated {
                     Button("Update") { Task { await store.updatePackage(package) } }
-                        .disabled(store.isWorking(.homebrewPackage(package.id)))
+                        .disabled(isWorking)
                     Divider()
                 }
                 UpdateExclusionOptions(
@@ -220,7 +251,7 @@ private struct PackageRow: View {
     }
 
     @ViewBuilder private var packageVersions: some View {
-        if let exclusion = store.exclusion(for: package) {
+        if let exclusion {
             ItemStatusView(
                 title: exclusion.mode.rawValue,
                 systemImage: exclusion.mode == .ignored ? "eye.slash" : "forward.end",

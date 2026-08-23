@@ -1,12 +1,37 @@
 import SwiftUI
 
+private struct MacOSUpdateGroups {
+    let updates: [MacOSUpdate]
+    let installers: [MacOSUpdate]
+
+    init(_ items: [MacOSUpdate]) {
+        var updates: [MacOSUpdate] = []
+        var installers: [MacOSUpdate] = []
+        updates.reserveCapacity(items.count)
+        installers.reserveCapacity(items.count)
+        for item in items {
+            if item.isFullInstaller {
+                installers.append(item)
+            } else {
+                updates.append(item)
+            }
+        }
+        self.updates = updates
+        self.installers = installers
+    }
+
+    var isEmpty: Bool { updates.isEmpty && installers.isEmpty }
+    var identity: [String] { (updates + installers).map(\.id) }
+}
+
 struct MacOSUpdatesView: View {
     @EnvironmentObject private var store: UpkeepStore
     @EnvironmentObject private var settings: AppSettings
 
     var body: some View {
+        let groups = MacOSUpdateGroups(store.macOSUpdates)
         VStack(spacing: 0) {
-            if availableUpdates.isEmpty && installers.isEmpty {
+            if groups.isEmpty {
                 ContentUnavailableView(
                     "Your Mac is up to date",
                     systemImage: "checkmark.seal.fill",
@@ -14,16 +39,17 @@ struct MacOSUpdatesView: View {
                         ? "Enable a beta channel with Beta Updates if you want prerelease builds."
                         : "Upkeep will show new macOS updates here when Apple makes them available.")
                 ).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .upkeepStateTransition()
             } else {
                 List {
-                    if !availableUpdates.isEmpty {
+                    if !groups.updates.isEmpty {
                         Section("Available Updates") {
-                            ForEach(availableUpdates) { update in systemRow(update) }
+                            ForEach(groups.updates) { update in systemRow(update) }
                         }
                     }
-                    if settings.sidebarViewMode == .advanced, !installers.isEmpty {
+                    if settings.sidebarViewMode == .advanced, !groups.installers.isEmpty {
                         Section {
-                            ForEach(installers) { update in systemRow(update) }
+                            ForEach(groups.installers) { update in systemRow(update) }
                         } header: {
                             Text("Full macOS Installers")
                         } footer: {
@@ -32,25 +58,28 @@ struct MacOSUpdatesView: View {
                     }
                 }
                 .listStyle(.inset)
+                .upkeepStateTransition()
             }
         }
+        .upkeepAnimated(for: groups.identity)
         .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                if settings.sidebarViewMode == .advanced {
+            if settings.sidebarViewMode == .advanced {
+                ToolbarItem(placement: .primaryAction) {
                     Button("Beta Updates…") { store.openBetaSettings() }
                         .toolbarControlLabel("Choose macOS beta updates")
                 }
-                Button { Task { await store.scan() } } label: {
-                    Label("Check Again", systemImage: "arrow.clockwise")
-                }
-                .toolbarControlLabel("Check for macOS updates")
-                .disabled(store.isScanning)
+                upkeepToolbarSpacer()
+            }
+            ToolbarItem(placement: .primaryAction) {
+                AsyncToolbarButton(
+                    title: "Check for macOS updates",
+                    systemImage: "arrow.clockwise",
+                    isWorking: store.isScanning,
+                    action: store.scan
+                )
             }
         }
     }
-
-    private var availableUpdates: [MacOSUpdate] { store.macOSUpdates.filter { !$0.isFullInstaller } }
-    private var installers: [MacOSUpdate] { store.macOSUpdates.filter(\.isFullInstaller) }
 
     private func systemRow(_ update: MacOSUpdate) -> some View {
         StandardItemRow {
@@ -59,7 +88,7 @@ struct MacOSUpdatesView: View {
         } content: {
             ItemIdentityView(
                 title: update.title,
-                detail: (update.isFullInstaller ? "Full installer" : "System update") + (update.size.map { " · \($0)" } ?? ""),
+                detail: (update.isFullInstaller ? "Full installer" : "System update") + (formattedSize(update.size).map { " · \($0)" } ?? ""),
                 prereleaseChannel: update.prereleaseChannel
             )
         } accessories: {
@@ -83,5 +112,30 @@ struct MacOSUpdatesView: View {
             .frame(width: 150)
             .disabled(store.isWorking(.macOSUpdate(update.id)))
         }
+    }
+
+    private func formattedSize(_ value: String?) -> String? {
+        guard let value else { return nil }
+
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let units: [(suffix: String, multiplier: Double)] = [
+            ("kib", 1_024),
+            ("mib", 1_048_576),
+            ("gib", 1_073_741_824),
+            ("kb", 1_000),
+            ("mb", 1_000_000),
+            ("gb", 1_000_000_000)
+        ]
+
+        for unit in units where trimmed.lowercased().hasSuffix(unit.suffix) {
+            let numberText = trimmed.dropLast(unit.suffix.count).trimmingCharacters(in: .whitespaces)
+            guard let number = Double(numberText) else { continue }
+            return ByteCountFormatter.string(
+                fromByteCount: Int64(number * unit.multiplier),
+                countStyle: .file
+            )
+        }
+
+        return trimmed
     }
 }

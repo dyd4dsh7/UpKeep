@@ -1,12 +1,41 @@
 import SwiftUI
 
+private struct GlobalSearchResults {
+    let apps: [InstalledApp]
+    let adoptableApps: [AdoptableApp]
+    let homebrewPackages: [HomebrewPackage]
+    let developerPackages: [DeveloperPackage]
+    let models: [LocalLLMModel]
+    let macOSUpdates: [MacOSUpdate]
+    let history: [UpdateRecord]
+
+    var isEmpty: Bool {
+        apps.isEmpty && adoptableApps.isEmpty && homebrewPackages.isEmpty
+            && developerPackages.isEmpty && models.isEmpty && macOSUpdates.isEmpty
+            && history.isEmpty
+    }
+
+    var identity: String {
+        [
+            apps.map(\.id),
+            adoptableApps.map(\.id),
+            homebrewPackages.map(\.id),
+            developerPackages.map(\.id),
+            models.map(\.id),
+            macOSUpdates.map(\.id),
+            history.map { $0.id.uuidString }
+        ].flatMap { $0 }.joined(separator: "|")
+    }
+}
+
 struct GlobalSearchView: View {
     @EnvironmentObject private var store: UpkeepStore
     @StateObject private var searchState = GlobalSearchState()
 
     var body: some View {
+        let results = searchResults
         VStack(spacing: 0) {
-            if resultCount == 0 {
+            if results.isEmpty {
                 ContentUnavailableView {
                     Label("No Results", systemImage: "magnifyingglass")
                 } description: {
@@ -16,41 +45,42 @@ struct GlobalSearchView: View {
                         .buttonStyle(.borderedProminent)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .upkeepStateTransition()
             } else {
                 List(selection: $searchState.selection) {
-                    if !matchingApps.isEmpty {
+                    if !results.apps.isEmpty {
                         Section("Applications") {
-                            ForEach(matchingApps) { app in appRow(app) }
+                            ForEach(results.apps) { app in appRow(app) }
                         }
                     }
-                    if !matchingAdoptableApps.isEmpty {
+                    if !results.adoptableApps.isEmpty {
                         Section("Adoptable Apps") {
-                            ForEach(matchingAdoptableApps) { item in adoptableRow(item) }
+                            ForEach(results.adoptableApps) { item in adoptableRow(item) }
                         }
                     }
-                    if !matchingHomebrewPackages.isEmpty {
+                    if !results.homebrewPackages.isEmpty {
                         Section("Homebrew Packages") {
-                            ForEach(matchingHomebrewPackages) { package in homebrewRow(package) }
+                            ForEach(results.homebrewPackages) { package in homebrewRow(package) }
                         }
                     }
-                    if !matchingDeveloperPackages.isEmpty {
+                    if !results.developerPackages.isEmpty {
                         Section("Developer Packages") {
-                            ForEach(matchingDeveloperPackages) { package in developerRow(package) }
+                            ForEach(results.developerPackages) { package in developerRow(package) }
                         }
                     }
-                    if !matchingModels.isEmpty {
+                    if !results.models.isEmpty {
                         Section("AI Models") {
-                            ForEach(matchingModels) { model in modelRow(model) }
+                            ForEach(results.models) { model in modelRow(model) }
                         }
                     }
-                    if !matchingMacOSUpdates.isEmpty {
+                    if !results.macOSUpdates.isEmpty {
                         Section("macOS") {
-                            ForEach(matchingMacOSUpdates) { update in macOSRow(update) }
+                            ForEach(results.macOSUpdates) { update in macOSRow(update) }
                         }
                     }
-                    if !matchingHistory.isEmpty {
+                    if !results.history.isEmpty {
                         Section("Update History") {
-                            ForEach(matchingHistory) { record in historyRow(record) }
+                            ForEach(results.history) { record in historyRow(record) }
                         }
                     }
                 }
@@ -62,12 +92,14 @@ struct GlobalSearchView: View {
                 .onChange(of: query) { _, _ in
                     searchState.selection = nil
                 }
+                .upkeepStateTransition()
             }
         }
+        .upkeepAnimated(for: results.isEmpty ? "empty:\(query)" : results.identity)
     }
 
     private var query: String {
-        store.searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        store.searchText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var displayQuery: String {
@@ -116,14 +148,20 @@ struct GlobalSearchView: View {
         }.sorted { $0.date > $1.date }
     }
 
-    private var resultCount: Int {
-        matchingApps.count + matchingAdoptableApps.count + matchingHomebrewPackages.count
-            + matchingDeveloperPackages.count + matchingModels.count + matchingMacOSUpdates.count
-            + matchingHistory.count
+    private var searchResults: GlobalSearchResults {
+        GlobalSearchResults(
+            apps: matchingApps,
+            adoptableApps: matchingAdoptableApps,
+            homebrewPackages: matchingHomebrewPackages,
+            developerPackages: matchingDeveloperPackages,
+            models: matchingModels,
+            macOSUpdates: matchingMacOSUpdates,
+            history: matchingHistory
+        )
     }
 
     private func matches(_ values: String?...) -> Bool {
-        values.contains { $0?.lowercased().contains(query) == true }
+        values.contains { $0?.localizedCaseInsensitiveContains(query) == true }
     }
 
     private func appRow(_ app: InstalledApp) -> some View {
@@ -237,9 +275,9 @@ struct GlobalSearchView: View {
         store.updateInspectorSelection = nil
         switch selection {
         case let .application(id):
-            store.selectedApp = store.apps.first { $0.id == id }
+            store.selectedApp = store.app(forID: id)
         case let .adoptable(id):
-            store.selectedApp = store.adoptableApps.first { $0.id == id }?.app
+            store.selectedApp = store.adoptableApp(forID: id)?.app
         case let .homebrew(id):
             store.selectedPackageID = id
             store.updateInspectorSelection = .homebrew(id)

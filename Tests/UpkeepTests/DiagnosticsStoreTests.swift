@@ -61,3 +61,22 @@ import Testing
     #expect(store.entries().isEmpty)
     #expect(DiagnosticsStore(fileURL: fileURL).entries().isEmpty)
 }
+
+@Test func diagnosticsLoadedFromDiskAreRedactedAgain() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("upkeep-diagnostics-tests-\(UUID().uuidString)", isDirectory: true)
+    let fileURL = directory.appendingPathComponent("diagnostics.json")
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let rawEntry = #"""
+        [{"id":"00000000-0000-0000-0000-000000000001","date":"2026-08-24T00:00:00Z","level":"Error","category":"Update Source","message":"Authorization: Bearer ghp_1234567890abcdefghijklmnop","metadata":{"URL":"https://example.com/feed?token=super-secret-value"}}]
+        """#
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    try Data(rawEntry.utf8).write(to: fileURL)
+
+    let loaded = DiagnosticsStore(fileURL: fileURL).entries()
+    #expect(loaded.count == 1)
+    #expect(loaded[0].message.contains("<redacted>"))
+    #expect(!loaded[0].message.contains("ghp_1234567890abcdefghijklmnop"))
+    #expect(!loaded[0].metadata.values.joined().contains("super-secret-value"))
+}

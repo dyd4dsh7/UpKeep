@@ -8,12 +8,14 @@ struct AllAppsView: View {
     let systemImage: String
 
     var body: some View {
+        let visibleApps = displayedApps
         VStack(spacing: 0) {
-            if displayedApps.isEmpty {
+            if visibleApps.isEmpty {
                 emptyState
+                    .upkeepStateTransition()
             } else {
                 List(selection: selectedAppID) {
-                    ForEach(displayedApps) { app in
+                    ForEach(visibleApps) { app in
                     StandardItemRow {
                         AppIcon(url: app.url, size: 36)
                     } content: {
@@ -26,15 +28,14 @@ struct AllAppsView: View {
                         )
                     } accessories: {
                         if store.isRefreshing(app) {
-                            ProgressView().controlSize(.small)
-                                .accessibilityLabel("Refreshing \(app.name)")
+                            RefreshingIndicator(itemName: app.name)
                         }
                         versions(for: app)
                     }
                     .tag(app.id)
                     .contentShape(Rectangle())
                     .contextMenu {
-                        if let update = store.updates.first(where: { $0.app.id == app.id }) {
+                        if let update = store.update(for: app) {
                             Button(update.actionTitle) { Task { await store.performUpdate(update) } }
                                 .disabled(store.isUpdating(update))
                         }
@@ -44,7 +45,7 @@ struct AllAppsView: View {
                         if let exclusion = activeExclusion(for: app) {
                             Button("Restore Updates") { store.restore(exclusion) }
                         } else {
-                            if let update = store.updates.first(where: { $0.app.id == app.id }) {
+                            if let update = store.update(for: app) {
                                 UpdateExclusionOptions(
                                     skipTitle: "Skip Version \(update.availableVersion)",
                                     ignoreTitle: "Ignore \(app.name) Indefinitely",
@@ -77,14 +78,16 @@ struct AllAppsView: View {
                     }
                 }
                 .listStyle(.inset)
+                .upkeepStateTransition()
             }
         }
+        .upkeepAnimated(for: visibleApps.map(\.id))
         .toolbar { listToolbar }
     }
 
     private func hasHomebrewAdoptionOption(for app: InstalledApp) -> Bool {
-        store.adoptableApps.contains { $0.app.id == app.id } ||
-            store.updates.first(where: { $0.app.id == app.id })?.candidates.contains(where: \.requiresHomebrewAdoption) == true
+        store.adoptableApp(for: app) != nil ||
+            store.update(for: app)?.candidates.contains(where: \.requiresHomebrewAdoption) == true
     }
 
     @ToolbarContentBuilder private var listToolbar: some ToolbarContent {
@@ -92,6 +95,9 @@ struct AllAppsView: View {
             appSortMenu
             appFilterMenu
             ListDensityButton()
+        }
+        upkeepToolbarSpacer()
+        ToolbarItem(placement: .primaryAction) {
             ScanToolbarButton()
         }
     }
@@ -223,8 +229,8 @@ struct AllAppsView: View {
             let comparison: ComparisonResult
             switch store.appSortOrder {
             case .recommended:
-                let leftHasUpdate = store.updates.contains { $0.app.id == left.id }
-                let rightHasUpdate = store.updates.contains { $0.app.id == right.id }
+                let leftHasUpdate = store.update(for: left) != nil
+                let rightHasUpdate = store.update(for: right) != nil
                 if leftHasUpdate != rightHasUpdate { return leftHasUpdate }
                 comparison = left.name.localizedStandardCompare(right.name)
             case .name:
@@ -239,29 +245,17 @@ struct AllAppsView: View {
                     update(for: right)?.availableVersion ?? right.installedVersion
                 )
             case .installDate:
-                comparison = compareDate(left.installedAt, right.installedAt, leftName: left.name, rightName: right.name)
+                comparison = ListSorting.compareDates(
+                    left.installedAt, right.installedAt,
+                    leftName: left.name, rightName: right.name
+                )
             case .recentlyUpdated:
-                comparison = compareDate(left.modifiedAt, right.modifiedAt, leftName: left.name, rightName: right.name)
+                comparison = ListSorting.compareDates(
+                    left.modifiedAt, right.modifiedAt,
+                    leftName: left.name, rightName: right.name
+                )
             }
             return store.appSortAscending ? comparison == .orderedAscending : comparison == .orderedDescending
-        }
-    }
-
-    private func compareDate(
-        _ left: Date?,
-        _ right: Date?,
-        leftName: String,
-        rightName: String
-    ) -> ComparisonResult {
-        switch (left, right) {
-        case let (left?, right?) where left != right:
-            return left < right ? .orderedAscending : .orderedDescending
-        case (nil, .some):
-            return .orderedAscending
-        case (.some, nil):
-            return .orderedDescending
-        default:
-            return leftName.localizedStandardCompare(rightName)
         }
     }
 
@@ -269,7 +263,7 @@ struct AllAppsView: View {
         switch store.appListFilter {
         case .all: true
         case .updates: update(for: app) != nil
-        case .adoptable: store.adoptableApps.contains { $0.app.id == app.id }
+        case .adoptable: store.adoptableApp(for: app) != nil
         case .appStore: app.updateManagement == .appStore
         case .testFlight: app.updateManagement == .testFlight
         case .setapp: app.updateManagement == .setapp
@@ -306,7 +300,7 @@ struct AllAppsView: View {
     }
 
     private func update(for app: InstalledApp) -> AvailableUpdate? {
-        store.updates.first { $0.app.id == app.id }
+        store.update(for: app)
     }
 
     private func sourceSummary(for app: InstalledApp) -> String {
@@ -327,7 +321,7 @@ struct AllAppsView: View {
                 color: .orange
             )
             InstalledVersionView(version: app.installedVersion)
-        } else if let update = store.visibleUpdates.first(where: { $0.app.id == app.id }) {
+        } else if let update = store.visibleUpdate(for: app) {
             VersionTransitionView(current: app.installedVersion, latest: update.availableVersion)
         } else {
             InstalledVersionView(version: app.installedVersion)
@@ -342,8 +336,8 @@ struct AppDetailView: View {
     @StateObject private var detailState = AppDetailState()
     let app: InstalledApp
 
-    private var update: AvailableUpdate? { store.updates.first { $0.app.id == app.id } }
-    private var adoptableItem: AdoptableApp? { store.adoptableApps.first { $0.app.id == app.id } }
+    private var update: AvailableUpdate? { store.update(for: app) }
+    private var adoptableItem: AdoptableApp? { store.adoptableApp(for: app) }
     private var updateAdoptsWithHomebrew: Bool {
         guard let update, let adoptableItem else { return false }
         return update.source == .homebrew && update.primaryCandidate.requiresHomebrewAdoption && update.homebrewToken == adoptableItem.caskToken
@@ -377,10 +371,6 @@ struct AppDetailView: View {
             }
         }
         .frame(minHeight: 500)
-        .alert("The operation couldn’t be completed", isPresented: Binding(
-            get: { store.errorMessage != nil }, set: { if !$0 { store.errorMessage = nil } }
-        )) { Button("OK", role: .cancel) {} } message: { Text(store.errorMessage ?? "Unknown error") }
-        .upkeepRunningAppConfirmationAlert(store)
         .task(id: detailState.showsTechnicalDetails ? app.id : nil) {
             guard detailState.showsTechnicalDetails else { return }
             await inspection.load(app)
@@ -619,6 +609,11 @@ struct AppDetailView: View {
         }
         .padding(16)
         .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 14))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(.separator.opacity(0.55), lineWidth: 0.5)
+        }
+        .upkeepAnimated(for: statusTitle)
     }
 
     @ViewBuilder
@@ -753,17 +748,19 @@ struct AppDetailView: View {
                 }
                 .buttonStyle(.bordered)
             }
-            Button { NSWorkspace.shared.open(app.url) } label: {
-                Label("Open App", systemImage: "arrow.up.forward.app")
-                    .frame(maxWidth: .infinity)
+            if update?.actionTitle != "Open App" {
+                Button { NSWorkspace.shared.open(app.url) } label: {
+                    Label("Open App", systemImage: "arrow.up.forward.app")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
             }
-            .buttonStyle(.bordered)
             Button { NSWorkspace.shared.activateFileViewerSelecting([app.url]) } label: {
                 Label("Show in Finder", systemImage: "folder")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
-            if let sourceURL {
+            if let sourceURL, sourceURL.standardizedFileURL != app.url.standardizedFileURL {
                 Button { NSWorkspace.shared.open(sourceURL) } label: {
                     Label(sourceActionTitle, systemImage: sourceActionSystemImage)
                         .frame(maxWidth: .infinity)
@@ -895,7 +892,7 @@ struct AppDetailView: View {
         switch update?.source ?? store.source(for: app) {
         case .appStore: "Open App Store"
         case .homebrew: "Open Homebrew"
-        case .developer: "Open App"
+        case .developer: sourceURL?.isFileURL == true ? "Open App" : "Open Update Page"
         case .github: update == nil ? "Open GitHub" : "Open Release"
         case .sparkle: update?.actionURL == nil ? "Open Sparkle" : "Open Download"
         case nil: "Open Source"
@@ -906,7 +903,7 @@ struct AppDetailView: View {
         switch update?.source ?? store.source(for: app) {
         case .appStore: "storefront"
         case .homebrew: "shippingbox"
-        case .developer: "arrow.triangle.2.circlepath"
+        case .developer: sourceURL?.isFileURL == true ? "arrow.triangle.2.circlepath" : "arrow.up.right.square"
         case .github: "arrow.up.right.square"
         case .sparkle: update?.requiresInAppInstallation == true ? "arrow.down.circle" : "wand.and.stars"
         case nil: "arrow.up.right.square"

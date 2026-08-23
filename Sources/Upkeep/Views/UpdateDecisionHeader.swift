@@ -11,6 +11,7 @@ struct UpdateDecisionHeader: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text(title)
                     .font(.title2.bold())
+                    .contentTransition(.numericText())
                 Text(detail)
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -41,6 +42,8 @@ struct UpdateDecisionHeader: View {
         .padding(.vertical, 16)
         .background(.bar)
         .accessibilityElement(children: .contain)
+        .upkeepAnimated(for: recommendedCount)
+        .upkeepAnimated(for: attentionCount)
     }
 
     private var title: String {
@@ -75,11 +78,15 @@ private struct UpdateDecisionMetric: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text("\(value)")
                     .font(.headline.monospacedDigit())
+                    .contentTransition(.numericText())
                 Text(label)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(color.opacity(0.09), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(value) \(label.lowercased()) updates")
     }

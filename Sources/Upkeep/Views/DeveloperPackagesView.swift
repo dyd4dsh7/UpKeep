@@ -6,6 +6,7 @@ struct DeveloperPackagesView: View {
     @State private var cleanupResult: PackageCleanupResult?
 
     var body: some View {
+        let packages = sortedPackages
         VStack(spacing: 0) {
             if let cleanupResult {
                 PackageCleanupResultBanner(result: cleanupResult) {
@@ -13,21 +14,28 @@ struct DeveloperPackagesView: View {
                 }
                 Divider()
             }
-            if store.filteredDeveloperPackages.isEmpty {
+            if packages.isEmpty {
                 ContentUnavailableView(
                     "No packages found", systemImage: "checkmark.seal.fill",
                     description: Text("Installed package managers are checked automatically.")
                 ).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .upkeepStateTransition()
             } else {
-                packageList
+                packageList(packages)
+                    .upkeepStateTransition()
             }
         }
+        .upkeepAnimated(for: packages.map(\.id))
+        .upkeepAnimated(for: cleanupResult?.id)
         .toolbar { packageToolbar }
     }
 
     @ToolbarContentBuilder private var packageToolbar: some ToolbarContent {
-        ToolbarItemGroup(placement: .primaryAction) {
+        ToolbarItem(placement: .primaryAction) {
             PackageCleanupMenu(targets: developerCleanupTargets, result: $cleanupResult)
+        }
+        upkeepToolbarSpacer()
+        ToolbarItem(placement: .primaryAction) {
             Menu {
                 ForEach(developerFilters, id: \.self) { filter in
                     Button {
@@ -46,6 +54,9 @@ struct DeveloperPackagesView: View {
             }
             .fixedSize()
             .toolbarControlLabel("Filter developer packages")
+        }
+        upkeepToolbarSpacer()
+        ToolbarItem(placement: .primaryAction) {
             Menu {
                 Button("Check All Managers") { Task { await store.scanDeveloperPackages(manager: nil) } }
                 Divider()
@@ -61,11 +72,11 @@ struct DeveloperPackagesView: View {
                     Button("Check \(manager.rawValue)") { Task { await store.scanDeveloperPackages(manager: manager) } }
                 }
             } label: {
-                if isCheckingDeveloperPackages {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Label("Check Packages", systemImage: "arrow.clockwise")
-                }
+                WorkingToolbarLabel(
+                    title: "Check Packages",
+                    systemImage: "arrow.clockwise",
+                    isWorking: isCheckingDeveloperPackages
+                )
             }
             .toolbarControlLabel("Check developer packages")
             .disabled(isCheckingDeveloperPackages)
@@ -76,8 +87,8 @@ struct DeveloperPackagesView: View {
         store.packageCleanupTargets.filter { $0.kind != .homebrew }
     }
 
-    private var packageList: some View {
-        List(sortedPackages, selection: $store.navigation.selectedDeveloperPackageID) { package in
+    private func packageList(_ packages: [DeveloperPackage]) -> some View {
+        List(packages, selection: $store.navigation.selectedDeveloperPackageID) { package in
             DeveloperPackageRow(
                 store: store,
                 package: package,
@@ -89,8 +100,8 @@ struct DeveloperPackagesView: View {
             .tag(package.id)
         }
         .listStyle(.inset)
-        .onAppear { ensurePackageSelection() }
-        .onChange(of: store.filteredDeveloperPackages.map(\.id)) { _, _ in ensurePackageSelection() }
+        .onAppear { ensurePackageSelection(in: packages) }
+        .onChange(of: packages.map(\.id)) { _, _ in ensurePackageSelection(in: packages) }
     }
 
     private var sortedPackages: [DeveloperPackage] {
@@ -102,9 +113,9 @@ struct DeveloperPackagesView: View {
         }
     }
 
-    private func ensurePackageSelection() {
-        guard !store.filteredDeveloperPackages.contains(where: { $0.id == store.selectedDeveloperPackageID }) else { return }
-        store.selectedDeveloperPackageID = store.filteredDeveloperPackages.first?.id
+    private func ensurePackageSelection(in packages: [DeveloperPackage]) {
+        guard !packages.contains(where: { $0.id == store.selectedDeveloperPackageID }) else { return }
+        store.selectedDeveloperPackageID = packages.first?.id
     }
 
     private var isCheckingDeveloperPackages: Bool {
@@ -139,7 +150,7 @@ struct BundledPackageIcon: View {
 
     var body: some View {
         Group {
-            if let image = BundledPackageImageCache.shared.image(named: name) {
+            if let image = BundledImageCache.shared.image(named: name) {
                 Image(nsImage: image).resizable().scaledToFit()
             } else {
                 Image(systemName: "shippingbox.fill").resizable().scaledToFit().padding(size * 0.2)
@@ -147,28 +158,6 @@ struct BundledPackageIcon: View {
         }
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: size * 0.2))
-    }
-}
-
-@MainActor
-private final class BundledPackageImageCache {
-    static let shared = BundledPackageImageCache()
-
-    private var images: [String: NSImage] = [:]
-    private var missingImageNames = Set<String>()
-
-    func image(named name: String) -> NSImage? {
-        if let image = images[name] {
-            return image
-        }
-        guard !missingImageNames.contains(name),
-              let url = bundledPackageAssetURL(named: name),
-              let image = NSImage(contentsOf: url) else {
-            missingImageNames.insert(name)
-            return nil
-        }
-        images[name] = image
-        return image
     }
 }
 
@@ -210,8 +199,7 @@ private struct DeveloperPackageRow: View, Equatable {
             )
         } accessories: {
             if isRefreshing {
-                ProgressView().controlSize(.small)
-                    .accessibilityLabel("Refreshing \(package.name)")
+                RefreshingIndicator(itemName: package.name)
             }
             packageVersions
             if package.isOutdated && exclusion == nil {

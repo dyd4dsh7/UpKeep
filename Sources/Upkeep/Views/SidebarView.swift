@@ -50,27 +50,46 @@ struct UpkeepSidebarView: View {
             }
         }
         .listStyle(.sidebar)
+        .upkeepAnimated(for: sidebarPresentationKey)
     }
 
     private func item(_ destination: SidebarDestination) -> some View {
-        Label {
+        let count = store.count(for: destination)
+        return Label {
             HStack {
                 Text(destination.rawValue)
                 Spacer()
-                let count = store.count(for: destination)
                 if count > 0 {
                     Text("\(count)")
-                        .font(.caption)
+                        .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
+                        .contentTransition(.numericText())
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(.quaternary, in: Capsule())
                 }
             }
         } icon: {
             Image(systemName: destination.systemImage)
-                .symbolRenderingMode(.monochrome)
-                .foregroundStyle(.secondary)
+                .symbolRenderingMode(.hierarchical)
                 .frame(width: 18)
         }
         .tag(destination)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(destination.rawValue)
+        .accessibilityValue(count > 0 ? "\(count) items" : "No items")
+    }
+
+    private var sidebarPresentationKey: String {
+        [
+            settings.sidebarViewMode.rawValue,
+            settings.checkHomebrew.description,
+            settings.checkMacOS.description,
+            settings.checkLocalModels.description,
+            settings.enabledDeveloperManagers.map(\.rawValue).sorted().joined(separator: ","),
+            store.installedDeveloperManagers.map(\.rawValue).sorted().joined(separator: ","),
+            store.localModels.isEmpty.description
+        ].joined(separator: "|")
     }
 }

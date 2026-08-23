@@ -86,24 +86,37 @@ struct DiagnosticEntry: Identifiable, Codable, Hashable, Sendable {
 }
 
 enum DiagnosticRedactor {
+    // NSRegularExpression instances are immutable and safe to reuse across the
+    // concurrent scanner tasks that create buffered diagnostic entries.
+    private final class CompiledRules: @unchecked Sendable {
+        let values: [(expression: NSRegularExpression, replacement: String)]
+
+        init() {
+            values = [
+                (#"(?i)(https?://)[^/\s:@]+:[^@\s/]+@"#, "$1<redacted>@"),
+                (#"(?i)(authorization\s*[:=]\s*(?:bearer|basic)\s+)[^\s,;]+"#, "$1<redacted>"),
+                (#"(?i)((?:api[_-]?key|access[_-]?token|auth[_-]?token|password|secret)\s*[:=]\s*)[^\s,;]+"#, "$1<redacted>"),
+                (#"(?i)(https?://[^\s?#]+)\?[^\s#]+"#, "$1?<redacted>"),
+                (#"(?i)([?&](?:token|key|signature|sig|password|secret|auth)=)[^&#\s]+"#, "$1<redacted>"),
+                (#"\b(?:ghp|github_pat|sk|xox[baprs])[-_][A-Za-z0-9_-]{12,}\b"#, "<redacted-token>")
+            ].map { pattern, replacement in
+                (try! NSRegularExpression(pattern: pattern), replacement)
+            }
+        }
+    }
+
+    private static let homePath = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
+    private static let rules = CompiledRules()
+
     static func redact(_ input: String) -> String {
         var value = input
-        let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
-        if !home.isEmpty { value = value.replacingOccurrences(of: home, with: "~") }
+        if !homePath.isEmpty { value = value.replacingOccurrences(of: homePath, with: "~") }
 
-        let patterns: [(String, String)] = [
-            (#"(?i)(https?://)[^/\s:@]+:[^@\s/]+@"#, "$1<redacted>@"),
-            (#"(?i)(authorization\s*[:=]\s*(?:bearer|basic)\s+)[^\s,;]+"#, "$1<redacted>"),
-            (#"(?i)((?:api[_-]?key|access[_-]?token|auth[_-]?token|password|secret)\s*[:=]\s*)[^\s,;]+"#, "$1<redacted>"),
-            (#"(?i)(https?://[^\s?#]+)\?[^\s#]+"#, "$1?<redacted>"),
-            (#"(?i)([?&](?:token|key|signature|sig|password|secret|auth)=)[^&#\s]+"#, "$1<redacted>"),
-            (#"\b(?:ghp|github_pat|sk|xox[baprs])[-_][A-Za-z0-9_-]{12,}\b"#, "<redacted-token>")
-        ]
-        for (pattern, replacement) in patterns {
-            value = value.replacingOccurrences(
-                of: pattern,
-                with: replacement,
-                options: .regularExpression
+        for rule in rules.values {
+            value = rule.expression.stringByReplacingMatches(
+                in: value,
+                range: NSRange(value.startIndex..<value.endIndex, in: value),
+                withTemplate: rule.replacement
             )
         }
         return String(value.prefix(2_000))

@@ -23,15 +23,131 @@ enum OperationID: Hashable, Sendable {
 
 @MainActor
 final class UpkeepLibraryState: ObservableObject {
-    @Published var apps: [InstalledApp] = []
-    @Published var updates: [AvailableUpdate] = []
-    @Published var homebrewPackages: [HomebrewPackage] = []
-    @Published var adoptableApps: [AdoptableApp] = []
+    @Published var apps: [InstalledApp] = [] { didSet { rebuildAppLookups() } }
+    @Published var updates: [AvailableUpdate] = [] { didSet { rebuildUpdateLookup() } }
+    @Published var homebrewPackages: [HomebrewPackage] = [] { didSet { rebuildHomebrewLookups() } }
+    @Published var adoptableApps: [AdoptableApp] = [] { didSet { rebuildAdoptableLookups() } }
     @Published var macOSUpdates: [MacOSUpdate] = []
     @Published var updateHistory: [UpdateRecord] = []
-    @Published var developerPackages: [DeveloperPackage] = []
+    @Published var developerPackages: [DeveloperPackage] = [] { didSet { rebuildDeveloperPackageLookup() } }
     @Published var installedDeveloperManagers: [DeveloperPackageManager] = []
-    @Published var localModels: [LocalLLMModel] = []
+    @Published var localModels: [LocalLLMModel] = [] { didSet { rebuildLocalModelLookup() } }
+
+    private var appByID: [String: InstalledApp] = [:]
+    private var appIndexByProductName: [String: Int] = [:]
+    private var updateByAppID: [String: AvailableUpdate] = [:]
+    private var homebrewPackageByID: [String: HomebrewPackage] = [:]
+    private var caskIndexByProductName: [String: Int] = [:]
+    private var adoptableAppByID: [String: AdoptableApp] = [:]
+    private var adoptableAppByAppID: [String: AdoptableApp] = [:]
+    private var developerPackageByID: [String: DeveloperPackage] = [:]
+    private var localModelByID: [String: LocalLLMModel] = [:]
+
+    func app(forID id: String) -> InstalledApp? {
+        appByID[id]
+    }
+
+    func update(for appID: String) -> AvailableUpdate? {
+        updateByAppID[appID]
+    }
+
+    func homebrewPackage(forID id: String) -> HomebrewPackage? {
+        homebrewPackageByID[id]
+    }
+
+    func adoptableApp(forID id: String) -> AdoptableApp? {
+        adoptableAppByID[id]
+    }
+
+    func adoptableApp(forAppID id: String) -> AdoptableApp? {
+        adoptableAppByAppID[id]
+    }
+
+    func developerPackage(forID id: String) -> DeveloperPackage? {
+        developerPackageByID[id]
+    }
+
+    func localModel(forID id: String) -> LocalLLMModel? {
+        localModelByID[id]
+    }
+
+    func homebrewPackage(forAppNamed name: String) -> HomebrewPackage? {
+        Self.productNameVariants(name)
+            .compactMap { caskIndexByProductName[$0] }
+            .min()
+            .map { homebrewPackages[$0] }
+    }
+
+    func app(for package: HomebrewPackage) -> InstalledApp? {
+        Self.productNameVariants(package.displayName)
+            .union(Self.productNameVariants(package.token))
+            .compactMap { appIndexByProductName[$0] }
+            .min()
+            .map { apps[$0] }
+    }
+
+    private func rebuildAppLookups() {
+        appByID = Dictionary(apps.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        appIndexByProductName.removeAll(keepingCapacity: true)
+        for (index, app) in apps.enumerated() {
+            for name in Self.productNameVariants(app.name) where appIndexByProductName[name] == nil {
+                appIndexByProductName[name] = index
+            }
+        }
+    }
+
+    private func rebuildUpdateLookup() {
+        updateByAppID = Dictionary(updates.map { ($0.app.id, $0) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    private func rebuildHomebrewLookups() {
+        homebrewPackageByID = Dictionary(
+            homebrewPackages.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        caskIndexByProductName.removeAll(keepingCapacity: true)
+        for (index, package) in homebrewPackages.enumerated() where package.kind == .cask {
+            let names = Self.productNameVariants(package.displayName)
+                .union(Self.productNameVariants(package.token))
+            for name in names where caskIndexByProductName[name] == nil {
+                caskIndexByProductName[name] = index
+            }
+        }
+    }
+
+    private func rebuildAdoptableLookups() {
+        adoptableAppByID = Dictionary(
+            adoptableApps.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        adoptableAppByAppID = Dictionary(
+            adoptableApps.map { ($0.app.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+    }
+
+    private func rebuildDeveloperPackageLookup() {
+        developerPackageByID = Dictionary(
+            developerPackages.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+    }
+
+    private func rebuildLocalModelLookup() {
+        localModelByID = Dictionary(
+            localModels.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+    }
+
+    private static func productNameVariants(_ value: String) -> Set<String> {
+        let normalized = value.lowercased().filter(\.isLetter)
+        var values: Set<String> = [normalized]
+        for suffix in ["desktop", "app"] where normalized.hasSuffix(suffix) && normalized.count > suffix.count {
+            values.insert(String(normalized.dropLast(suffix.count)))
+        }
+        return values
+    }
 }
 
 @MainActor

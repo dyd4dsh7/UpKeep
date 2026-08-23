@@ -79,6 +79,7 @@ final class UpkeepStore: ObservableObject {
     private var periodicTask: Task<Void, Never>?
     private var runningApplicationObservers = Set<AnyCancellable>()
     private var featureStateObservers = Set<AnyCancellable>()
+    private var isRootChangeScheduled = false
     private var didStart = false
     private let startedAt = Date()
     private var versionCache: [String: [String]] = [:]
@@ -99,9 +100,22 @@ final class UpkeepStore: ObservableObject {
          updateExecutionState.objectWillChange, diagnostics.objectWillChange]
             .forEach { publisher in
                 publisher
-                    .sink { [weak self] _ in self?.objectWillChange.send() }
+                    .sink { [weak self] _ in self?.scheduleRootChange() }
                     .store(in: &featureStateObservers)
             }
+    }
+
+    /// Child feature objects can update several related properties in one
+    /// synchronous phase. Publish once after that phase so SwiftUI does not
+    /// invalidate the entire root view tree for every individual assignment.
+    private func scheduleRootChange() {
+        guard !isRootChangeScheduled else { return }
+        isRootChangeScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            isRootChangeScheduled = false
+            objectWillChange.send()
+        }
     }
 
     func isWorking(_ operation: OperationID) -> Bool {
@@ -244,6 +258,39 @@ final class UpkeepStore: ObservableObject {
         return matching(scoped, name: { $0.displayName })
     }
 
+    func app(forID id: String) -> InstalledApp? {
+        library.app(forID: id)
+    }
+
+    func update(for app: InstalledApp) -> AvailableUpdate? {
+        library.update(for: app.id)
+    }
+
+    func visibleUpdate(for app: InstalledApp) -> AvailableUpdate? {
+        guard let update = library.update(for: app.id), !isExcluded(update) else { return nil }
+        return update
+    }
+
+    func homebrewPackage(forID id: String) -> HomebrewPackage? {
+        library.homebrewPackage(forID: id)
+    }
+
+    func adoptableApp(forID id: String) -> AdoptableApp? {
+        library.adoptableApp(forID: id)
+    }
+
+    func adoptableApp(for app: InstalledApp) -> AdoptableApp? {
+        library.adoptableApp(forAppID: app.id)
+    }
+
+    func developerPackage(forID id: String) -> DeveloperPackage? {
+        library.developerPackage(forID: id)
+    }
+
+    func localModel(forID id: String) -> LocalLLMModel? {
+        library.localModel(forID: id)
+    }
+
     func applications(for destination: SidebarDestination) -> [InstalledApp] {
         apps.filter { app in
             switch destination {
@@ -269,12 +316,13 @@ final class UpkeepStore: ObservableObject {
     }
 
     func source(for app: InstalledApp) -> UpdateSource? {
-        updates.first(where: { $0.app.id == app.id })?.source ?? sources(for: app).first
+        library.update(for: app.id)?.source ?? sources(for: app).first
     }
 
     func sources(for app: InstalledApp) -> [UpdateSource] {
         var detected = Set<UpdateSource>()
-        if let update = updates.first(where: { $0.app.id == app.id }) {
+        let update = library.update(for: app.id)
+        if let update {
             detected.formUnion(update.candidates.map(\.source))
         }
         if app.updateManagement == .appStore { detected.insert(.appStore) }
@@ -286,7 +334,7 @@ final class UpkeepStore: ObservableObject {
         }
         let preferredOrder: [UpdateSource] = [.appStore, .homebrew, .developer, .sparkle, .github]
         let ordered = preferredOrder.filter(detected.contains)
-        guard let primary = updates.first(where: { $0.app.id == app.id })?.source else { return ordered }
+        guard let primary = update?.source else { return ordered }
         return [primary] + ordered.filter { $0 != primary }
     }
 
@@ -1668,8 +1716,7 @@ final class UpkeepStore: ObservableObject {
     }
 
     private func matchingApp(for package: HomebrewPackage) -> InstalledApp? {
-        let packageNames = productNameVariants(package.displayName).union(productNameVariants(package.token))
-        return apps.first { !productNameVariants($0.name).isDisjoint(with: packageNames) }
+        library.app(for: package)
     }
 
     func isUnmapped(_ package: HomebrewPackage) -> Bool {
@@ -1677,12 +1724,7 @@ final class UpkeepStore: ObservableObject {
     }
 
     func homebrewPackage(for app: InstalledApp) -> HomebrewPackage? {
-        let appNames = productNameVariants(app.name)
-        return homebrewPackages.first {
-            $0.kind == .cask && !appNames.isDisjoint(
-                with: productNameVariants($0.displayName).union(productNameVariants($0.token))
-            )
-        }
+        library.homebrewPackage(forAppNamed: app.name)
     }
 
     func homebrewPackageApp(for package: HomebrewPackage) -> InstalledApp? {
@@ -1788,17 +1830,6 @@ final class UpkeepStore: ObservableObject {
 
     private func matching<T>(_ values: [T], name: (T) -> String) -> [T] {
         searchText.isEmpty ? values : values.filter { name($0).localizedCaseInsensitiveContains(searchText) }
-    }
-
-    private func normalize(_ value: String) -> String { value.lowercased().filter(\.isLetter) }
-
-    private func productNameVariants(_ value: String) -> Set<String> {
-        let normalized = normalize(value)
-        var values: Set<String> = [normalized]
-        for suffix in ["desktop", "app"] where normalized.hasSuffix(suffix) && normalized.count > suffix.count {
-            values.insert(String(normalized.dropLast(suffix.count)))
-        }
-        return values
     }
 
     private func enabledUpdateSources(for app: InstalledApp) -> Set<UpdateSource> {

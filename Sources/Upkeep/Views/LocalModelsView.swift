@@ -4,38 +4,46 @@ struct LocalModelsView: View {
     @EnvironmentObject private var store: UpkeepStore
 
     var body: some View {
+        let models = sortedModels
         VStack(spacing: 0) {
-            if store.localModels.isEmpty {
+            if models.isEmpty {
                 ContentUnavailableView(
                     "No local models found", systemImage: "brain.head.profile",
                     description: Text("Models appear here when Ollama or LM Studio has models installed.")
                 )
+                .upkeepStateTransition()
             } else {
-                modelList
+                modelList(models)
+                    .upkeepStateTransition()
             }
         }
+        .upkeepAnimated(for: models.map(\.id))
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { Task { await store.scanLocalModels() } } label: {
-                    if store.isWorking(.localModelScan) {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Label("Check Models", systemImage: "arrow.clockwise")
-                    }
-                }
-                .toolbarControlLabel("Check local models")
-                .disabled(store.isWorking(.localModelScan))
+                AsyncToolbarButton(
+                    title: "Check local models",
+                    systemImage: "arrow.clockwise",
+                    isWorking: store.isWorking(.localModelScan),
+                    action: store.scanLocalModels
+                )
             }
         }
     }
 
-    private var modelList: some View {
-        List(sortedModels, selection: $store.navigation.selectedLocalModelID) { model in
-            LocalModelRow(model: model).tag(model.id)
+    private func modelList(_ models: [LocalLLMModel]) -> some View {
+        List(models, selection: $store.navigation.selectedLocalModelID) { model in
+            LocalModelRow(
+                store: store,
+                model: model,
+                exclusion: store.exclusion(for: model),
+                isWorking: store.isWorking(.localModel(model.id))
+            )
+            .equatable()
+            .tag(model.id)
         }
         .listStyle(.inset)
-        .onAppear { ensureModelSelection() }
-        .onChange(of: store.localModels.map(\.id)) { _, _ in ensureModelSelection() }
+        .onAppear { ensureModelSelection(in: models) }
+        .onChange(of: models.map(\.id)) { _, _ in ensureModelSelection(in: models) }
     }
 
     private var sortedModels: [LocalLLMModel] {
@@ -45,15 +53,23 @@ struct LocalModelsView: View {
         }
     }
 
-    private func ensureModelSelection() {
-        guard !store.localModels.contains(where: { $0.id == store.selectedLocalModelID }) else { return }
-        store.selectedLocalModelID = store.localModels.first?.id
+    private func ensureModelSelection(in models: [LocalLLMModel]) {
+        guard !models.contains(where: { $0.id == store.selectedLocalModelID }) else { return }
+        store.selectedLocalModelID = models.first?.id
     }
 }
 
-private struct LocalModelRow: View {
-    @EnvironmentObject private var store: UpkeepStore
+private struct LocalModelRow: View, Equatable {
+    let store: UpkeepStore
     let model: LocalLLMModel
+    let exclusion: UpdateExclusion?
+    let isWorking: Bool
+
+    nonisolated static func == (left: Self, right: Self) -> Bool {
+        left.model == right.model
+            && left.exclusion == right.exclusion
+            && left.isWorking == right.isWorking
+    }
 
     var body: some View {
         StandardItemRow {
@@ -65,7 +81,7 @@ private struct LocalModelRow: View {
                 prereleaseChannel: model.prereleaseChannel
             )
         } accessories: {
-            if let exclusion = store.exclusion(for: model) {
+            if let exclusion {
                 ItemStatusView(
                     title: exclusion.mode.rawValue,
                     systemImage: exclusion.mode == .ignored ? "eye.slash" : "forward.end",
@@ -77,15 +93,15 @@ private struct LocalModelRow: View {
             } else {
                 InstalledVersionView(version: model.installedRevision)
             }
-            if model.isOutdated && !store.isExcluded(model) {
+            if model.isOutdated && exclusion == nil {
                 Button { Task { await store.updateLocalModel(model) } } label: {
                     WorkingActionLabel(
-                        isWorking: store.isWorking(.localModel(model.id)),
+                        isWorking: isWorking,
                         idleTitle: "Update"
                     )
                 }
                     .buttonStyle(.bordered).controlSize(.small)
-                    .disabled(store.isWorking(.localModel(model.id)))
+                    .disabled(isWorking)
                     .frame(width: 120)
             } else {
                 Color.clear.frame(width: 120, height: 1).accessibilityHidden(true)
@@ -93,14 +109,12 @@ private struct LocalModelRow: View {
         }
         .contextMenu {
             Group {
-                if store.isExcluded(model) {
-                    if let exclusion = store.exclusion(for: model) {
-                        Button("Restore Updates") { store.restore(exclusion) }
-                    }
+                if let exclusion {
+                    Button("Restore Updates") { store.restore(exclusion) }
                 } else {
                     if model.isOutdated {
                         Button("Update") { Task { await store.updateLocalModel(model) } }
-                            .disabled(store.isWorking(.localModel(model.id)))
+                            .disabled(isWorking)
                         Divider()
                     }
                     UpdateExclusionOptions(
@@ -201,8 +215,7 @@ struct LocalModelRuntimeIcon: View {
 
     var body: some View {
         Group {
-            if let url = Bundle.module.url(forResource: runtime.assetName, withExtension: "png"),
-               let image = NSImage(contentsOf: url) {
+            if let image = BundledImageCache.shared.image(named: runtime.assetName, extensions: ["png"]) {
                 Image(nsImage: image).resizable().scaledToFit()
             } else {
                 Image(systemName: runtime.systemImage)

@@ -1,54 +1,84 @@
 import AppKit
 import SwiftUI
 
+private struct UpdateListSnapshot {
+    let applications: [AvailableUpdate]
+    let homebrewPackages: [HomebrewPackage]
+    let macOSUpdates: [MacOSUpdate]
+    let developerPackages: [DeveloperPackage]
+    let models: [LocalLLMModel]
+
+    var isEmpty: Bool {
+        applications.isEmpty && homebrewPackages.isEmpty && macOSUpdates.isEmpty
+            && developerPackages.isEmpty && models.isEmpty
+    }
+
+    var identity: String {
+        let appIDs = applications.map { "app:\($0.app.id)" }
+        let packageIDs = homebrewPackages.map { "homebrew:\($0.id)" }
+        let systemIDs = macOSUpdates.map { "macos:\($0.id)" }
+        let developerIDs = developerPackages.map { "developer:\($0.id)" }
+        let modelIDs = models.map { "model:\($0.id)" }
+        return (appIDs + packageIDs + systemIDs + developerIDs + modelIDs).joined(separator: "|")
+    }
+}
+
 struct UpdatesView: View {
     @EnvironmentObject private var store: UpkeepStore
     @EnvironmentObject private var viewState: UpdateViewState
 
     var body: some View {
+        let snapshot = listSnapshot
         VStack(spacing: 0) {
             if store.isScanning && store.apps.isEmpty {
                 scanningState
-            } else if appUpdates.isEmpty && filteredPackages.isEmpty && systemUpdates.isEmpty && filteredDeveloperPackages.isEmpty && filteredModels.isEmpty {
+                    .upkeepStateTransition()
+            } else if snapshot.isEmpty {
                 emptyState
+                    .upkeepStateTransition()
             } else {
-                UpdateDecisionHeader(
-                    recommendedCount: store.recommendedBatchUpdateItems.count,
-                    attentionCount: store.availableBatchUpdateItems.count - store.recommendedBatchUpdateItems.count,
-                    isWorking: store.isWorking(.unifiedBatch),
-                    review: { store.isShowingBatchReview = true }
-                )
-                Divider()
-                List(selection: selectedUpdateItemID) {
-                    if !appUpdates.isEmpty {
-                        Section("Applications") {
-                            ForEach(appUpdates) { UpdateCard(update: $0) }
+                VStack(spacing: 0) {
+                    UpdateDecisionHeader(
+                        recommendedCount: store.recommendedBatchUpdateItems.count,
+                        attentionCount: store.availableBatchUpdateItems.count - store.recommendedBatchUpdateItems.count,
+                        isWorking: store.isWorking(.unifiedBatch),
+                        review: { store.isShowingBatchReview = true }
+                    )
+                    Divider()
+                    List(selection: selectedUpdateItemID) {
+                        if !snapshot.applications.isEmpty {
+                            Section("Applications") {
+                                ForEach(snapshot.applications) { UpdateCard(update: $0) }
+                            }
+                        }
+                        if !snapshot.homebrewPackages.isEmpty {
+                            Section("Homebrew Packages") {
+                                ForEach(snapshot.homebrewPackages) { HomebrewUpdateCard(package: $0) }
+                            }
+                        }
+                        if !snapshot.macOSUpdates.isEmpty {
+                            Section("macOS") {
+                                ForEach(snapshot.macOSUpdates) { MacOSUpdateCard(update: $0) }
+                            }
+                        }
+                        if !snapshot.developerPackages.isEmpty {
+                            Section("Developer Packages") {
+                                ForEach(snapshot.developerPackages) { DeveloperUpdateCard(package: $0) }
+                            }
+                        }
+                        if !snapshot.models.isEmpty {
+                            Section("AI Models") {
+                                ForEach(snapshot.models) { LocalModelUpdateCard(model: $0) }
+                            }
                         }
                     }
-                    if !filteredPackages.isEmpty {
-                        Section("Homebrew Packages") {
-                            ForEach(filteredPackages) { HomebrewUpdateCard(package: $0) }
-                        }
-                    }
-                    if !systemUpdates.isEmpty {
-                        Section("macOS") {
-                            ForEach(systemUpdates) { MacOSUpdateCard(update: $0) }
-                        }
-                    }
-                    if !filteredDeveloperPackages.isEmpty {
-                        Section("Developer Packages") {
-                            ForEach(filteredDeveloperPackages) { DeveloperUpdateCard(package: $0) }
-                        }
-                    }
-                    if !filteredModels.isEmpty {
-                        Section("AI Models") {
-                            ForEach(filteredModels) { LocalModelUpdateCard(model: $0) }
-                        }
-                    }
+                    .listStyle(.inset)
                 }
-                .listStyle(.inset)
+                .upkeepStateTransition()
             }
         }
+        .upkeepAnimated(for: store.isScanning && store.apps.isEmpty ? "scanning" : snapshot.isEmpty ? "empty" : "content")
+        .upkeepAnimated(for: snapshot.identity)
         .sheet(isPresented: $store.navigation.isShowingBatchReview) {
             BatchUpdateSheet(items: store.availableBatchUpdateItems)
                 .environmentObject(store)
@@ -61,6 +91,9 @@ struct UpdatesView: View {
             updateSortMenu
             updateFilterMenu
             ListDensityButton()
+        }
+        upkeepToolbarSpacer()
+        ToolbarItem(placement: .primaryAction) {
             ScanToolbarButton()
         }
     }
@@ -173,6 +206,16 @@ struct UpdatesView: View {
         return store.filteredUpdates.sorted { compareUpdates($0, $1) }
     }
 
+    private var listSnapshot: UpdateListSnapshot {
+        UpdateListSnapshot(
+            applications: appUpdates,
+            homebrewPackages: filteredPackages,
+            macOSUpdates: systemUpdates,
+            developerPackages: filteredDeveloperPackages,
+            models: filteredModels
+        )
+    }
+
     private var filteredPackages: [HomebrewPackage] {
         guard viewState.filter == .all || viewState.filter == .homebrew else { return [] }
         return store.homebrewPackages.filter {
@@ -210,7 +253,7 @@ struct UpdatesView: View {
         if viewState.sortOrder == .installDate || viewState.sortOrder == .recentlyUpdated {
             let leftDate = viewState.sortOrder == .installDate ? left.app.installedAt : left.app.modifiedAt
             let rightDate = viewState.sortOrder == .installDate ? right.app.installedAt : right.app.modifiedAt
-            let comparison = compareDate(
+            let comparison = ListSorting.compareDates(
                 leftDate, rightDate,
                 leftName: left.app.name, rightName: right.app.name
             )
@@ -238,24 +281,6 @@ struct UpdatesView: View {
         case .installDate, .recentlyUpdated: comparison = leftName.localizedStandardCompare(rightName)
         }
         return viewState.sortAscending ? comparison == .orderedAscending : comparison == .orderedDescending
-    }
-
-    private func compareDate(
-        _ left: Date?,
-        _ right: Date?,
-        leftName: String,
-        rightName: String
-    ) -> ComparisonResult {
-        switch (left, right) {
-        case let (left?, right?) where left != right:
-            return left < right ? .orderedAscending : .orderedDescending
-        case (nil, .some):
-            return .orderedAscending
-        case (.some, nil):
-            return .orderedDescending
-        default:
-            return leftName.localizedStandardCompare(rightName)
-        }
     }
 
     private var scanningState: some View {
@@ -673,8 +698,7 @@ private struct DeveloperUpdateCard: View {
             )
         } accessories: {
             if store.isRefreshing(package) {
-                ProgressView().controlSize(.small)
-                    .accessibilityLabel("Refreshing \(package.name)")
+                RefreshingIndicator(itemName: package.name)
             }
             VersionTransitionView(current: package.currentVersion, latest: package.latestVersion)
             Button { Task { await store.updateDeveloperPackage(package) } } label: {
@@ -752,8 +776,7 @@ struct UpdateCard: View {
             )
         } accessories: {
             if store.isRefreshing(update.app) {
-                ProgressView().controlSize(.small)
-                    .accessibilityLabel("Refreshing \(update.app.name)")
+                RefreshingIndicator(itemName: update.app.name)
             }
             VersionTransitionView(current: update.app.installedVersion, latest: update.availableVersion)
             Button {
@@ -822,8 +845,7 @@ private struct HomebrewUpdateCard: View {
             )
         } accessories: {
             if store.isRefreshing(package) {
-                ProgressView().controlSize(.small)
-                    .accessibilityLabel("Refreshing \(package.displayName)")
+                RefreshingIndicator(itemName: package.displayName)
             }
             VersionTransitionView(current: package.installedVersion, latest: package.currentVersion)
             Button { Task { await store.updatePackage(package) } } label: {

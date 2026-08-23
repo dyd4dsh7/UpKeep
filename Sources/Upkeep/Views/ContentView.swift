@@ -107,11 +107,18 @@ struct ContentView: View {
     }
 
     @ViewBuilder private var detail: some View {
-        if !store.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            GlobalSearchView()
-        } else {
-            destinationDetail
+        ZStack {
+            if isSearching {
+                GlobalSearchView()
+                    .id("search")
+                    .upkeepStateTransition()
+            } else {
+                destinationDetail
+                    .id(store.selection)
+                    .upkeepStateTransition()
+            }
         }
+        .upkeepAnimated(for: detailSurfaceID)
     }
 
     @ViewBuilder private var destinationDetail: some View {
@@ -195,29 +202,33 @@ struct ContentView: View {
         !store.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private var detailSurfaceID: String {
+        isSearching ? "search" : "destination:\(store.selection.rawValue)"
+    }
+
     private var selectedHomebrewPackage: HomebrewPackage? {
         guard let id = store.selectedPackageID else { return nil }
-        return store.homebrewPackages.first { $0.id == id }
+        return store.homebrewPackage(forID: id)
     }
 
     private var selectedDeveloperPackage: DeveloperPackage? {
         guard let id = store.selectedDeveloperPackageID else { return nil }
-        return store.developerPackages.first { $0.id == id }
+        return store.developerPackage(forID: id)
     }
 
     private var selectedLocalModel: LocalLLMModel? {
         guard let id = store.selectedLocalModelID else { return nil }
-        return store.localModels.first { $0.id == id }
+        return store.localModel(forID: id)
     }
 
     @ViewBuilder private func updateInspector(_ selection: UpdateInspectorSelection) -> some View {
         switch selection {
         case let .homebrew(id):
-            PackageDetail(package: store.homebrewPackages.first { $0.id == id })
+            PackageDetail(package: store.homebrewPackage(forID: id))
         case let .developer(id):
-            DeveloperPackageDetail(package: store.developerPackages.first { $0.id == id })
+            DeveloperPackageDetail(package: store.developerPackage(forID: id))
         case let .model(id):
-            LocalModelDetail(model: store.localModels.first { $0.id == id })
+            LocalModelDetail(model: store.localModel(forID: id))
         }
     }
 

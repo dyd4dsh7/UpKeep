@@ -5,16 +5,18 @@ struct AdoptableView: View {
     @EnvironmentObject private var store: UpkeepStore
 
     var body: some View {
+        let adoptableApps = sortedAdoptableApps
         VStack(spacing: 0) {
-            if store.filteredAdoptableApps.isEmpty {
+            if adoptableApps.isEmpty {
                 ContentUnavailableView(
                     "No adoptable apps",
                     systemImage: "shippingbox",
                     description: Text("Upkeep matches installed apps with Homebrew’s official cask catalog.")
                 ).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .upkeepStateTransition()
             } else {
                 List(selection: selectedAppID) {
-                    ForEach(sortedAdoptableApps) { item in
+                    ForEach(adoptableApps) { item in
                     StandardItemRow {
                         AppIcon(url: item.app.url, size: 36)
                     } content: {
@@ -46,8 +48,10 @@ struct AdoptableView: View {
                     }
                     }
                 }.listStyle(.inset)
+                    .upkeepStateTransition()
             }
         }
+        .upkeepAnimated(for: adoptableApps.map(\.id))
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 ScanToolbarButton()
@@ -64,7 +68,7 @@ struct AdoptableView: View {
             },
             set: { identifier in
                 store.selectedApp = identifier.flatMap { id in
-                    store.filteredAdoptableApps.first { $0.app.id == id }?.app
+                    store.app(forID: id).flatMap { store.adoptableApp(for: $0) }?.app
                 }
             }
         )
@@ -72,8 +76,8 @@ struct AdoptableView: View {
 
     private var sortedAdoptableApps: [AdoptableApp] {
         store.filteredAdoptableApps.sorted { left, right in
-            let leftHasUpdate = store.updates.contains { $0.app.id == left.app.id }
-            let rightHasUpdate = store.updates.contains { $0.app.id == right.app.id }
+            let leftHasUpdate = store.update(for: left.app) != nil
+            let rightHasUpdate = store.update(for: right.app) != nil
             if leftHasUpdate != rightHasUpdate { return leftHasUpdate }
             return left.app.name.localizedStandardCompare(right.app.name) == .orderedAscending
         }

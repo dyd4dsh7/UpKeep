@@ -1,6 +1,53 @@
 import SwiftUI
 import UserNotifications
 
+private struct DiagnosticSnapshot {
+    let entries: [DiagnosticEntry]
+    let warningCount: Int
+    let errorCount: Int
+    let latestScanDuration: String
+
+    init(
+        entries: [DiagnosticEntry],
+        searchText: String,
+        levelFilter: DiagnosticLevelFilter,
+        categoryFilter: DiagnosticCategory?
+    ) {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.entries = entries.filter { entry in
+            let matchesLevel = levelFilter.level.map { entry.level == $0 } ?? true
+            let matchesCategory = categoryFilter.map { entry.category == $0 } ?? true
+            guard matchesLevel && matchesCategory else { return false }
+            guard !query.isEmpty else { return true }
+            let searchable = ([entry.message, entry.category.rawValue]
+                + entry.metadata.flatMap { [$0.key, $0.value] })
+                .joined(separator: " ")
+            return searchable.localizedCaseInsensitiveContains(query)
+        }
+
+        let completionIndex = entries.firstIndex(where: {
+            $0.category == .scan && $0.message == "Update scan completed"
+        })
+        let latestScanEntries: ArraySlice<DiagnosticEntry>
+        if let completionIndex {
+            let remaining = entries[completionIndex...]
+            if let startIndex = remaining.firstIndex(where: {
+                $0.category == .scan && $0.message == "Update scan started"
+            }) {
+                latestScanEntries = entries[completionIndex...startIndex]
+            } else {
+                latestScanEntries = remaining
+            }
+        } else {
+            latestScanEntries = entries[...]
+        }
+        warningCount = latestScanEntries.count { $0.level == .warning }
+        errorCount = latestScanEntries.count { $0.level == .error }
+        let duration = completionIndex.flatMap { entries[$0].metadata["Duration"] } ?? "—"
+        latestScanDuration = diagnosticDisplayValue(duration, key: "Duration")
+    }
+}
+
 struct SettingsView: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var store: UpkeepStore
@@ -16,6 +63,7 @@ struct SettingsView: View {
             }
         }
         .frame(width: 860, height: 620)
+        .upkeepAnimated(for: visibleSettingsSections)
         .onChange(of: settings.sidebarViewMode) { _, mode in
             if mode == .basic, settings.selectedSection.requiresAdvancedView {
                 settings.selectedSection = .general
@@ -117,6 +165,7 @@ struct SettingsView: View {
                         .labelsHidden()
                         .onChange(of: settings.dailyRefreshTimeMinutes) { _, _ in store.scheduleNextRefresh() }
                     }
+                    .upkeepStateTransition()
                 }
 
                 SettingsOptionRow(
@@ -160,6 +209,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .upkeepAnimated(for: settings.refreshInterval)
     }
 
     private var sources: some View {
@@ -284,17 +334,23 @@ struct SettingsView: View {
     }
 
     private var diagnostics: some View {
-        VStack(spacing: 0) {
+        let snapshot = DiagnosticSnapshot(
+            entries: store.diagnosticEntries,
+            searchText: store.diagnosticsSearchText,
+            levelFilter: store.diagnosticsLevelFilter,
+            categoryFilter: store.diagnosticsCategoryFilter
+        )
+        return VStack(spacing: 0) {
             Form {
                 Section("Latest Activity") {
                     Grid(alignment: .leading, horizontalSpacing: 28, verticalSpacing: 8) {
                         GridRow {
                             diagnosticSummary("Entries", "\(store.diagnosticEntries.count)", "list.bullet.rectangle")
-                            diagnosticSummary("Warnings", "\(diagnosticWarningCount)", "exclamationmark.triangle.fill")
+                            diagnosticSummary("Warnings", "\(snapshot.warningCount)", "exclamationmark.triangle.fill")
                         }
                         GridRow {
-                            diagnosticSummary("Errors", "\(diagnosticErrorCount)", "xmark.octagon.fill")
-                            diagnosticSummary("Latest scan", latestScanDuration, "clock")
+                            diagnosticSummary("Errors", "\(snapshot.errorCount)", "xmark.octagon.fill")
+                            diagnosticSummary("Latest scan", snapshot.latestScanDuration, "clock")
                         }
                     }
                 }
@@ -335,58 +391,20 @@ struct SettingsView: View {
             .padding(.horizontal, 20)
             .padding(.bottom, 10)
 
-            if filteredDiagnostics.isEmpty {
+            if snapshot.entries.isEmpty {
                 ContentUnavailableView(
                     store.diagnosticsSearchText.isEmpty ? "No diagnostics yet" : "No matching diagnostics",
                     systemImage: "stethoscope",
                     description: Text(store.diagnosticsSearchText.isEmpty ? "Run an update check to populate this log." : "Try a different search or level.")
                 )
             } else {
-                List(filteredDiagnostics) { entry in
+                List(snapshot.entries) { entry in
                     DiagnosticRow(entry: entry)
                 }
                 .listStyle(.inset)
             }
         }
         .onAppear { store.refreshDiagnostics() }
-    }
-
-    private var filteredDiagnostics: [DiagnosticEntry] {
-        let query = store.diagnosticsSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        return store.diagnosticEntries.filter { entry in
-            let matchesLevel = store.diagnosticsLevelFilter.level.map { entry.level == $0 } ?? true
-            let matchesCategory = store.diagnosticsCategoryFilter.map { entry.category == $0 } ?? true
-            let searchable = ([entry.message, entry.category.rawValue] + entry.metadata.flatMap { [$0.key, $0.value] })
-                .joined(separator: " ")
-            return matchesLevel && matchesCategory
-                && (query.isEmpty || searchable.localizedCaseInsensitiveContains(query))
-        }
-    }
-
-    private var diagnosticWarningCount: Int {
-        latestScanEntries.count { $0.level == .warning }
-    }
-
-    private var diagnosticErrorCount: Int {
-        latestScanEntries.count { $0.level == .error }
-    }
-
-    private var latestScanDuration: String {
-        let rawValue = store.diagnosticEntries.first {
-            $0.category == .scan && $0.message == "Update scan completed"
-        }?.metadata["Duration"] ?? "—"
-        return diagnosticDisplayValue(rawValue, key: "Duration")
-    }
-
-    private var latestScanEntries: ArraySlice<DiagnosticEntry> {
-        guard let completionIndex = store.diagnosticEntries.firstIndex(where: {
-            $0.category == .scan && $0.message == "Update scan completed"
-        }) else { return store.diagnosticEntries[...] }
-        let remaining = store.diagnosticEntries[completionIndex...]
-        guard let startIndex = remaining.firstIndex(where: {
-            $0.category == .scan && $0.message == "Update scan started"
-        }) else { return remaining }
-        return store.diagnosticEntries[completionIndex...startIndex]
     }
 
     private var ignored: some View {
@@ -663,6 +681,7 @@ private struct DeveloperManagerSettingsRow: View {
 }
 
 private struct AppearanceOptionButton: View {
+    @State private var isHovering = false
     let title: String
     let detail: String
     let systemImage: String
@@ -696,7 +715,9 @@ private struct AppearanceOptionButton: View {
         }
         .buttonStyle(.plain)
         .background(
-            isSelected ? Color.accentColor.opacity(0.10) : Color.secondary.opacity(0.06),
+            isSelected
+                ? Color.accentColor.opacity(isHovering ? 0.14 : 0.10)
+                : Color.secondary.opacity(isHovering ? 0.10 : 0.06),
             in: RoundedRectangle(cornerRadius: 11)
         )
         .overlay {
@@ -706,6 +727,10 @@ private struct AppearanceOptionButton: View {
                     lineWidth: isSelected ? 1.5 : 1
                 )
         }
+        .scaleEffect(isHovering ? 1.008 : 1)
+        .onHover { isHovering = $0 }
+        .upkeepAnimated(for: isHovering, animation: UpkeepMotion.quick)
+        .upkeepAnimated(for: isSelected, animation: UpkeepMotion.quick)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
@@ -733,9 +758,9 @@ private struct DiagnosticRow: View {
                 }
                 if !entry.metadata.isEmpty {
                     LazyVGrid(
-                        columns: [GridItem(.adaptive(minimum: 132), spacing: 7, alignment: .leading)],
+                        columns: [GridItem(.adaptive(minimum: 160), spacing: 9, alignment: .leading)],
                         alignment: .leading,
-                        spacing: 7
+                        spacing: 9
                     ) {
                         ForEach(orderedMetadata, id: \.key) { pair in
                             VStack(alignment: .leading, spacing: 2) {
@@ -745,7 +770,7 @@ private struct DiagnosticRow: View {
                                 Text(diagnosticDisplayValue(pair.value, key: pair.key))
                                     .font(.caption.monospaced())
                                     .foregroundStyle(pair.key == "Error" ? .red : .secondary)
-                                    .lineLimit(2)
+                                    .lineLimit(3)
                                     .textSelection(.enabled)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)

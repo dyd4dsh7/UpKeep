@@ -1,12 +1,41 @@
 import Foundation
 
 enum VersionComparator {
+    private final class ParsedVersionBox: NSObject {
+        let value: ParsedVersion?
+
+        init(_ value: ParsedVersion?) {
+            self.value = value
+        }
+    }
+
+    // NSCache synchronizes access internally. This wrapper retains that guarantee
+    // while exposing only immutable parsed values to concurrent scan tasks.
+    private final class ParsedVersionCache: @unchecked Sendable {
+        private let storage: NSCache<NSString, ParsedVersionBox>
+
+        init() {
+            storage = NSCache<NSString, ParsedVersionBox>()
+            storage.countLimit = 512
+        }
+
+        func value(for rawValue: String) -> ParsedVersion? {
+            let key = rawValue as NSString
+            if let cached = storage.object(forKey: key) { return cached.value }
+            let parsed = ParsedVersion(rawValue)
+            storage.setObject(ParsedVersionBox(parsed), forKey: key)
+            return parsed
+        }
+    }
+
+    private static let parsedVersionCache = ParsedVersionCache()
+
     static func isNewer(_ candidate: String, than installed: String) -> Bool {
         compare(candidate, installed) == .orderedDescending
     }
 
     static func isPrerelease(_ version: String) -> Bool {
-        prereleaseChannel(for: version) != nil || ParsedVersion(version)?.prerelease != nil
+        prereleaseChannel(for: version) != nil || parsedVersion(version)?.prerelease != nil
     }
 
     static func prereleaseChannel(for version: String) -> PrereleaseChannel? {
@@ -17,7 +46,7 @@ enum VersionComparator {
         if value.contains("alpha") { return .alpha }
         if value.contains("beta") { return .beta }
         if value.contains("preview") { return .preview }
-        if let label = ParsedVersion(version)?.prerelease?.label {
+        if let label = parsedVersion(version)?.prerelease?.label {
             switch label {
             case "dev": return .development
             case "nightly": return .nightly
@@ -41,7 +70,7 @@ enum VersionComparator {
     }
 
     static func compare(_ lhs: String, _ rhs: String) -> ComparisonResult {
-        guard let left = ParsedVersion(lhs), let right = ParsedVersion(rhs) else {
+        guard let left = parsedVersion(lhs), let right = parsedVersion(rhs) else {
             // An unversioned value such as "latest" must not create an update.
             return .orderedSame
         }
@@ -82,6 +111,10 @@ enum VersionComparator {
         return ParsedVersion.packagingLabels.contains { label in
             value.contains("-\(label)") || value.contains(".\(label)")
         }
+    }
+
+    private static func parsedVersion(_ value: String) -> ParsedVersion? {
+        parsedVersionCache.value(for: value)
     }
 
     private struct ParsedVersion {

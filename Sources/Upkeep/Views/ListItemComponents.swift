@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 enum UpkeepLayout {
@@ -6,8 +7,33 @@ enum UpkeepLayout {
     static let inspectorMaximumWidth: CGFloat = 500
 }
 
+@MainActor
+final class BundledImageCache {
+    static let shared = BundledImageCache()
+
+    private var images: [String: NSImage] = [:]
+    private var missingImageNames = Set<String>()
+
+    func image(named name: String, extensions: [String] = ["png", "svg"]) -> NSImage? {
+        let cacheKey = "\(name).\(extensions.joined(separator: ","))"
+        if let image = images[cacheKey] { return image }
+        guard !missingImageNames.contains(cacheKey),
+              let url = extensions.lazy.compactMap({
+                  Bundle.module.url(forResource: name, withExtension: $0)
+              }).first,
+              let image = NSImage(contentsOf: url) else {
+            missingImageNames.insert(cacheKey)
+            return nil
+        }
+        images[cacheKey] = image
+        return image
+    }
+}
+
 struct StandardItemRow<Icon: View, Content: View, Accessories: View>: View {
     @EnvironmentObject private var settings: AppSettings
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovering = false
     private let icon: Icon
     private let content: Content
     private let accessories: Accessories
@@ -41,8 +67,16 @@ struct StandardItemRow<Icon: View, Content: View, Accessories: View>: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, settings.listDensity == .compact ? 2 : 6)
         .padding(.vertical, settings.listDensity == .compact ? 5 : 10)
+        .background {
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(.primary.opacity(isHovering ? 0.03 : 0))
+        }
+        .contentShape(Rectangle())
+        .onHover { isHovering = $0 }
         .listRowSeparator(.hidden)
-        .animation(.snappy(duration: 0.18), value: settings.listDensity)
+        .animation(reduceMotion ? nil : UpkeepMotion.quick, value: settings.listDensity)
+        .upkeepAnimated(for: isHovering, animation: UpkeepMotion.quick)
+        .upkeepRowTransition()
     }
 }
 
@@ -79,12 +113,23 @@ struct ItemIdentityView: View {
     }
 }
 
+struct RefreshingIndicator: View {
+    let itemName: String
+
+    var body: some View {
+        ProgressView()
+            .controlSize(.small)
+            .accessibilityLabel("Refreshing \(itemName)")
+    }
+}
+
 struct ListDensityButton: View {
     @EnvironmentObject private var settings: AppSettings
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Button {
-            withAnimation(.snappy(duration: 0.18)) {
+            withAnimation(reduceMotion ? nil : UpkeepMotion.quick) {
                 settings.listDensity = settings.listDensity == .comfortable ? .compact : .comfortable
             }
         } label: {
@@ -101,18 +146,51 @@ struct ScanToolbarButton: View {
     @EnvironmentObject private var store: UpkeepStore
 
     var body: some View {
-        Button {
-            Task { await store.scan() }
-        } label: {
-            if store.isScanning {
+        AsyncToolbarButton(
+            title: "Check for updates",
+            systemImage: "arrow.clockwise",
+            isWorking: store.isScanning,
+            action: store.scan
+        )
+    }
+}
+
+struct AsyncToolbarButton: View {
+    let title: String
+    let systemImage: String
+    let isWorking: Bool
+    let action: @MainActor () async -> Void
+
+    var body: some View {
+        Button { Task { await action() } } label: {
+            WorkingToolbarLabel(
+                title: title,
+                systemImage: systemImage,
+                isWorking: isWorking
+            )
+        }
+        .toolbarControlLabel(title)
+        .disabled(isWorking)
+    }
+}
+
+struct WorkingToolbarLabel: View {
+    let title: String
+    let systemImage: String
+    let isWorking: Bool
+
+    var body: some View {
+        ZStack {
+            if isWorking {
                 ProgressView()
                     .controlSize(.small)
+                    .upkeepStateTransition()
             } else {
-                Image(systemName: "arrow.clockwise")
+                Label(title, systemImage: systemImage)
+                    .upkeepStateTransition()
             }
         }
-        .toolbarControlLabel("Check for updates")
-        .disabled(store.isScanning)
+        .upkeepAnimated(for: isWorking, animation: UpkeepMotion.quick)
     }
 }
 
@@ -132,8 +210,15 @@ struct ListControlLabel: View {
             .font(.system(size: 15, weight: .medium))
             .symbolRenderingMode(.hierarchical)
             .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
-            .frame(width: 30, height: 26)
+            .frame(width: 30, height: 28)
             .contentShape(Rectangle())
+    }
+}
+
+@ToolbarContentBuilder
+func upkeepToolbarSpacer() -> some ToolbarContent {
+    if #available(macOS 26, *) {
+        ToolbarSpacer(.fixed, placement: .primaryAction)
     }
 }
 
@@ -233,6 +318,9 @@ struct VersionTransitionView: View {
                 }
             }
         }
+        .id(latest == nil || latest == current ? "current" : "update")
+        .upkeepStateTransition()
+        .upkeepAnimated(for: latest ?? "")
         .font(.subheadline.monospacedDigit())
         .lineLimit(1)
         .minimumScaleFactor(0.8)
@@ -244,7 +332,7 @@ struct VersionTransitionView: View {
 struct ListRowPrimaryAction: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.bordered)
             .buttonBorderShape(.capsule)
             .controlSize(.small)
             .frame(width: 108, alignment: .trailing)
@@ -332,6 +420,11 @@ struct InspectorUpdateStatusCard<Actions: View, Options: View>: View {
         }
         .padding(16)
         .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 14))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(.separator.opacity(0.55), lineWidth: 0.5)
+        }
+        .upkeepAnimated(for: title)
     }
 }
 
@@ -341,15 +434,20 @@ struct WorkingActionLabel: View {
     var workingTitle = "Updating…"
 
     var body: some View {
-        if isWorking {
-            HStack(spacing: 6) {
-                ProgressView().controlSize(.small)
-                Text(workingTitle)
+        ZStack {
+            if isWorking {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text(workingTitle)
+                }
+                .accessibilityElement(children: .combine)
+                .upkeepStateTransition()
+            } else {
+                Text(idleTitle)
+                    .upkeepStateTransition()
             }
-            .accessibilityElement(children: .combine)
-        } else {
-            Text(idleTitle)
         }
+        .upkeepAnimated(for: isWorking, animation: UpkeepMotion.quick)
     }
 }
 
