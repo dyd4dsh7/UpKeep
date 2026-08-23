@@ -110,6 +110,8 @@ enum DiagnosticRedactor {
     }
 }
 
+// SAFETY: Every access to cachedEntries and persistence is serialized by lock;
+// fileURL is immutable after initialization.
 final class DiagnosticsStore: @unchecked Sendable {
     static let shared = DiagnosticsStore()
     private static let maximumEntries = 2_000

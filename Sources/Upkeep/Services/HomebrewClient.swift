@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 struct HomebrewClient: Sendable {
@@ -313,7 +314,9 @@ private func runInTerminal(
         .appendingPathComponent("Upkeep-Homebrew-\(UUID().uuidString)", isDirectory: true)
     let outputURL = directory.appendingPathComponent("output.log")
     let statusURL = directory.appendingPathComponent("status")
+    let processIDURL = directory.appendingPathComponent("pid")
     try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+    try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
     defer { try? fileManager.removeItem(at: directory) }
 
     let command = ([executable.path] + arguments).map(shellQuote).joined(separator: " ")
@@ -343,6 +346,7 @@ private func runInTerminal(
     let terminalCommand = """
     set -o pipefail
     typeset -i upkeep_status=1
+    print -r -- "$$" > \(shellQuote(processIDURL.path))
     trap 'print -r -- "$upkeep_status" > \(shellQuote(statusURL.path))' EXIT HUP INT TERM
     print
     print "Upkeep needs administrator approval to finish this Homebrew update."
@@ -387,10 +391,7 @@ private func runInTerminal(
         )
     }
 
-    while !fileManager.fileExists(atPath: statusURL.path) {
-        try Task.checkCancellation()
-        try await Task.sleep(for: .milliseconds(250))
-    }
+    try await waitForTerminalStatus(at: statusURL, processIDURL: processIDURL)
 
     let statusText = (try? String(contentsOf: statusURL, encoding: .utf8))?
         .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -406,6 +407,54 @@ private func runInTerminal(
         )
     }
     return data
+}
+
+func waitForTerminalStatus(
+    at statusURL: URL,
+    processIDURL: URL,
+    launchTimeout: Duration = .seconds(30),
+    pollInterval: Duration = .milliseconds(250),
+    processIsRunning: @Sendable (Int32) -> Bool = terminalProcessIsRunning
+) async throws {
+    let clock = ContinuousClock()
+    let launchDeadline = clock.now.advanced(by: launchTimeout)
+    var processID: Int32?
+    var stoppedPollCount = 0
+    while !FileManager.default.fileExists(atPath: statusURL.path) {
+        try Task.checkCancellation()
+        if processID == nil {
+            processID = terminalProcessID(at: processIDURL)
+        }
+        if let processID {
+            if processIsRunning(processID) {
+                stoppedPollCount = 0
+            } else {
+                stoppedPollCount += 1
+                guard stoppedPollCount < 3 else {
+                    throw HomebrewClient.BrewError.failed(
+                        "The Terminal command stopped without reporting a Homebrew result. Review the Terminal output, then try again."
+                    )
+                }
+            }
+        } else if clock.now >= launchDeadline {
+            throw HomebrewClient.BrewError.failed(
+                "The Homebrew command did not start in Terminal. Close the Terminal window and try again."
+            )
+        }
+        try await Task.sleep(for: pollInterval)
+    }
+}
+
+private func terminalProcessID(at url: URL) -> Int32? {
+    guard let value = try? String(contentsOf: url, encoding: .utf8)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    else { return nil }
+    return Int32(value)
+}
+
+private func terminalProcessIsRunning(_ processID: Int32) -> Bool {
+    guard processID > 0 else { return false }
+    return kill(processID, 0) == 0 || errno == EPERM
 }
 
 func terminalAppleScriptArguments(command: String) -> [String] {

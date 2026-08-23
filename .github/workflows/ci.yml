@@ -10,8 +10,8 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v6
-      - name: Test
-        run: swift test
+      - name: Lint and test
+        run: swift test -Xswiftc -warnings-as-errors
       - name: Package debug app
         run: ./scripts/package-app.sh debug
       - name: Extract debug app

@@ -412,7 +412,7 @@ private struct TransactionExternalOpener: ExternalOpening {
 }
 
 @MainActor
-private final class RecordingTransactionExternalOpener: ExternalOpening, @unchecked Sendable {
+private final class RecordingTransactionExternalOpener: ExternalOpening {
     private(set) var openedURLs: [URL] = []
 
     func open(_ url: URL) -> Bool {
