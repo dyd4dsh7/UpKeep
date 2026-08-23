@@ -1445,7 +1445,7 @@ func captureDeveloperCommand(
     return (data, process.terminationStatus)
 }
 
-private func captureDeveloperCommandAsync(
+func captureDeveloperCommandAsync(
     _ executable: URL,
     _ arguments: [String],
     baseEnvironment: [String: String] = ProcessInfo.processInfo.environment,

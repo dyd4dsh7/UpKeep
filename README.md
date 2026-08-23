@@ -38,6 +38,8 @@ Package rows use bundled manager artwork and open detailed metadata when selecte
 
 Developer package details load available releases from the package manager or registry into a version menu and select the latest release by default. The Developer toolbar can refresh all installed managers or only npm, pnpm, Python, RubyGems, or Cargo.
 
+The Homebrew and Developer toolbars also expose supported cleanup operations for Homebrew, npm, pnpm, and uv. Upkeep first performs a non-destructive check, shows Homebrew's dry-run estimate or clearly labels when a manager cannot predict its cleanup size, and asks for confirmation before cleaning. It then reports the disk space reclaimed.
+
 ## Local AI models
 
 Upkeep detects locally installed Ollama and LM Studio models without showing empty runtime sections. Ollama models are checked by comparing their local and registry manifest digests. LM Studio model files are checked against their originating Hugging Face repository. Supported updates run through `ollama pull` or `lms get`, so credentials, storage, and model management remain with the installed runtime.

@@ -3,9 +3,16 @@ import SwiftUI
 
 struct DeveloperPackagesView: View {
     @EnvironmentObject private var store: UpkeepStore
+    @State private var cleanupResult: PackageCleanupResult?
 
     var body: some View {
         VStack(spacing: 0) {
+            if let cleanupResult {
+                PackageCleanupResultBanner(result: cleanupResult) {
+                    self.cleanupResult = nil
+                }
+                Divider()
+            }
             if store.filteredDeveloperPackages.isEmpty {
                 ContentUnavailableView(
                     "No packages found", systemImage: "checkmark.seal.fill",
@@ -20,6 +27,7 @@ struct DeveloperPackagesView: View {
 
     @ToolbarContentBuilder private var packageToolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
+            PackageCleanupMenu(targets: developerCleanupTargets, result: $cleanupResult)
             Menu {
                 ForEach(developerFilters, id: \.self) { filter in
                     Button {
@@ -62,6 +70,10 @@ struct DeveloperPackagesView: View {
             .toolbarControlLabel("Check developer packages")
             .disabled(isCheckingDeveloperPackages)
         }
+    }
+
+    private var developerCleanupTargets: [PackageCleanupTarget] {
+        store.packageCleanupTargets.filter { $0.kind != .homebrew }
     }
 
     private var packageList: some View {

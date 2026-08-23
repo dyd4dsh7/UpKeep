@@ -71,6 +71,11 @@ protocol DeveloperPackageManaging: Sendable {
     func uninstall(_ package: DeveloperPackage) async throws
 }
 
+protocol PackageCleanupManaging: Sendable {
+    func scan(_ target: PackageCleanupTarget) async throws -> PackageCleanupEstimate
+    func cleanup(_ target: PackageCleanupTarget) async throws -> PackageCleanupResult
+}
+
 extension DeveloperPackageManaging {
     func uninstall(_ package: DeveloperPackage) async throws {
         throw DeveloperPackageUninstallAdapters.AdapterError.unsupportedPackage(package.name)
@@ -103,6 +108,7 @@ struct WorkspaceExternalOpener: ExternalOpening {
 extension UpdateScanner: UpdateScanning {}
 extension HomebrewClient: HomebrewManaging {}
 extension DeveloperPackageClient: DeveloperPackageManaging {}
+extension PackageCleanupClient: PackageCleanupManaging {}
 extension LocalModelClient: LocalModelManaging {}
 extension HomebrewClient: HomebrewScanning {
     func adoptableApps(
@@ -149,6 +155,7 @@ struct UpkeepDependencies: Sendable {
     let applicationDiscovery: any ApplicationDiscovering
     let homebrew: any HomebrewManaging
     let developerPackages: any DeveloperPackageManaging
+    let packageCleanup: any PackageCleanupManaging
     let localModels: any LocalModelManaging
     let history: any UpdateHistoryManaging
     let externalOpener: any ExternalOpening
@@ -159,6 +166,7 @@ struct UpkeepDependencies: Sendable {
         applicationDiscovery: any ApplicationDiscovering = LiveApplicationDiscovery(),
         homebrew: any HomebrewManaging,
         developerPackages: any DeveloperPackageManaging,
+        packageCleanup: any PackageCleanupManaging = PackageCleanupClient(),
         localModels: any LocalModelManaging,
         history: any UpdateHistoryManaging = UpdateHistoryStore.shared,
         externalOpener: any ExternalOpening = WorkspaceExternalOpener(),
@@ -168,6 +176,7 @@ struct UpkeepDependencies: Sendable {
         self.applicationDiscovery = applicationDiscovery
         self.homebrew = homebrew
         self.developerPackages = developerPackages
+        self.packageCleanup = packageCleanup
         self.localModels = localModels
         self.history = history
         self.externalOpener = externalOpener
@@ -179,6 +188,7 @@ struct UpkeepDependencies: Sendable {
         applicationDiscovery: LiveApplicationDiscovery(),
         homebrew: HomebrewClient(),
         developerPackages: DeveloperPackageClient(),
+        packageCleanup: PackageCleanupClient(),
         localModels: LocalModelClient(),
         history: UpdateHistoryStore.shared,
         externalOpener: WorkspaceExternalOpener(),

@@ -14,6 +14,7 @@ enum OperationID: Hashable, Sendable {
     case appManagementPermissionCheck
     case developerRefresh(String)
     case developerScan(DeveloperPackageManager?)
+    case packageCleanup(String)
     case localModelScan
     case homebrewBatch
     case unifiedBatch

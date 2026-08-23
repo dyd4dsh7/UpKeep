@@ -3,9 +3,16 @@ import SwiftUI
 struct HomebrewView: View {
     @EnvironmentObject private var store: UpkeepStore
     @EnvironmentObject private var settings: AppSettings
+    @State private var cleanupResult: PackageCleanupResult?
 
     var body: some View {
         VStack(spacing: 0) {
+            if let cleanupResult {
+                PackageCleanupResultBanner(result: cleanupResult) {
+                    self.cleanupResult = nil
+                }
+                Divider()
+            }
             if HomebrewClient.brewURL == nil {
                 ContentUnavailableView("Homebrew not installed", systemImage: "terminal", description: Text("Install Homebrew to manage packages here."))
             } else {
@@ -17,6 +24,10 @@ struct HomebrewView: View {
 
     @ToolbarContentBuilder private var packageToolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
+            PackageCleanupMenu(
+                targets: store.packageCleanupTargets.filter { $0.kind == .homebrew },
+                result: $cleanupResult
+            )
             homebrewSortMenu
             homebrewFilterMenu
             ListDensityButton()

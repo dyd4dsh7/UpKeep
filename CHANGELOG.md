@@ -4,6 +4,7 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+- Added check-first, confirmed native cleanup actions for Homebrew, npm, pnpm, and uv, with honest estimate availability, reclaimed disk-space reporting, and diagnostics.
 - Automatically reopens applications that Upkeep temporarily quits after successful single or batch updates.
 - Added trusted GitHub release discovery for Stats and UniGetUI, plus validated per-app repository mappings for advanced users.
 - Discovered runtime-configured Sparkle feeds and distinguished built-in updater apps from unsupported update sources.

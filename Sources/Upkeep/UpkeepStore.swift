@@ -142,6 +142,74 @@ final class UpkeepStore: ObservableObject {
         }, name: { $0.name })
     }
 
+    var packageCleanupTargets: [PackageCleanupTarget] {
+        PackageCleanupTarget.available(
+            homebrewURL: HomebrewClient.brewURL,
+            installedManagers: installedDeveloperManagers,
+            packages: developerPackages
+        )
+    }
+
+    func scanCleanup(_ target: PackageCleanupTarget) async -> PackageCleanupEstimate? {
+        let operationID = OperationID.packageCleanup(target.id)
+        guard !isWorking(operationID) else { return nil }
+        updateExecutionState.activeOperations.insert(operationID)
+        defer { updateExecutionState.activeOperations.remove(operationID) }
+
+        let startedAt = Date()
+        errorMessage = nil
+        do {
+            let estimate = try await dependencies.packageCleanup.scan(target)
+            DiagnosticsStore.shared.record(.info, category: .command, "Package cleanup scan completed", metadata: [
+                "Manager": target.title,
+                "Scanned size": ByteCountFormatter.string(fromByteCount: estimate.bytes, countStyle: .file),
+                "Duration": diagnosticDuration(since: startedAt)
+            ])
+            refreshDiagnostics()
+            return estimate
+        } catch {
+            errorMessage = error.localizedDescription
+            DiagnosticsStore.shared.record(.error, category: .command, "Package cleanup scan failed", metadata: [
+                "Manager": target.title,
+                "Duration": diagnosticDuration(since: startedAt),
+                "Error": error.localizedDescription
+            ])
+            refreshDiagnostics()
+            return nil
+        }
+    }
+
+    func cleanUp(_ target: PackageCleanupTarget) async -> PackageCleanupResult? {
+        let operationID = OperationID.packageCleanup(target.id)
+        guard !isWorking(operationID) else { return nil }
+        updateExecutionState.activeOperations.insert(operationID)
+        defer { updateExecutionState.activeOperations.remove(operationID) }
+
+        let startedAt = Date()
+        errorMessage = nil
+        do {
+            let result = try await dependencies.packageCleanup.cleanup(target)
+            DiagnosticsStore.shared.record(.info, category: .command, "Package cleanup completed", metadata: [
+                "Manager": target.title,
+                "Command": target.commandDescription,
+                "Freed": ByteCountFormatter.string(fromByteCount: result.bytesFreed, countStyle: .file),
+                "Duration": diagnosticDuration(since: startedAt)
+            ])
+            refreshDiagnostics()
+            return result
+        } catch {
+            errorMessage = error.localizedDescription
+            DiagnosticsStore.shared.record(.error, category: .command, "Package cleanup failed", metadata: [
+                "Manager": target.title,
+                "Command": target.commandDescription,
+                "Duration": diagnosticDuration(since: startedAt),
+                "Error": error.localizedDescription
+            ])
+            refreshDiagnostics()
+            return nil
+        }
+    }
+
     var visibleOutdatedLocalModels: [LocalLLMModel] {
         localModels.filter { $0.isOutdated && !isExcluded($0) }
     }
