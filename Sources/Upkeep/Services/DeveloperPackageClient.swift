@@ -1484,8 +1484,40 @@ func developerCommandEnvironment(
     if executableDirectory.contains("/.nvm/versions/node/") {
         environment["NVM_BIN"] = executableDirectory
     }
+    let temporaryDirectory = developerCommandTemporaryDirectory(base: environment)
+    environment["TMPDIR"] = temporaryDirectory
+    environment["TMP"] = temporaryDirectory
+    environment["TEMP"] = temporaryDirectory
     environment["PNPM_HOME"] = pnpmHome
     return environment
+}
+
+func developerCommandTemporaryDirectory(
+    base: [String: String],
+    fileManager: FileManager = .default
+) -> String {
+    for key in ["TMPDIR", "TMP", "TEMP"] {
+        guard let path = base[key]?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !path.isEmpty,
+              URL(fileURLWithPath: path).standardizedFileURL.path != "/",
+              fileManager.isWritableFile(atPath: path)
+        else { continue }
+        return path
+    }
+
+    if let cachesDirectory = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first {
+        let directory = cachesDirectory
+            .appendingPathComponent("Upkeep", isDirectory: true)
+            .appendingPathComponent("Temporary", isDirectory: true)
+        do {
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            if fileManager.isWritableFile(atPath: directory.path) { return directory.path }
+        } catch {
+            // Fall through to the system-wide temporary directory.
+        }
+    }
+
+    return "/tmp"
 }
 
 private struct NPMList: Decodable { let dependencies: [String: NPMInstalled] }

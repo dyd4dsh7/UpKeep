@@ -41,3 +41,22 @@ import Testing
     #expect(environment["PATH"]?.contains("/Users/tester/Library/pnpm/bin") == true)
     #expect(environment["PNPM_HOME"] == "/Users/tester/Library/pnpm")
 }
+
+@Test func developerCommandReplacesReadOnlyRootTemporaryDirectory() {
+    let executable = URL(fileURLWithPath: "/example/.bun/bin/bun")
+    let environment = developerCommandEnvironment(
+        for: executable,
+        base: [
+            "HOME": "/Users/tester",
+            "PATH": "/usr/bin:/bin",
+            "TMPDIR": "/"
+        ]
+    )
+
+    let temporaryDirectory = environment["TMPDIR"]
+    #expect(temporaryDirectory != nil)
+    #expect(temporaryDirectory != "/")
+    #expect(environment["TMP"] == temporaryDirectory)
+    #expect(environment["TEMP"] == temporaryDirectory)
+    #expect(FileManager.default.isWritableFile(atPath: temporaryDirectory ?? "") == true)
+}
