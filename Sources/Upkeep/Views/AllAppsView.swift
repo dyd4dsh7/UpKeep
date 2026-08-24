@@ -20,7 +20,7 @@ struct AllAppsView: View {
                     let visibleUpdate = store.visibleUpdate(for: app)
                     let exclusion = activeExclusion(for: app, update: update)
                     let hasAdoptionOption = hasHomebrewAdoptionOption(for: app, update: update)
-                    StandardItemRow {
+                    StandardItemRow(isSelected: store.selectedApp?.id == app.id) {
                         AppIcon(url: app.url, size: 36)
                     } content: {
                         ItemIdentityView(

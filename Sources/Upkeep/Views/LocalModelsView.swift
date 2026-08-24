@@ -35,6 +35,7 @@ struct LocalModelsView: View {
             LocalModelRow(
                 store: store,
                 model: model,
+                isSelected: model.id == store.selectedLocalModelID,
                 exclusion: store.exclusion(for: model),
                 isWorking: store.isWorking(.localModel(model.id))
             )
@@ -62,17 +63,19 @@ struct LocalModelsView: View {
 private struct LocalModelRow: View, Equatable {
     let store: UpkeepStore
     let model: LocalLLMModel
+    let isSelected: Bool
     let exclusion: UpdateExclusion?
     let isWorking: Bool
 
     nonisolated static func == (left: Self, right: Self) -> Bool {
         left.model == right.model
+            && left.isSelected == right.isSelected
             && left.exclusion == right.exclusion
             && left.isWorking == right.isWorking
     }
 
     var body: some View {
-        StandardItemRow {
+        StandardItemRow(isSelected: isSelected) {
             LocalModelRuntimeIcon(runtime: model.runtime, size: 36)
         } content: {
             LocalModelIdentityView(model: model)

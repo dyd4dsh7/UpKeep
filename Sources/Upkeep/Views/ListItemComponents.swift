@@ -34,15 +34,18 @@ struct StandardItemRow<Icon: View, Content: View, Accessories: View>: View {
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
+    private let isSelected: Bool
     private let icon: Icon
     private let content: Content
     private let accessories: Accessories
 
     init(
+        isSelected: Bool = false,
         @ViewBuilder icon: () -> Icon,
         @ViewBuilder content: () -> Content,
         @ViewBuilder accessories: () -> Accessories
     ) {
+        self.isSelected = isSelected
         self.icon = icon()
         self.content = content()
         self.accessories = accessories()
@@ -69,13 +72,14 @@ struct StandardItemRow<Icon: View, Content: View, Accessories: View>: View {
         .padding(.vertical, settings.listDensity == .compact ? 5 : 10)
         .background {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(.primary.opacity(isHovering ? 0.03 : 0))
+                .fill(.primary.opacity(isHovering && !isSelected ? 0.03 : 0))
         }
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .listRowSeparator(.hidden)
         .animation(reduceMotion ? nil : UpkeepMotion.quick, value: settings.listDensity)
         .upkeepAnimated(for: isHovering, animation: UpkeepMotion.quick)
+        .upkeepAnimated(for: isSelected, animation: UpkeepMotion.quick)
         .upkeepRowTransition()
     }
 }

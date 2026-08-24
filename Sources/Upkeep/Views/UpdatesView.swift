@@ -687,7 +687,7 @@ private struct DeveloperUpdateCard: View {
     @EnvironmentObject private var store: UpkeepStore
     let package: DeveloperPackage
     var body: some View {
-        StandardItemRow {
+        StandardItemRow(isSelected: store.updateInspectorSelection == .developer(package.id)) {
             PackageManagerIcon(manager: package.manager, size: 36)
         } content: {
             ItemIdentityView(
@@ -764,7 +764,7 @@ struct UpdateCard: View {
     let update: AvailableUpdate
 
     var body: some View {
-        StandardItemRow {
+        StandardItemRow(isSelected: store.selectedApp?.id == update.app.id) {
             AppIcon(url: update.app.url, size: 36)
         } content: {
             ItemIdentityView(
@@ -832,7 +832,7 @@ private struct HomebrewUpdateCard: View {
     let package: HomebrewPackage
 
     var body: some View {
-        StandardItemRow {
+        StandardItemRow(isSelected: store.updateInspectorSelection == .homebrew(package.id)) {
             BundledPackageIcon(name: "homebrew", size: 36)
         } content: {
             ItemIdentityView(
@@ -880,7 +880,7 @@ private struct LocalModelUpdateCard: View {
     let model: LocalLLMModel
 
     var body: some View {
-        StandardItemRow {
+        StandardItemRow(isSelected: store.updateInspectorSelection == .model(model.id)) {
             LocalModelRuntimeIcon(runtime: model.runtime, size: 36)
         } content: {
             LocalModelIdentityView(model: model)

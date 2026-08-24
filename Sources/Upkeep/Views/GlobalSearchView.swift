@@ -165,7 +165,7 @@ struct GlobalSearchView: View {
     }
 
     private func appRow(_ app: InstalledApp) -> some View {
-        StandardItemRow {
+        StandardItemRow(isSelected: searchState.selection == .application(app.id)) {
             AppIcon(url: app.url, size: 36)
         } content: {
             ItemIdentityView(
@@ -182,7 +182,7 @@ struct GlobalSearchView: View {
     }
 
     private func adoptableRow(_ item: AdoptableApp) -> some View {
-        StandardItemRow {
+        StandardItemRow(isSelected: searchState.selection == .adoptable(item.id)) {
             AppIcon(url: item.app.url, size: 36)
         } content: {
             ItemIdentityView(title: item.app.name, detail: "Adoptable · Homebrew \(item.caskToken)")
@@ -193,7 +193,7 @@ struct GlobalSearchView: View {
     }
 
     private func homebrewRow(_ package: HomebrewPackage) -> some View {
-        StandardItemRow {
+        StandardItemRow(isSelected: searchState.selection == .homebrew(package.id)) {
             BundledPackageIcon(name: "homebrew", size: 36)
         } content: {
             ItemIdentityView(
@@ -207,7 +207,7 @@ struct GlobalSearchView: View {
     }
 
     private func developerRow(_ package: DeveloperPackage) -> some View {
-        StandardItemRow {
+        StandardItemRow(isSelected: searchState.selection == .developer(package.id)) {
             PackageManagerIcon(manager: package.manager)
         } content: {
             ItemIdentityView(title: package.name, detail: package.manager.rawValue)
@@ -218,7 +218,7 @@ struct GlobalSearchView: View {
     }
 
     private func modelRow(_ model: LocalLLMModel) -> some View {
-        StandardItemRow {
+        StandardItemRow(isSelected: searchState.selection == .model(model.id)) {
             LocalModelRuntimeIcon(runtime: model.runtime, size: 36)
         } content: {
             ItemIdentityView(
@@ -232,7 +232,7 @@ struct GlobalSearchView: View {
     }
 
     private func macOSRow(_ update: MacOSUpdate) -> some View {
-        StandardItemRow {
+        StandardItemRow(isSelected: searchState.selection == .macOS(update.id)) {
             Image(systemName: update.isFullInstaller ? "internaldrive" : "apple.logo")
                 .font(.title2).foregroundStyle(update.isBeta ? .purple : .blue)
         } content: {
@@ -257,7 +257,7 @@ struct GlobalSearchView: View {
     }
 
     private func historyRow(_ record: UpdateRecord) -> some View {
-        StandardItemRow {
+        StandardItemRow(isSelected: searchState.selection == .history(record.id)) {
             Image(systemName: historyIcon(record.kind)).foregroundStyle(.blue)
         } content: {
             ItemIdentityView(

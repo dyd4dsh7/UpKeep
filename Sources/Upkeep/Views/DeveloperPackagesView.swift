@@ -84,6 +84,7 @@ struct DeveloperPackagesView: View {
             DeveloperPackageRow(
                 store: store,
                 package: package,
+                isSelected: package.id == store.selectedDeveloperPackageID,
                 isRefreshing: store.isRefreshing(package),
                 exclusion: store.exclusion(for: package),
                 isWorking: store.isWorking(.developerPackage(package.id))
@@ -168,19 +169,21 @@ func openDeveloperPackageFolder(_ package: DeveloperPackage) {
 private struct DeveloperPackageRow: View, Equatable {
     let store: UpkeepStore
     let package: DeveloperPackage
+    let isSelected: Bool
     let isRefreshing: Bool
     let exclusion: UpdateExclusion?
     let isWorking: Bool
 
     nonisolated static func == (left: Self, right: Self) -> Bool {
         left.package == right.package
+            && left.isSelected == right.isSelected
             && left.isRefreshing == right.isRefreshing
             && left.exclusion == right.exclusion
             && left.isWorking == right.isWorking
     }
 
     var body: some View {
-        StandardItemRow {
+        StandardItemRow(isSelected: isSelected) {
             PackageManagerIcon(manager: package.manager)
         } content: {
             ItemIdentityView(

@@ -17,7 +17,7 @@ struct AdoptableView: View {
             } else {
                 List(selection: selectedAppID) {
                     ForEach(adoptableApps) { item in
-                    StandardItemRow {
+                    StandardItemRow(isSelected: store.selectedApp?.id == item.app.id) {
                         AppIcon(url: item.app.url, size: 36)
                     } content: {
                         ItemIdentityView(

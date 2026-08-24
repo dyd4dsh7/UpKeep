@@ -101,6 +101,7 @@ struct HomebrewView: View {
             PackageRow(
                 store: store,
                 package: package,
+                isSelected: package.id == store.selectedPackageID,
                 isRefreshing: store.isRefreshing(package),
                 isUnmapped: store.isUnmapped(package),
                 exclusion: store.exclusion(for: package),
@@ -165,6 +166,7 @@ struct HomebrewView: View {
 private struct PackageRow: View, Equatable {
     let store: UpkeepStore
     let package: HomebrewPackage
+    let isSelected: Bool
     let isRefreshing: Bool
     let isUnmapped: Bool
     let exclusion: UpdateExclusion?
@@ -172,6 +174,7 @@ private struct PackageRow: View, Equatable {
 
     nonisolated static func == (left: Self, right: Self) -> Bool {
         left.package == right.package
+            && left.isSelected == right.isSelected
             && left.isRefreshing == right.isRefreshing
             && left.isUnmapped == right.isUnmapped
             && left.exclusion == right.exclusion
@@ -179,7 +182,7 @@ private struct PackageRow: View, Equatable {
     }
 
     var body: some View {
-        StandardItemRow {
+        StandardItemRow(isSelected: isSelected) {
             BundledPackageIcon(name: "homebrew", size: 36)
         } content: {
             ItemIdentityView(
