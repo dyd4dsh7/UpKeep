@@ -490,12 +490,16 @@ private func recordAppSourceFailure(
     error: Error,
     startedAt: Date
 ) {
-    DiagnosticsStore.shared.recordBuffered(.error, category: .source, "\(source.rawValue) request failed", metadata: [
+    var metadata = [
         "Item": app.name,
         "Installed": app.installedVersion,
         "Duration": formattedDiagnosticDuration(since: startedAt),
         "Error": error.localizedDescription
-    ])
+    ]
+    if source == .sparkle, let host = app.sparkleFeedURL?.host {
+        metadata["Publisher host"] = host
+    }
+    DiagnosticsStore.shared.recordBuffered(.error, category: .source, "\(source.rawValue) request failed", metadata: metadata)
 }
 
 private func diagnosticDescription(_ status: ScanStatus) -> String {

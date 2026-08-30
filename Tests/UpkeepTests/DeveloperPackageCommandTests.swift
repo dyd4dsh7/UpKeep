@@ -2,6 +2,23 @@ import Foundation
 import Testing
 @testable import Upkeep
 
+@Test func globalDeveloperCommandsProbeWritableHomeInsteadOfLaunchDirectory() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("UpkeepCommandCWDTests-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    // Mimic pnpm's store-location probe, which uses cwd rather than TMPDIR.
+    let result = captureDeveloperCommand(
+        URL(fileURLWithPath: "/bin/sh"),
+        ["-c", "pwd -P; touch .upkeep-store-probe; test -f .upkeep-store-probe"],
+        baseEnvironment: ["HOME": directory.path, "PATH": "/usr/bin:/bin", "TMPDIR": "/"]
+    )
+    #expect(result.status == 0)
+    #expect(String(data: result.data, encoding: .utf8)?.contains(directory.lastPathComponent) == true)
+    #expect(FileManager.default.fileExists(atPath: directory.appendingPathComponent(".upkeep-store-probe").path))
+}
+
 @Test func nodePackageManagerFindsSiblingNodeFromGUIEnvironment() throws {
     let fileManager = FileManager.default
     let directory = fileManager.temporaryDirectory

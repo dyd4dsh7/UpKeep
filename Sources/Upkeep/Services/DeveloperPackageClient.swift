@@ -1429,11 +1429,31 @@ func captureDeveloperCommand(
     let process = Process(); let output = Pipe()
     process.executableURL = executable; process.arguments = arguments
     process.environment = developerCommandEnvironment(for: executable, base: baseEnvironment)
+    // Finder launches apps from `/`. pnpm probes the current directory when
+    // locating its store, independently of TMPDIR. These are global commands;
+    // do not inherit the read-only root or an unrelated project's configuration.
+    process.currentDirectoryURL = developerCommandWorkingDirectory(base: process.environment ?? [:])
     process.standardOutput = output; process.standardError = output
     do { try process.run() }
     catch { return (Data(error.localizedDescription.utf8), -1) }
     let data = output.fileHandleForReading.readDataToEndOfFile(); process.waitUntilExit()
     return (data, process.terminationStatus)
+}
+
+func developerCommandWorkingDirectory(
+    base: [String: String],
+    fileManager: FileManager = .default
+) -> URL {
+    let candidates: [String?] = [base["HOME"], fileManager.homeDirectoryForCurrentUser.path]
+    for case let path? in candidates {
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: path, isDirectory: &isDirectory),
+              isDirectory.boolValue,
+              URL(fileURLWithPath: path).standardizedFileURL.path != "/",
+              fileManager.isWritableFile(atPath: path) else { continue }
+        return URL(fileURLWithPath: path, isDirectory: true)
+    }
+    return URL(fileURLWithPath: developerCommandTemporaryDirectory(base: base), isDirectory: true)
 }
 
 func captureDeveloperCommandAsync(

@@ -137,17 +137,21 @@ enum DiagnosticRedactor {
 // SAFETY: Every access to cachedEntries and persistence is serialized by lock;
 // fileURL is immutable after initialization.
 final class DiagnosticsStore: @unchecked Sendable {
-    static let shared = DiagnosticsStore()
+    // Only the packaged app owns the user's persistent diagnostics. SwiftPM
+    // tests and standalone review harnesses must not write fixture failures to it.
+    static let shared = DiagnosticsStore(
+        persistent: Bundle.main.bundleIdentifier == InstalledApp.upkeepBundleIdentifier
+    )
     private static let maximumEntries = 2_000
 
     private let lock = NSLock()
-    private let fileURL: URL
+    private let fileURL: URL?
     private var cachedEntries: [DiagnosticEntry]
 
-    init(fileURL: URL? = nil) {
-        let resolvedURL = fileURL ?? Self.defaultFileURL()
+    init(fileURL: URL? = nil, persistent: Bool = true) {
+        let resolvedURL = persistent ? (fileURL ?? Self.defaultFileURL()) : nil
         self.fileURL = resolvedURL
-        self.cachedEntries = Self.load(from: resolvedURL)
+        self.cachedEntries = resolvedURL.map(Self.load(from:)) ?? []
     }
 
     func record(
@@ -204,6 +208,7 @@ final class DiagnosticsStore: @unchecked Sendable {
     }
 
     private func persistLocked() {
+        guard let fileURL else { return }
         do {
             try FileManager.default.createDirectory(
                 at: fileURL.deletingLastPathComponent(),

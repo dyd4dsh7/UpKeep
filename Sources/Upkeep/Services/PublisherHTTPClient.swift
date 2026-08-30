@@ -55,7 +55,7 @@ enum PublisherHTTPClient {
         var errorDescription: String? {
             switch self {
             case .invalidDestination: "The publisher URL is not a valid HTTPS destination."
-            case .nonPublicDestination: "The publisher URL resolves to a local or private network destination."
+            case .nonPublicDestination: "The publisher URL resolves to a local, private, or reserved network address. Check your DNS, VPN, or network filter settings. Upkeep blocked the request for safety."
             case .responseTooLarge: "The publisher response exceeded Upkeep’s safety limit."
             case .invalidResponse: "The publisher returned an invalid response."
             }

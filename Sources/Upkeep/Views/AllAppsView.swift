@@ -823,8 +823,13 @@ struct AppDetailView: View {
         app.isUpkeep ? "View Release" : candidate.actionTitle
     }
 
+    private var failedSources: [UpdateSource] {
+        (store.scanState.failedAppSources[app.id] ?? []).sorted { $0.rawValue < $1.rawValue }
+    }
+
     private var statusTitle: String {
         if let exclusion { return exclusion.mode == .ignored ? "Updates ignored" : "Version skipped" }
+        if update == nil, !failedSources.isEmpty { return "Update check incomplete" }
         if update == nil, app.updateManagement.isExternallyManaged {
             if let status = app.managedUpdateStatus, status.state != .managed {
                 return status.state.rawValue
@@ -840,6 +845,10 @@ struct AppDetailView: View {
                 ? "Upkeep will not show updates for this app until you restore them."
                 : "This version is skipped. A later release will appear automatically."
         }
+        if !failedSources.isEmpty {
+            let sources = failedSources.map(\.rawValue).joined(separator: ", ")
+            return "\(sources) could not be checked. Upkeep cannot confirm this app is up to date. Review Source details or try Refresh again."
+        }
         if app.updateManagement.isExternallyManaged { return app.updateManagement.updateExplanation }
         if store.source(for: app) == nil {
             return app.hasBuiltInUpdater
@@ -851,6 +860,7 @@ struct AppDetailView: View {
 
     private var statusIcon: String {
         if let exclusion { return exclusion.mode == .ignored ? "eye.slash.circle.fill" : "forward.end.circle.fill" }
+        if update == nil, !failedSources.isEmpty { return "exclamationmark.triangle.fill" }
         if update == nil, app.updateManagement.isExternallyManaged { return "gearshape.2.fill" }
         if update == nil, app.hasBuiltInUpdater { return "arrow.triangle.2.circlepath.circle.fill" }
         return update == nil ? "checkmark.circle.fill" : "arrow.down.circle.fill"
@@ -858,6 +868,7 @@ struct AppDetailView: View {
 
     private var statusColor: Color {
         if exclusion != nil { return .orange }
+        if update == nil, !failedSources.isEmpty { return .orange }
         if update == nil, app.updateManagement.isExternallyManaged { return .blue }
         if update == nil, app.hasBuiltInUpdater { return .blue }
         return update == nil ? .green : .accentColor

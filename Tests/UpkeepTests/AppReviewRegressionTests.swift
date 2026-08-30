@@ -3,6 +3,23 @@ import Testing
 @testable import Upkeep
 
 @MainActor
+@Test(arguments: [false, true])
+func appRefreshTracksFailedSourcesWithoutChangingOtherApps(fails: Bool) async {
+    let app = reviewApp()
+    let f = ReviewFixture(discoveredApp: app, scanner: ReviewScanner(failedSources: fails ? [.sparkle] : []))
+    defer { f.cleanUp() }
+    f.store.apps = [app]
+    f.store.scanState.failedAppSources = [app.id: [.github], "other-app": [.github]]
+
+    await f.store.refresh(app)
+    #expect(f.store.scanState.failedAppSources[app.id] == (fails ? [.sparkle] : nil))
+    #expect(f.store.scanState.failedAppSources["other-app"] == [.github])
+
+    await f.store.scan()
+    #expect(f.store.scanState.failedAppSources.isEmpty)
+}
+
+@MainActor
 @Test func batchReservationsBlockIndividualInstallAndRestore() async throws {
     let installer = ReviewInstaller(pause: true)
     let f = ReviewFixture(installer: installer)
@@ -291,9 +308,10 @@ private func eventually(_ condition: () async -> Bool) async -> Bool {
 
 private enum ReviewError: Error { case historyWrite, quit }
 private struct ReviewScanner: UpdateScanning {
+    var failedSources: Set<UpdateSource> = [.sparkle]
     func scan(settings: ScanSettings) async -> ScanReport { .empty }
     func scan(app: InstalledApp, settings: ScanSettings) async -> UpdateScanner.TargetedAppReport {
-        .init(updates: [], failedSources: [.sparkle], warnings: [])
+        .init(updates: [], failedSources: failedSources, warnings: [])
     }
 }
 private struct ReviewDiscovery: ApplicationDiscovering {
@@ -373,12 +391,13 @@ private actor ReviewInstaller: DirectAppInstalling {
     let opener = ReviewOpener()
     let store: UpkeepStore
     init(history: ReviewHistory = ReviewHistory(), installer: ReviewInstaller = ReviewInstaller(),
-         discoveredApp: InstalledApp = reviewApp(), developerReport: DeveloperPackageClient.Report = .empty) {
+         discoveredApp: InstalledApp = reviewApp(), developerReport: DeveloperPackageClient.Report = .empty,
+         scanner: ReviewScanner = ReviewScanner()) {
         defaults = UserDefaults(suiteName: suite)!
         settings = AppSettings(defaults: defaults)
         self.history = history; self.installer = installer
         store = UpkeepStore(settings: settings, dependencies: UpkeepDependencies(
-            scanner: ReviewScanner(), applicationDiscovery: ReviewDiscovery(app: discoveredApp), homebrew: ReviewBrew(),
+            scanner: scanner, applicationDiscovery: ReviewDiscovery(app: discoveredApp), homebrew: ReviewBrew(),
             developerPackages: ReviewDeveloper(report: developerReport), localModels: ReviewModels(), history: history,
             externalOpener: opener, directAppInstaller: installer, applicationLifecycle: lifecycle,
             externalVerificationInterval: .milliseconds(1)

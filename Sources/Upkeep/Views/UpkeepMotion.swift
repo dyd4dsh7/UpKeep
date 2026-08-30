@@ -5,10 +5,9 @@ enum UpkeepMotion {
     static let standard = Animation.spring(duration: 0.32, bounce: 0.08)
 
     static var stateTransition: AnyTransition {
-        .asymmetric(
-            insertion: .opacity.combined(with: .scale(scale: 0.985)),
-            removal: .opacity
-        )
+        // Scaling a surface also scales native AppKit progress controls through
+        // fractional sizes, producing invalid min/max geometry during scans.
+        .opacity
     }
 
     static var rowTransition: AnyTransition {

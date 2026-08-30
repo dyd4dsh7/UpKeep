@@ -366,6 +366,7 @@ final class UpkeepStore: ObservableObject {
         let report = await dependencies.scanner.scan(settings: settings.scanSettings)
         scanState.completedCheckState = UpdateCheckState.completed(report: report, settings: settings.scanSettings)
         scanState.macOSStatus = report.macOSUpdatesStatus
+        scanState.failedAppSources = report.failedAppSources
         apps = report.apps
         for app in apps {
             settings.migrateExclusion(from: legacyExclusionKey(for: app), to: exclusionKey(for: app))
@@ -425,6 +426,7 @@ final class UpkeepStore: ObservableObject {
         if selectedApp?.id == app.id { selectedApp = refreshedApp }
 
         let report = await dependencies.scanner.scan(app: refreshedApp, settings: settings.scanSettings)
+        scanState.failedAppSources[app.id] = report.failedSources.isEmpty ? nil : report.failedSources
         var candidates = (updates.first(where: { $0.app.id == app.id })?.candidates ?? [])
             .filter { $0.isNewer(than: refreshedApp) }
         let enabledSources = enabledUpdateSources(for: refreshedApp)
