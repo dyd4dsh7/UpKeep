@@ -36,6 +36,13 @@ a claim about every log ever produced or every installed app on the Mac.
 - **Blocked-address diagnostics were imprecise.** The error now includes reserved
   addresses and suggests checking DNS/VPN/network filters. Sparkle failure entries
   include the publisher hostname without recording URL credentials or query data.
+- **Selecting a search result published state during a view update.** A fresh
+  process reproduced the SwiftUI fault at 10:36:37 NZST when selecting ProtonVPN
+  from global search. The list's selection was a published property on a private
+  observable object. It now uses view-local `@State`, avoiding synchronous
+  object-change notifications while AppKit reconciles list selection. The same
+  interaction in the rebuilt app opened the correct inspector without a fault,
+  at both desktop width and the narrow half-screen window.
 
 ## Existing or external conditions
 
@@ -64,3 +71,23 @@ package, not a notarized release. No release publication, package update, or
 destructive cleanup was performed. Subsequent Git publication is separate from
 these local validation results.
 Ignored evidence is kept in `outputs/log-review-2026-08-31/`.
+
+## Final verification follow-up
+
+The earlier changes were committed as `1be4776` during the follow-up review.
+At completion of local verification, the additional `GlobalSearchView.swift` fix
+and this report update were uncommitted. Subsequent Git publication is separate
+from these checks; no release was published during verification.
+
+The rebuilt process (PID 81655) completed a full scan and the reproduced search
+interaction. Its checked unified log contained no faults, including no SwiftUI
+publication, progress-size, or constraint faults. Apple framework service errors
+listed above remain, along with a TextInputUI cancellation explicitly described
+by macOS as benign unless unexpected. No new crash report appeared during this
+verification. These observations cover the tested session, not a guarantee that
+every possible runtime path is fault-free.
+
+All 207 tests passed again after the search fix. Debug packaging and launch
+succeeded, and `git diff --check` passed. Evidence: `swift-test-search-fix.log`,
+`build-run-search-fix.log`, `unified-search-fix.log`, `search-fix-desktop.jpg`, and
+`search-fix-narrow.jpg` under the ignored evidence directory above.

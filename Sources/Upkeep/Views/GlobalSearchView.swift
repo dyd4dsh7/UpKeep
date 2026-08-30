@@ -2,7 +2,10 @@ import SwiftUI
 
 struct GlobalSearchView: View {
     @EnvironmentObject private var store: UpkeepStore
-    @StateObject private var searchState = GlobalSearchState()
+    // AppKit can update List selection while SwiftUI reconciles its rows.
+    // Keep this view-local value in State so it does not synchronously publish
+    // an ObservableObject change from inside that update.
+    @State private var selection: SearchResultSelection?
 
     var body: some View {
         let results = GlobalSearch(store: store).results
@@ -19,7 +22,7 @@ struct GlobalSearchView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .upkeepStateTransition()
             } else {
-                List(selection: $searchState.selection) {
+                List(selection: $selection) {
                     if !results.apps.isEmpty {
                         Section("Applications") {
                             ForEach(results.apps) { app in appRow(app) }
@@ -57,12 +60,12 @@ struct GlobalSearchView: View {
                     }
                 }
                 .listStyle(.inset)
-                .onChange(of: searchState.selection) { _, newSelection in
+                .onChange(of: selection) { _, newSelection in
                     guard let newSelection else { return }
                     activate(newSelection)
                 }
                 .onChange(of: query) { _, _ in
-                    searchState.selection = nil
+                    selection = nil
                 }
                 .upkeepStateTransition()
             }
@@ -79,7 +82,7 @@ struct GlobalSearchView: View {
     }
 
     private func appRow(_ app: InstalledApp) -> some View {
-        StandardItemRow(isSelected: searchState.selection == .application(app.id)) {
+        StandardItemRow(isSelected: selection == .application(app.id)) {
             AppIcon(url: app.url, size: 36)
         } content: {
             ItemIdentityView(
@@ -96,7 +99,7 @@ struct GlobalSearchView: View {
     }
 
     private func adoptableRow(_ item: AdoptableApp) -> some View {
-        StandardItemRow(isSelected: searchState.selection == .adoptable(item.id)) {
+        StandardItemRow(isSelected: selection == .adoptable(item.id)) {
             AppIcon(url: item.app.url, size: 36)
         } content: {
             ItemIdentityView(title: item.app.name, detail: "Adoptable · Homebrew \(item.caskToken)")
@@ -107,7 +110,7 @@ struct GlobalSearchView: View {
     }
 
     private func homebrewRow(_ package: HomebrewPackage) -> some View {
-        StandardItemRow(isSelected: searchState.selection == .homebrew(package.id)) {
+        StandardItemRow(isSelected: selection == .homebrew(package.id)) {
             BundledPackageIcon(name: "homebrew", size: 36)
         } content: {
             ItemIdentityView(
@@ -121,7 +124,7 @@ struct GlobalSearchView: View {
     }
 
     private func developerRow(_ package: DeveloperPackage) -> some View {
-        StandardItemRow(isSelected: searchState.selection == .developer(package.id)) {
+        StandardItemRow(isSelected: selection == .developer(package.id)) {
             PackageManagerIcon(manager: package.manager)
         } content: {
             ItemIdentityView(title: package.name, detail: package.manager.rawValue)
@@ -132,7 +135,7 @@ struct GlobalSearchView: View {
     }
 
     private func modelRow(_ model: LocalLLMModel) -> some View {
-        StandardItemRow(isSelected: searchState.selection == .model(model.id)) {
+        StandardItemRow(isSelected: selection == .model(model.id)) {
             LocalModelRuntimeIcon(runtime: model.runtime, size: 36)
         } content: {
             ItemIdentityView(
@@ -146,7 +149,7 @@ struct GlobalSearchView: View {
     }
 
     private func macOSRow(_ update: MacOSUpdate) -> some View {
-        StandardItemRow(isSelected: searchState.selection == .macOS(update.id)) {
+        StandardItemRow(isSelected: selection == .macOS(update.id)) {
             Image(systemName: update.isFullInstaller ? "internaldrive" : "apple.logo")
                 .font(.title2).foregroundStyle(update.isBeta ? .purple : .blue)
         } content: {
@@ -171,7 +174,7 @@ struct GlobalSearchView: View {
     }
 
     private func historyRow(_ record: UpdateRecord) -> some View {
-        StandardItemRow(isSelected: searchState.selection == .history(record.id)) {
+        StandardItemRow(isSelected: selection == .history(record.id)) {
             Image(systemName: historyIcon(record.kind)).foregroundStyle(.blue)
         } content: {
             ItemIdentityView(
@@ -236,9 +239,4 @@ private enum SearchResultSelection: Hashable {
     case model(String)
     case macOS(String)
     case history(UUID)
-}
-
-@MainActor
-private final class GlobalSearchState: ObservableObject {
-    @Published var selection: SearchResultSelection?
 }
