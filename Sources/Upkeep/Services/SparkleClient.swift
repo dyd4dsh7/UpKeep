@@ -17,17 +17,7 @@ struct SparkleClient: Sendable {
             }
             guard item.isNewer(than: app) else { return nil }
 
-            return AvailableUpdate(
-                app: app,
-                availableVersion: item.version,
-                source: .sparkle,
-                releaseNotes: item.releaseNotes,
-                actionURL: item.downloadURL ?? feedURL,
-                homebrewToken: nil,
-                sourcePrereleaseChannel: item.prereleaseChannel,
-                requiresInAppInstallation: item.installationType == .package,
-                verification: item.hasEdSignature ? .sparkleSignature : .publisherFeed
-            )
+            return item.availableUpdate(for: app, fallbackURL: feedURL)
         } catch { throw UpdateSourceError(error) }
     }
 }
@@ -46,6 +36,17 @@ struct SparkleFeedItem: Equatable {
     let downloadURL: URL?
     let installationType: SparkleInstallationType
     let hasEdSignature: Bool
+
+    func availableUpdate(for app: InstalledApp, fallbackURL: URL) -> AvailableUpdate {
+        AvailableUpdate(
+            app: app, availableVersion: version, source: .sparkle,
+            releaseNotes: releaseNotes, actionURL: downloadURL ?? fallbackURL,
+            homebrewToken: nil, sourcePrereleaseChannel: prereleaseChannel,
+            requiresInAppInstallation: installationType == .package,
+            verification: hasEdSignature ? .sparkleSignature : .publisherFeed,
+            availableBuildVersion: buildVersion, usesBuildVersionOnly: !hasMarketingVersion
+        )
+    }
 
     var prereleaseChannel: PrereleaseChannel? {
         sourcePrereleaseChannel ?? VersionComparator.prereleaseChannel(for: version)

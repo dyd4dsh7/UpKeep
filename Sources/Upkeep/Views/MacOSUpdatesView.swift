@@ -29,15 +29,17 @@ struct MacOSUpdatesView: View {
     @EnvironmentObject private var settings: AppSettings
 
     var body: some View {
-        let groups = MacOSUpdateGroups(store.macOSUpdates)
+        let groups = MacOSUpdateGroups(store.macOSUpdates.filter {
+            settings.sidebarViewMode == .advanced || !$0.isFullInstaller
+        })
         VStack(spacing: 0) {
             if groups.isEmpty {
                 ContentUnavailableView(
-                    "Your Mac is up to date",
-                    systemImage: "checkmark.seal.fill",
-                    description: Text(settings.sidebarViewMode == .advanced
-                        ? "Enable a beta channel with Beta Updates if you want prerelease builds."
-                        : "Upkeep will show new macOS updates here when Apple makes them available.")
+                    store.macOSCheckState == .complete ? "Your Mac is up to date" : store.macOSCheckState.title,
+                    systemImage: store.macOSCheckState.symbol,
+                    description: Text(store.macOSCheckState == .complete
+                        ? "Upkeep will show new macOS updates here when Apple makes them available."
+                        : store.macOSCheckState.detail)
                 ).frame(maxWidth: .infinity, maxHeight: .infinity)
                     .upkeepStateTransition()
             } else {
@@ -92,12 +94,9 @@ struct MacOSUpdatesView: View {
                 prereleaseChannel: update.prereleaseChannel
             )
         } accessories: {
-            ItemStatusView(
-                title: update.isFullInstaller ? "Installer" : "Available",
-                systemImage: update.isFullInstaller ? "internaldrive" : "arrow.down.circle.fill",
-                color: update.isBeta ? .purple : .accentColor
-            )
-            InstalledVersionView(version: update.version)
+            Text(update.version)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
             Button {
                 Task { await store.prepareMacOSUpdate(update) }
             } label: {

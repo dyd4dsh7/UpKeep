@@ -67,7 +67,8 @@ import Testing
             homebrew: HomebrewClient(),
             developerPackages: DeveloperPackageClient(),
             packageCleanup: cleanup,
-            localModels: LocalModelClient()
+            localModels: LocalModelClient(),
+            history: TestUpdateHistory()
         )
     )
     let target = PackageCleanupTarget(kind: .pnpm, executablePath: "/usr/local/bin/pnpm")

@@ -89,7 +89,7 @@ struct UpdateHistoryView: View {
             }
             Button("Cancel", role: .cancel) { store.pendingRevert = nil }
         } message: {
-            Text("The current app will be moved to Trash and Upkeep’s pre-update backup will be restored.")
+            Text("Upkeep will prepare and validate the backup before replacing the current app. If the app is running, you will be asked to quit it. The replaced app will be moved to Trash after the restore succeeds.")
         }
     }
 

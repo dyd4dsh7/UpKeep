@@ -274,6 +274,8 @@ enum PrereleaseChannel: String, Codable, Hashable, Sendable {
 
 struct UpdateCandidate: Identifiable, Hashable, Sendable {
     var id: UpdateSource { source }
+    let availableBuildVersion: String?
+    let usesBuildVersionOnly: Bool
     let availableVersion: String
     let source: UpdateSource
     let releaseNotes: String?
@@ -293,9 +295,13 @@ struct UpdateCandidate: Identifiable, Hashable, Sendable {
         sourcePrereleaseChannel: PrereleaseChannel?,
         requiresHomebrewAdoption: Bool,
         requiresInAppInstallation: Bool = false,
-        verification: ReleaseVerification? = nil
+        verification: ReleaseVerification? = nil,
+        availableBuildVersion: String? = nil,
+        usesBuildVersionOnly: Bool = false
     ) {
         self.availableVersion = availableVersion
+        self.availableBuildVersion = availableBuildVersion
+        self.usesBuildVersionOnly = usesBuildVersionOnly
         self.source = source
         self.releaseNotes = releaseNotes
         self.actionURL = actionURL
@@ -343,7 +349,7 @@ struct AvailableUpdate: Identifiable, Hashable, Sendable {
     var source: UpdateSource { primaryCandidate.source }
     var releaseNotes: String? { primaryCandidate.releaseNotes }
     var actionURL: URL? { primaryCandidate.actionURL }
-    var homebrewToken: String? { primaryCandidate.homebrewToken }
+    var homebrewToken: String? { app.isUpkeep ? nil : primaryCandidate.homebrewToken }
     var sourcePrereleaseChannel: PrereleaseChannel? { primaryCandidate.sourcePrereleaseChannel }
 
     init(
@@ -356,7 +362,9 @@ struct AvailableUpdate: Identifiable, Hashable, Sendable {
         sourcePrereleaseChannel: PrereleaseChannel? = nil,
         requiresHomebrewAdoption: Bool = false,
         requiresInAppInstallation: Bool = false,
-        verification: ReleaseVerification? = nil
+        verification: ReleaseVerification? = nil,
+        availableBuildVersion: String? = nil,
+        usesBuildVersionOnly: Bool = false
     ) {
         self.app = app
         self.candidates = [UpdateCandidate(
@@ -368,7 +376,9 @@ struct AvailableUpdate: Identifiable, Hashable, Sendable {
             sourcePrereleaseChannel: sourcePrereleaseChannel,
             requiresHomebrewAdoption: requiresHomebrewAdoption,
             requiresInAppInstallation: requiresInAppInstallation,
-            verification: verification
+            verification: verification,
+            availableBuildVersion: availableBuildVersion,
+            usesBuildVersionOnly: usesBuildVersionOnly
         )]
     }
 
@@ -394,7 +404,9 @@ struct AvailableUpdate: Identifiable, Hashable, Sendable {
             sourcePrereleaseChannel: candidate.sourcePrereleaseChannel,
             requiresHomebrewAdoption: candidate.requiresHomebrewAdoption,
             requiresInAppInstallation: candidate.requiresInAppInstallation,
-            verification: candidate.verification
+            verification: candidate.verification,
+            availableBuildVersion: candidate.availableBuildVersion,
+            usesBuildVersionOnly: candidate.usesBuildVersionOnly
         )
     }
 
@@ -404,7 +416,9 @@ struct AvailableUpdate: Identifiable, Hashable, Sendable {
                 if left.requiresHomebrewAdoption != right.requiresHomebrewAdoption {
                     return !left.requiresHomebrewAdoption
                 }
-                return VersionComparator.compare(left.availableVersion, right.availableVersion) == .orderedDescending
+                let order = VersionComparator.compare(left.availableVersion, right.availableVersion)
+                if order != .orderedSame { return order == .orderedDescending }
+                return VersionComparator.isNewer(left.availableBuildVersion ?? "", than: right.availableBuildVersion ?? "")
             }.first
         }
         return bestBySource.sorted { left, right in
@@ -432,9 +446,9 @@ struct AvailableUpdate: Identifiable, Hashable, Sendable {
         availablePrereleaseChannel ?? app.prereleaseChannel
     }
     var prereleaseIsInstalled: Bool { availablePrereleaseChannel == nil && app.prereleaseChannel != nil }
-    var requiresInAppInstallation: Bool { primaryCandidate.requiresInAppInstallation }
+    var requiresInAppInstallation: Bool { !app.isUpkeep && primaryCandidate.requiresInAppInstallation }
     var directInstallURL: URL? {
-        guard !requiresInAppInstallation,
+        guard !app.isUpkeep, !requiresInAppInstallation,
               source == .sparkle || source == .github,
               let actionURL,
               actionURL.scheme?.lowercased() == "https",
@@ -445,11 +459,13 @@ struct AvailableUpdate: Identifiable, Hashable, Sendable {
     var canInstallDirectly: Bool { directInstallURL != nil }
 
     var actionTitle: String {
+        if app.isUpkeep { return "View Release" }
         if canInstallDirectly { return "Update" }
         return primaryCandidate.actionTitle
     }
 
     var actionDescription: String {
+        if app.isUpkeep { return "Download the signed release, then quit Upkeep and replace it in Applications" }
         if canInstallDirectly { return "Download, verify, and install with Upkeep" }
         if requiresInAppInstallation { return "Open the app to run its built-in updater" }
         return switch source {
@@ -552,6 +568,7 @@ struct BatchUpdateResult: Identifiable, Hashable, Sendable {
     let item: BatchUpdateItem
     let outcome: Outcome
     let detail: String
+    var warning: String? = nil
     var id: String { item.id }
 }
 
@@ -747,7 +764,7 @@ struct LocalLLMModel: Identifiable, Hashable, Sendable {
     let updateReference: String
     let isOutdated: Bool
     var prereleaseChannel: PrereleaseChannel? {
-        variant.flatMap { VersionComparator.prereleaseChannel(for: $0) }
+        ModelReleaseChannel.detect(in: variant)
     }
 }
 

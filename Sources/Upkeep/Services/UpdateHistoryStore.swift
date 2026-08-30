@@ -7,6 +7,7 @@ actor UpdateHistoryStore {
     private let root: URL
     private let historyURL: URL
     private let backupRoot: URL
+    private let recoveryRoot: URL
     private let maximumBackupsPerApp: Int
     private let maximumBackupsTotal: Int
     private var pendingBackupPaths = Set<String>()
@@ -17,13 +18,19 @@ actor UpdateHistoryStore {
         self.maximumBackupsPerApp = max(0, maximumBackupsPerApp)
         self.maximumBackupsTotal = max(0, maximumBackupsTotal)
         backupRoot = self.root.appendingPathComponent("Backups", isDirectory: true)
+        recoveryRoot = self.root.appendingPathComponent("RecoveryRecords", isDirectory: true)
         historyURL = self.root.appendingPathComponent("history.json")
     }
 
     func records() -> [UpdateRecord] {
-        guard let values = loadRecords() else { return [] }
-        maintainBackups(referencedBy: values)
-        return values
+        let values = loadRecords()
+        let recovery = loadRecoveryRecords().filter {
+            !pendingBackupPaths.contains($0.backupPath ?? "")
+        }
+        let merged = Dictionary((values ?? []).map { ($0.id, $0) } + recovery.map { ($0.id, $0) },
+                                uniquingKeysWith: { saved, _ in saved }).values
+        if let values { maintainBackups(referencedBy: values) }
+        return merged.sorted { $0.date > $1.date }
     }
 
     func prepareAppBackup(app: InstalledApp, toVersion: String, kind: UpdateRecordKind) throws -> UpdateRecord {
@@ -37,8 +44,7 @@ actor UpdateHistoryStore {
             try? FileManager.default.removeItem(at: backupURL)
             throw error
         }
-        pendingBackupPaths.insert(backupURL.standardizedFileURL.path)
-        return UpdateRecord(
+        let record = UpdateRecord(
             id: id,
             date: Date(),
             name: app.name,
@@ -49,14 +55,35 @@ actor UpdateHistoryStore {
             backupPath: backupURL.path,
             recoveryNote: nil
         )
+        // Persist recovery metadata before any installation. A failed history
+        // write or app crash must not turn this backup into a cleanup orphan.
+        do {
+            try FileManager.default.createDirectory(at: recoveryRoot, withIntermediateDirectories: true)
+            let recovery = UpdateRecord(
+                id: record.id, date: record.date, name: record.name,
+                fromVersion: record.fromVersion, toVersion: record.toVersion,
+                kind: record.kind, originalAppPath: record.originalAppPath, backupPath: record.backupPath,
+                recoveryNote: "Recovery backup from an interrupted update or history-save failure. Check the installed version before restoring."
+            )
+            try JSONEncoder().encode(recovery).write(to: recoveryURL(for: record), options: .atomic)
+        } catch {
+            try? FileManager.default.removeItem(at: backupURL)
+            throw error
+        }
+        pendingBackupPaths.insert(backupURL.standardizedFileURL.path)
+        return record
     }
 
     func add(_ record: UpdateRecord) throws {
+        defer {
+            if let path = record.backupPath { pendingBackupPaths.remove(path) }
+        }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         guard var values = loadRecords() else { throw HistoryError.historyUnreadable }
         values.insert(record, at: 0)
         let data = try JSONEncoder().encode(values)
         try data.write(to: historyURL, options: .atomic)
+        try? FileManager.default.removeItem(at: recoveryURL(for: record))
         if let backupPath = record.backupPath,
            let backupURL = managedBackupURL(for: backupPath) {
             pendingBackupPaths.remove(backupURL.standardizedFileURL.path)
@@ -70,6 +97,7 @@ actor UpdateHistoryStore {
         else { return }
         pendingBackupPaths.remove(backupURL.standardizedFileURL.path)
         try? FileManager.default.removeItem(at: backupURL)
+        try? FileManager.default.removeItem(at: recoveryURL(for: record))
     }
 
     func addMacOSPlan(update: MacOSUpdate) throws {
@@ -89,11 +117,33 @@ actor UpdateHistoryStore {
         let original = URL(fileURLWithPath: originalPath)
         let backup = URL(fileURLWithPath: backupPath)
         guard FileManager.default.fileExists(atPath: backup.path) else { throw HistoryError.backupMissing }
-        if FileManager.default.fileExists(atPath: original.path) {
+        let manager = FileManager.default
+        let parent = original.deletingLastPathComponent()
+        let staged = parent.appendingPathComponent(".Upkeep-Restore-\(UUID().uuidString).app")
+        let displaced = parent.appendingPathComponent(".Upkeep-Previous-\(UUID().uuidString).app")
+        defer { try? manager.removeItem(at: staged) }
+        let originalIdentifier = Bundle(url: original)?.bundleIdentifier
+        let hadInstalledApp = try AppRestoreTransaction.perform(
+            backup: backup, installed: original, staged: staged, displaced: displaced,
+            exists: { manager.fileExists(atPath: $0.path) },
+            copy: { try manager.copyItem(at: $0, to: $1) },
+            validate: { candidate in
+                guard let bundle = Bundle(url: candidate),
+                      let identifier = bundle.bundleIdentifier,
+                      originalIdentifier == nil || identifier == originalIdentifier,
+                      let version = (bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString")
+                        ?? bundle.object(forInfoDictionaryKey: "CFBundleVersion")) as? String,
+                      version == record.fromVersion
+                else { throw AppRestoreTransaction.RestoreError.invalidBackup }
+            },
+            move: { try manager.moveItem(at: $0, to: $1) }
+        )
+        if hadInstalledApp {
             var resultingURL: NSURL?
-            try FileManager.default.trashItem(at: original, resultingItemURL: &resultingURL)
+            // Trash is housekeeping after success. If unavailable, retain the old
+            // app at the displaced path rather than undoing a successful restore.
+            try? manager.trashItem(at: displaced, resultingItemURL: &resultingURL)
         }
-        try FileManager.default.copyItem(at: backup, to: original)
     }
 
     private func loadRecords() -> [UpdateRecord]? {
@@ -102,8 +152,25 @@ actor UpdateHistoryStore {
         return try? JSONDecoder().decode([UpdateRecord].self, from: data)
     }
 
+    private func recoveryURL(for record: UpdateRecord) -> URL {
+        recoveryRoot.appendingPathComponent("\(record.id.uuidString).json")
+    }
+
+    private func loadRecoveryRecords() -> [UpdateRecord] {
+        guard let urls = try? FileManager.default.contentsOfDirectory(at: recoveryRoot, includingPropertiesForKeys: nil) else { return [] }
+        return urls.compactMap { url in
+            guard let data = try? Data(contentsOf: url),
+                  let record = try? JSONDecoder().decode(UpdateRecord.self, from: data),
+                  let path = record.backupPath,
+                  let backup = managedBackupURL(for: path),
+                  FileManager.default.fileExists(atPath: backup.path) else { return nil }
+            return record
+        }
+    }
+
     private func maintainBackups(referencedBy records: [UpdateRecord]) {
         var keptPaths = pendingBackupPaths
+        keptPaths.formUnion(loadRecoveryRecords().compactMap(\.backupPath))
         var keptPerApp: [String: Int] = [:]
         var keptTotal = 0
 

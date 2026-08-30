@@ -3,9 +3,39 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject private var store: UpkeepStore
     @EnvironmentObject private var settings: AppSettings
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var sidebarCollapsedForInspector = false
 
     var body: some View {
-        NavigationSplitView {
+        GeometryReader { geometry in
+            workspace
+                .onChange(of: inspectorPresented.wrappedValue) { _, _ in
+                    adaptSidebar(to: geometry.size.width)
+                }
+                .onChange(of: geometry.size.width) { _, width in
+                    adaptSidebar(to: width)
+                }
+                .onChange(of: columnVisibility) { _, visibility in
+                    if sidebarCollapsedForInspector, visibility != .detailOnly {
+                        sidebarCollapsedForInspector = false
+                        inspectorPresented.wrappedValue = false
+                    }
+                }
+        }
+    }
+
+    private func adaptSidebar(to width: CGFloat) {
+        if inspectorPresented.wrappedValue && width < 1_000 {
+            sidebarCollapsedForInspector = true
+            columnVisibility = .detailOnly
+        } else if sidebarCollapsedForInspector {
+            sidebarCollapsedForInspector = false
+            columnVisibility = .all
+        }
+    }
+
+    private var workspace: some View {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             UpkeepSidebarView()
                 .navigationSplitViewColumnWidth(min: 215, ideal: 235, max: 300)
                 // Keep independent alerts on separate branches. Chaining multiple
@@ -14,15 +44,14 @@ struct ContentView: View {
                 .upkeepHomebrewAuthorizationAlert(store)
         } detail: {
             detail
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // The window owns its minimum size. Avoid feeding changing list,
+                // banner, and inspector minima back into AppKit's split layout.
+                .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                 .upkeepRunningAppConfirmationAlert(store)
                 .inspector(isPresented: inspectorPresented) {
                     inspectorContent
-                        .inspectorColumnWidth(
-                            min: UpkeepLayout.inspectorMinimumWidth,
-                            ideal: UpkeepLayout.inspectorIdealWidth,
-                            max: UpkeepLayout.inspectorMaximumWidth
-                        )
+                        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                        .inspectorColumnWidth(UpkeepLayout.inspectorIdealWidth)
                 }
         }
         .navigationTitle(navigationTitle)
@@ -107,15 +136,20 @@ struct ContentView: View {
     }
 
     @ViewBuilder private var detail: some View {
-        ZStack {
-            if isSearching {
-                GlobalSearchView()
-                    .id("search")
-                    .upkeepStateTransition()
-            } else {
-                destinationDetail
-                    .id(store.selection)
-                    .upkeepStateTransition()
+        VStack(spacing: 0) {
+            if store.selection != .history {
+                ScanStatusNotice(isMacOS: store.selection == .macOSUpdates)
+            }
+            ZStack {
+                if isSearching {
+                    GlobalSearchView()
+                        .id("search")
+                        .upkeepStateTransition()
+                } else {
+                    destinationDetail
+                        .id(store.selection)
+                        .upkeepStateTransition()
+                }
             }
         }
         .upkeepAnimated(for: detailSurfaceID)

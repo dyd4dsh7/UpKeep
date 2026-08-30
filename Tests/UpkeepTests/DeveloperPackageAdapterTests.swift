@@ -66,7 +66,8 @@ import Testing
             scanner: EmptyScanner(),
             homebrew: HomebrewClient(),
             developerPackages: manager,
-            localModels: LocalModelClient()
+            localModels: LocalModelClient(),
+            history: TestUpdateHistory()
         )
     )
     let package = adapterPackage(manager: .npm, name: "typescript")
@@ -88,7 +89,8 @@ import Testing
             scanner: EmptyScanner(),
             homebrew: HomebrewClient(),
             developerPackages: manager,
-            localModels: LocalModelClient()
+            localModels: LocalModelClient(),
+            history: TestUpdateHistory()
         )
     )
     let package = adapterPackage(manager: .npm, name: "typescript")

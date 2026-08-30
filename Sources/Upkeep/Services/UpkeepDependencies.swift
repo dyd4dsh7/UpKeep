@@ -160,6 +160,8 @@ struct UpkeepDependencies: Sendable {
     let history: any UpdateHistoryManaging
     let externalOpener: any ExternalOpening
     let directAppInstaller: any DirectAppInstalling
+    let applicationLifecycle: any ApplicationLifecycleManaging
+    let externalVerificationInterval: Duration
 
     init(
         scanner: any UpdateScanning,
@@ -168,9 +170,11 @@ struct UpkeepDependencies: Sendable {
         developerPackages: any DeveloperPackageManaging,
         packageCleanup: any PackageCleanupManaging = PackageCleanupClient(),
         localModels: any LocalModelManaging,
-        history: any UpdateHistoryManaging = UpdateHistoryStore.shared,
+        history: any UpdateHistoryManaging,
         externalOpener: any ExternalOpening = WorkspaceExternalOpener(),
-        directAppInstaller: any DirectAppInstalling = DirectAppInstaller()
+        directAppInstaller: any DirectAppInstalling = DirectAppInstaller(),
+        applicationLifecycle: any ApplicationLifecycleManaging = WorkspaceApplicationLifecycle(),
+        externalVerificationInterval: Duration = .seconds(3)
     ) {
         self.scanner = scanner
         self.applicationDiscovery = applicationDiscovery
@@ -181,6 +185,8 @@ struct UpkeepDependencies: Sendable {
         self.history = history
         self.externalOpener = externalOpener
         self.directAppInstaller = directAppInstaller
+        self.applicationLifecycle = applicationLifecycle
+        self.externalVerificationInterval = externalVerificationInterval
     }
 
     static let live = UpkeepDependencies(

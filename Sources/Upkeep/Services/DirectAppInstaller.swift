@@ -107,15 +107,20 @@ struct DirectAppInstaller: DirectAppInstalling, Sendable {
         else { throw InstallError.bundleIdentifierMismatch }
         let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
             ?? bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String
-        guard let version,
-              VersionComparator.compare(version, update.app.installedVersion) == .orderedDescending,
-              VersionComparator.compare(version, update.availableVersion) == .orderedSame
-        else { throw InstallError.versionMismatch }
+        let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        try Self.validateVersion(version: version, build: build, update: update)
         try run("/usr/bin/codesign", ["--verify", "--strict", replacement.path])
         try run("/usr/bin/codesign", ["--verify", "--strict", update.app.url.path])
         guard try signingIdentity(for: replacement) == signingIdentity(for: update.app.url) else {
             throw InstallError.signingIdentityMismatch
         }
+    }
+
+    static func validateVersion(version: String?, build: String?, update: AvailableUpdate) throws {
+        guard let version,
+              update.primaryCandidate.isNewer(than: update.app),
+              update.primaryCandidate.matchesDownload(version: version, build: build)
+        else { throw InstallError.versionMismatch }
     }
 
     private func replace(_ installed: URL, with replacement: URL, for update: AvailableUpdate) throws {

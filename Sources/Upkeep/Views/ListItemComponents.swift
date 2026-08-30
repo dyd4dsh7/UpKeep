@@ -67,7 +67,7 @@ struct StandardItemRow<Icon: View, Content: View, Accessories: View>: View {
             }
             .fixedSize(horizontal: true, vertical: false)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, settings.listDensity == .compact ? 2 : 6)
         .padding(.vertical, settings.listDensity == .compact ? 5 : 10)
         .background {

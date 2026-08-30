@@ -7,36 +7,17 @@ struct UpdateDecisionHeader: View {
     let review: () -> Void
 
     var body: some View {
-        HStack(spacing: 20) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text(title)
-                    .font(.title2.bold())
-                    .contentTransition(.numericText())
-                Text(detail)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 20) {
+                heading.fixedSize(horizontal: true, vertical: false)
+                Spacer(minLength: 24)
+                actions
             }
-
-            Spacer(minLength: 24)
-
-            UpdateDecisionMetric(
-                value: recommendedCount,
-                label: "Recommended",
-                systemImage: "checkmark.shield.fill",
-                color: .green
-            )
-            UpdateDecisionMetric(
-                value: attentionCount,
-                label: "Review",
-                systemImage: "hand.raised.fill",
-                color: .orange
-            )
-
-            Button(buttonTitle, action: review)
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .disabled(isWorking)
-                .keyboardShortcut(.defaultAction)
+            VStack(alignment: .leading, spacing: 12) {
+                heading
+                actions
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
@@ -44,6 +25,32 @@ struct UpdateDecisionHeader: View {
         .accessibilityElement(children: .contain)
         .upkeepAnimated(for: recommendedCount)
         .upkeepAnimated(for: attentionCount)
+    }
+
+    private var heading: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.title2.bold())
+                .contentTransition(.numericText())
+            Text(detail)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var actions: some View {
+        HStack(spacing: 12) {
+            UpdateDecisionMetric(value: recommendedCount, label: "Recommended",
+                                 systemImage: "checkmark.shield.fill", color: .green)
+            UpdateDecisionMetric(value: attentionCount, label: "Review",
+                                 systemImage: "hand.raised.fill", color: .orange)
+            Button(buttonTitle, action: review)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .fixedSize()
+                .disabled(isWorking)
+                .keyboardShortcut(.defaultAction)
+        }
     }
 
     private var title: String {

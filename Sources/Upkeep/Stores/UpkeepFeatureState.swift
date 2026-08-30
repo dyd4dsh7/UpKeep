@@ -194,6 +194,8 @@ final class UpkeepScanState: ObservableObject {
     @Published var nextScheduledCheck: Date?
     @Published var errorMessage: String?
     @Published var scanWarnings: [ScanWarning] = []
+    @Published var completedCheckState: UpdateCheckState?
+    @Published var macOSStatus: ScanStatus?
 
     init(lastChecked: Date?) {
         self.lastChecked = lastChecked

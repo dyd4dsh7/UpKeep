@@ -60,7 +60,7 @@ private func historyTestApp(at url: URL, name: String = "Example") throws -> Ins
     try Data("not-json".utf8).write(to: dataRoot.appendingPathComponent("history.json"))
 
     let relaunchedStore = UpdateHistoryStore(root: dataRoot)
-    #expect(await relaunchedStore.records().isEmpty)
+    #expect(await relaunchedStore.records().map(\.id) == [record.id])
     #expect(FileManager.default.fileExists(atPath: try #require(record.backupPath)))
 }
 
@@ -87,4 +87,30 @@ private func historyTestApp(at url: URL, name: String = "Example") throws -> Ins
     #expect(!records[0].canRevertDirectly)
     #expect(records[1].canRevertDirectly)
     #expect(records[2].canRevertDirectly)
+}
+
+@Test func historyWriteFailureKeepsRecoverableBackupAcrossRelaunchAndCleanup() async throws {
+    let manager = FileManager.default
+    let temporaryRoot = manager.temporaryDirectory.appendingPathComponent("UpkeepHistoryTests-\(UUID())")
+    defer { try? manager.removeItem(at: temporaryRoot) }
+    let dataRoot = temporaryRoot.appendingPathComponent("Data")
+    let app = try historyTestApp(at: temporaryRoot.appendingPathComponent("Example.app"))
+    let store = UpdateHistoryStore(root: dataRoot, maximumBackupsPerApp: 0, maximumBackupsTotal: 0)
+    let record = try await store.prepareAppBackup(app: app, toVersion: "2.0", kind: .app)
+    // A directory at history.json forces an actual persistence failure.
+    let historyURL = dataRoot.appendingPathComponent("history.json")
+    try manager.createDirectory(at: historyURL, withIntermediateDirectories: true)
+    do {
+        try await store.add(record)
+        Issue.record("Expected a history write failure")
+    } catch { }
+    #expect(await store.records().map(\.id) == [record.id])
+    try manager.removeItem(at: historyURL)
+    let relaunched = UpdateHistoryStore(root: dataRoot, maximumBackupsPerApp: 0, maximumBackupsTotal: 0)
+    let recovered = await relaunched.records()
+    #expect(recovered.map(\.id) == [record.id])
+    #expect(recovered.first?.recoveryNote?.contains("interrupted") == true)
+    #expect(manager.fileExists(atPath: try #require(record.backupPath)))
+    _ = await relaunched.records()
+    #expect(manager.fileExists(atPath: try #require(record.backupPath)))
 }

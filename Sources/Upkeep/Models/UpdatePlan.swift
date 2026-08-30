@@ -77,12 +77,15 @@ struct UpdatePlan: Sendable {
     let modelUpdates: [LocalLLMModel]
 
     var batchItems: [BatchUpdateItem] {
-        let representedCaskTokens = Set(applicationUpdates.flatMap { $0.candidates.compactMap(\.homebrewToken) })
-        let unrepresentedHomebrew = homebrewUpdates.filter { !representedCaskTokens.contains($0.token) }
         return applicationUpdates.map(BatchUpdateItem.application)
-            + unrepresentedHomebrew.map(BatchUpdateItem.homebrew)
+            + unrepresentedHomebrewUpdates.map(BatchUpdateItem.homebrew)
             + developerUpdates.map(BatchUpdateItem.developer)
             + modelUpdates.map(BatchUpdateItem.model)
+    }
+
+    var unrepresentedHomebrewUpdates: [HomebrewPackage] {
+        let tokens = Set(applicationUpdates.flatMap { $0.candidates.compactMap(\.homebrewToken) })
+        return homebrewUpdates.filter { $0.kind != .cask || !tokens.contains($0.token) }
     }
 
     var recommendedBatchItems: [BatchUpdateItem] {
@@ -104,7 +107,7 @@ struct UpdatePlan: Sendable {
     ) -> Int {
         let representedCaskTokens = Set(applicationUpdates.flatMap { $0.candidates.compactMap(\.homebrewToken) })
         let requestedHomebrewCount = homebrewUpdates.count {
-            !$0.isDependency && !representedCaskTokens.contains($0.token)
+            !$0.isDependency && ($0.kind != .cask || !representedCaskTokens.contains($0.token))
         }
         return applicationUpdates.count
             + requestedHomebrewCount

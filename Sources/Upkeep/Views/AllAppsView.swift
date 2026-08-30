@@ -56,7 +56,7 @@ struct AllAppsView: View {
                         } else {
                             if let update {
                                 UpdateExclusionOptions(
-                                    skipTitle: "Skip Version \(update.availableVersion)",
+                                    skipTitle: "Skip Version \(update.displayAvailableVersion)",
                                     ignoreTitle: "Ignore \(app.name) Indefinitely",
                                     skip: { store.skip(update) }, ignore: { store.ignore(app) },
                                     skipFor: { store.skip(update, duration: $0) },
@@ -393,7 +393,7 @@ struct AppDetailView: View {
                 if let update {
                     VersionTransitionView(
                         current: app.installedVersion,
-                        latest: update.availableVersion,
+                        latest: update.displayAvailableVersion,
                         usesFixedWidth: false
                     )
                 } else {
@@ -475,7 +475,7 @@ struct AppDetailView: View {
                             SourceBadge(source: candidate.source)
                             VStack(alignment: .leading, spacing: 3) {
                                 HStack(spacing: 7) {
-                                    Text("Version \(candidate.availableVersion)")
+                                    Text("Version \(update.selecting(candidate).displayAvailableVersion)")
                                         .font(.callout.weight(.medium))
                                         .monospacedDigit()
                                     if index == 0 {
@@ -618,7 +618,7 @@ struct AppDetailView: View {
                 HStack(alignment: .firstTextBaseline) {
                     Text("What’s New").font(.title2.weight(.semibold))
                     Spacer()
-                    Text("Version \(update.availableVersion)")
+                    Text("Version \(update.displayAvailableVersion)")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
@@ -793,7 +793,7 @@ struct AppDetailView: View {
             Button("Restore Updates") { store.restore(exclusion) }
         } else if let update {
                 UpdateExclusionOptions(
-                    skipTitle: "Skip Version \(update.availableVersion)",
+                    skipTitle: "Skip Version \(update.displayAvailableVersion)",
                     ignoreTitle: "Ignore Updates Indefinitely",
                     skip: { store.skip(update) },
                     ignore: { store.ignore(app) },
@@ -820,7 +820,7 @@ struct AppDetailView: View {
     private var homebrewAdoptionIgnored: Bool { store.isHomebrewAdoptionIgnored(app) }
 
     private func candidateActionTitle(_ candidate: UpdateCandidate) -> String {
-        candidate.actionTitle
+        app.isUpkeep ? "View Release" : candidate.actionTitle
     }
 
     private var statusTitle: String {

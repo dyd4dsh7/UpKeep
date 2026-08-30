@@ -218,7 +218,8 @@ struct UpdatesView: View {
 
     private var filteredPackages: [HomebrewPackage] {
         guard viewState.filter == .all || viewState.filter == .homebrew else { return [] }
-        return store.homebrewPackages.filter {
+        let packages = viewState.filter == .all ? store.updatePlan.unrepresentedHomebrewUpdates : store.homebrewPackages
+        return packages.filter {
             $0.isOutdated && !store.isExcluded($0)
                 && (viewState.filter == .homebrew || !$0.isDependency)
                 && (store.searchText.isEmpty || $0.displayName.localizedCaseInsensitiveContains(store.searchText))
@@ -296,12 +297,12 @@ struct UpdatesView: View {
 
     private var emptyState: some View {
         ContentUnavailableView {
-            Label(emptyTitle, systemImage: "checkmark.seal.fill")
+            Label(emptyTitle, systemImage: store.updateCheckState.symbol)
         } description: {
             Text(store.searchText.isEmpty
                  ? (viewState.filter != .all
                     ? "No available updates match the selected category."
-                    : "Supported update sources reported no newer versions for your apps.")
+                    : store.updateCheckState.detail)
                  : "Try a different search term.")
         } actions: {
             if store.searchText.isEmpty {
@@ -314,6 +315,7 @@ struct UpdatesView: View {
 
     private var emptyTitle: String {
         if !store.searchText.isEmpty { return "No matching updates" }
+        if store.updateCheckState != .complete { return store.updateCheckState.title }
         if viewState.filter != .all { return "No \(viewState.filter.rawValue)" }
         return "No updates found"
     }
@@ -460,6 +462,10 @@ private struct BatchUpdateSheet: View {
                             .foregroundStyle(resultColor(result.outcome))
                     }
                     Text(result.detail).font(.caption).foregroundStyle(.secondary)
+                    if let warning = result.warning {
+                        Label(warning, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
                 }
             }
             .padding(.vertical, 6)
@@ -523,17 +529,7 @@ private struct BatchUpdateSheet: View {
     private var selectedItems: [BatchUpdateItem] { visibleItems.filter { state.selectedIDs.contains($0.id) } }
 
     private var selectedRunningApps: [InstalledApp] {
-        selectedItems.compactMap { item in
-            switch item {
-            case let .application(update): return update.homebrewToken == nil || !store.isRunning(update.app) ? nil : update.app
-            case let .homebrew(package):
-                guard package.kind == .cask,
-                      let app = store.homebrewPackageApp(for: package),
-                      store.isRunning(app) else { return nil }
-                return app
-            case .developer, .model: return nil
-            }
-        }
+        store.runningAppsForBatch(selectedItems)
     }
 
     private var batchButtonTitle: String {
@@ -650,7 +646,7 @@ private struct BatchReviewRow: View {
                 Text(item.actionDescription).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            VersionTransitionView(current: item.currentVersion, latest: item.availableVersion)
+            VersionTransitionView(current: item.currentVersion, latest: displayedVersion)
             if item.opensExternalUpdater {
                 Image(systemName: "arrow.up.right.square")
                     .foregroundStyle(.secondary)
@@ -660,6 +656,11 @@ private struct BatchReviewRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 5)
         .listRowSeparator(.hidden)
+    }
+
+    private var displayedVersion: String {
+        if case let .application(update) = item { return update.displayAvailableVersion }
+        return item.availableVersion
     }
 
     private var isAppRunning: Bool {
@@ -778,7 +779,7 @@ struct UpdateCard: View {
             if store.isRefreshing(update.app) {
                 RefreshingIndicator(itemName: update.app.name)
             }
-            VersionTransitionView(current: update.app.installedVersion, latest: update.availableVersion)
+            VersionTransitionView(current: update.app.installedVersion, latest: update.displayAvailableVersion)
             Button {
                 Task { await store.performUpdate(update) }
             } label: {
@@ -796,7 +797,7 @@ struct UpdateCard: View {
                 .disabled(store.isWorking(.applicationRefresh(update.app.id)))
             Divider()
             exclusionOptions(
-                skipTitle: "Skip Version \(update.availableVersion)",
+                skipTitle: "Skip Version \(update.displayAvailableVersion)",
                 skip: { store.skip(update) }, ignore: { store.ignore(update.app) },
                 skipFor: { store.skip(update, duration: $0) },
                 ignoreFor: { store.ignore(update.app, duration: $0) }

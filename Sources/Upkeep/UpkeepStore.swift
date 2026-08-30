@@ -11,6 +11,7 @@ struct RunningAppConfirmation: Identifiable {
         case adopt(AdoptableApp)
         case updateAdoptable(AdoptableApp)
         case allPackages
+        case restore(UpdateRecord)
     }
 
     let id = UUID()
@@ -26,6 +27,7 @@ struct RunningAppConfirmation: Identifiable {
         switch action {
         case .adopt: "Quit and Adopt"
         case .allPackages: "Quit Apps and Update"
+        case .restore: "Quit and Restore"
         default: "Quit and Update"
         }
     }
@@ -43,17 +45,6 @@ struct HomebrewAuthorizationConfirmation: Identifiable {
     let id = UUID()
     let itemName: String
     let action: Action
-}
-
-private enum RunningAppUpdateError: LocalizedError {
-    case couldNotQuit([String])
-
-    var errorDescription: String? {
-        switch self {
-        case let .couldNotQuit(names):
-            return "Could not quit \(names.formatted()). Quit \(names.count == 1 ? "the app" : "these apps") manually, then try the update again."
-        }
-    }
 }
 
 private enum BatchUpdateError: LocalizedError {
@@ -74,6 +65,7 @@ final class UpkeepStore: ObservableObject {
     var navigation = UpkeepNavigationState()
     let scanState: UpkeepScanState
     let updateExecutionState = UpkeepUpdateExecutionState()
+    let mutationCoordinator = MutationCoordinator()
     var diagnostics = UpkeepDiagnosticsState()
 
     private var periodicTask: Task<Void, Never>?
@@ -97,7 +89,7 @@ final class UpkeepStore: ObservableObject {
 
     private func bindFeatureState() {
         [library.objectWillChange, navigation.objectWillChange, scanState.objectWillChange,
-         updateExecutionState.objectWillChange, diagnostics.objectWillChange]
+         updateExecutionState.objectWillChange, diagnostics.objectWillChange, mutationCoordinator.objectWillChange]
             .forEach { publisher in
                 publisher
                     .sink { [weak self] _ in self?.scheduleRootChange() }
@@ -120,9 +112,11 @@ final class UpkeepStore: ObservableObject {
 
     func isWorking(_ operation: OperationID) -> Bool {
         updateExecutionState.activeOperations.contains(operation)
+            || mutationCoordinator.isBusy(mutationTargets(for: operation))
     }
 
     func isUpdating(_ update: AvailableUpdate) -> Bool {
+        if mutationCoordinator.isBusy(mutationTargets(for: .application(update))) { return true }
         if isWorking(.applicationUpdate(update.id)) { return true }
         guard let token = update.homebrewToken else { return false }
         if let package = homebrewPackages.first(where: { $0.kind == .cask && $0.token == token }) {
@@ -370,6 +364,8 @@ final class UpkeepStore: ObservableObject {
         errorMessage = nil
         let previousCount = totalUpdateCount
         let report = await dependencies.scanner.scan(settings: settings.scanSettings)
+        scanState.completedCheckState = UpdateCheckState.completed(report: report, settings: settings.scanSettings)
+        scanState.macOSStatus = report.macOSUpdatesStatus
         apps = report.apps
         for app in apps {
             settings.migrateExclusion(from: legacyExclusionKey(for: app), to: exclusionKey(for: app))
@@ -429,7 +425,8 @@ final class UpkeepStore: ObservableObject {
         if selectedApp?.id == app.id { selectedApp = refreshedApp }
 
         let report = await dependencies.scanner.scan(app: refreshedApp, settings: settings.scanSettings)
-        var candidates = updates.first(where: { $0.app.id == app.id })?.candidates ?? []
+        var candidates = (updates.first(where: { $0.app.id == app.id })?.candidates ?? [])
+            .filter { $0.isNewer(than: refreshedApp) }
         let enabledSources = enabledUpdateSources(for: refreshedApp)
         candidates.removeAll { candidate in
             candidate.source != .homebrew
@@ -594,8 +591,11 @@ final class UpkeepStore: ObservableObject {
             if !installedDeveloperManagers.contains(manager), report.installedManagers.contains(manager) { installedDeveloperManagers.append(manager) }
             versionCache = versionCache.filter { !$0.key.hasPrefix("\(manager.rawValue):") }
         } else {
-            let retained = developerPackages.filter { report.failedManagers.contains($0.manager) }
-            developerPackages = (report.packages.filter { !report.failedManagers.contains($0.manager) } + retained).sorted(by: developerPackageOrder)
+            developerPackages = mergeDeveloperPackageResults(
+                fresh: report.packages, previous: developerPackages,
+                failedManagers: report.failedManagers,
+                failedExecutablePaths: report.failedExecutablePaths
+            ).sorted(by: developerPackageOrder)
             installedDeveloperManagers = report.installedManagers
             versionCache.removeAll()
         }
@@ -658,6 +658,12 @@ final class UpkeepStore: ObservableObject {
     }
 
     private func performApplicationUpdate(_ update: AvailableUpdate) async -> Bool {
+        await mutationCoordinator.withAccess(to: mutationTargets(for: .application(update)), otherwise: false) {
+            await performApplicationUpdateUnlocked(update)
+        }
+    }
+
+    private func performApplicationUpdateUnlocked(_ update: AvailableUpdate) async -> Bool {
         let operationID = OperationID.applicationUpdate(update.id)
         guard !isWorking(operationID) else { return false }
         updateExecutionState.activeOperations.insert(operationID)
@@ -731,11 +737,7 @@ final class UpkeepStore: ObservableObject {
                 await dependencies.history.discardBackup(for: record)
             }
             return succeeded
-        } else if update.requiresInAppInstallation {
-            let opened = dependencies.externalOpener.open(update.app.url)
-            recordExternalUpdateAction(update, opened: opened)
-            return opened
-        } else if let actionURL = update.actionURL {
+        } else if let actionURL = update.externalActionURL {
             let opened = dependencies.externalOpener.open(actionURL)
             recordExternalUpdateAction(update, opened: opened)
             return opened
@@ -762,6 +764,12 @@ final class UpkeepStore: ObservableObject {
     }
 
     private func updatePackageNow(_ package: HomebrewPackage) async -> Bool {
+        await mutationCoordinator.withAccess(to: mutationTargets(for: .homebrew(package)), otherwise: false) {
+            await updatePackageUnlocked(package)
+        }
+    }
+
+    private func updatePackageUnlocked(_ package: HomebrewPackage) async -> Bool {
         let operationID = OperationID.homebrewPackage(package.id)
         guard !isWorking(operationID) else { return false }
         updateExecutionState.activeOperations.insert(operationID)
@@ -809,6 +817,12 @@ final class UpkeepStore: ObservableObject {
     }
 
     private func updateAllPackagesNow() async -> Bool {
+        await mutationCoordinator.withAccess(to: Set(homebrewPackages.filter { $0.isOutdated && !isExcluded($0) }.flatMap { mutationTargets(for: .homebrew($0)) }), otherwise: false) {
+            await updateAllPackagesUnlocked()
+        }
+    }
+
+    private func updateAllPackagesUnlocked() async -> Bool {
         let operationID = OperationID.homebrewBatch
         guard !isWorking(operationID) else { return false }
         let startedAt = Date()
@@ -908,6 +922,12 @@ final class UpkeepStore: ObservableObject {
     }
 
     private func adoptNow(_ item: AdoptableApp) async -> Bool {
+        await mutationCoordinator.withAccess(to: mutationTargets(for: item), otherwise: false) {
+            await adoptUnlocked(item)
+        }
+    }
+
+    private func adoptUnlocked(_ item: AdoptableApp) async -> Bool {
         let operationID = OperationID.homebrewAdoption(item.id)
         guard !isWorking(operationID) else { return false }
         updateExecutionState.activeOperations.insert(operationID)
@@ -935,6 +955,12 @@ final class UpkeepStore: ObservableObject {
     }
 
     private func updateAdoptableAppNow(_ item: AdoptableApp) async -> Bool {
+        await mutationCoordinator.withAccess(to: mutationTargets(for: item), otherwise: false) {
+            await updateAdoptableAppUnlocked(item)
+        }
+    }
+
+    private func updateAdoptableAppUnlocked(_ item: AdoptableApp) async -> Bool {
         let operationID = OperationID.homebrewAdoption(item.id)
         guard !isWorking(operationID) else { return false }
         updateExecutionState.activeOperations.insert(operationID)
@@ -1027,6 +1053,12 @@ final class UpkeepStore: ObservableObject {
     }
 
     func confirmRunningAppUpdate(_ confirmation: RunningAppConfirmation) async {
+        await mutationCoordinator.withAccess(to: mutationTargets(for: confirmation), otherwise: ()) {
+            await confirmRunningAppUpdateUnlocked(confirmation)
+        }
+    }
+
+    private func confirmRunningAppUpdateUnlocked(_ confirmation: RunningAppConfirmation) async {
         pendingRunningAppConfirmation = nil
         do {
             try await quitRunningApplications(for: confirmation.apps)
@@ -1042,6 +1074,7 @@ final class UpkeepStore: ObservableObject {
         case let .adopt(item): succeeded = await adoptNow(item)
         case let .updateAdoptable(item): succeeded = await updateAdoptableAppNow(item)
         case .allPackages: succeeded = await updateAllPackagesNow()
+        case let .restore(record): succeeded = await revertNow(record)
         }
         if succeeded { reopenApplications(confirmation.apps) }
     }
@@ -1067,6 +1100,12 @@ final class UpkeepStore: ObservableObject {
     }
 
     func installDeveloperPackage(_ package: DeveloperPackage, version: String) async {
+        await mutationCoordinator.withAccess(to: mutationTargets(for: .developer(package)), otherwise: ()) {
+            await installDeveloperPackageUnlocked(package, version: version)
+        }
+    }
+
+    private func installDeveloperPackageUnlocked(_ package: DeveloperPackage, version: String) async {
         guard package.canUpdateAutomatically else {
             if let url = package.manager.homepage { _ = dependencies.externalOpener.open(url) }
             else { errorMessage = "\(package.name) must be updated with \(package.manager.rawValue)." }
@@ -1096,12 +1135,19 @@ final class UpkeepStore: ObservableObject {
                 kind: .developer, originalAppPath: nil, backupPath: nil,
                 recoveryNote: "Package-manager updates do not have a universal rollback mechanism. Reinstall the previous version with \(package.manager.rawValue) if needed."
             )
-            try? await dependencies.history.add(record)
+            let historyWarning = await saveUpdateHistory(record)
             await scan()
+            if let historyWarning { errorMessage = historyWarning }
         }
     }
 
     func uninstallDeveloperPackage(_ package: DeveloperPackage) async {
+        await mutationCoordinator.withAccess(to: mutationTargets(for: .developer(package)), otherwise: ()) {
+            await uninstallDeveloperPackageUnlocked(package)
+        }
+    }
+
+    private func uninstallDeveloperPackageUnlocked(_ package: DeveloperPackage) async {
         let operationID = OperationID.developerPackage(package.id)
         guard !isWorking(operationID) else { return }
         updateExecutionState.activeOperations.insert(operationID)
@@ -1141,6 +1187,12 @@ final class UpkeepStore: ObservableObject {
     }
 
     func updateLocalModel(_ model: LocalLLMModel) async {
+        await mutationCoordinator.withAccess(to: mutationTargets(for: .model(model)), otherwise: ()) {
+            await updateLocalModelUnlocked(model)
+        }
+    }
+
+    private func updateLocalModelUnlocked(_ model: LocalLLMModel) async {
         let operationID = OperationID.localModel(model.id)
         guard !isWorking(operationID) else { return }
         updateExecutionState.activeOperations.insert(operationID)
@@ -1158,12 +1210,19 @@ final class UpkeepStore: ObservableObject {
                 kind: .model, originalAppPath: nil, backupPath: nil,
                 recoveryNote: "Model files are managed by \(model.runtime.rawValue). Download the earlier model revision again if rollback is required."
             )
-            try? await dependencies.history.add(record)
+            let historyWarning = await saveUpdateHistory(record)
             await scanLocalModels()
+            if let historyWarning { errorMessage = historyWarning }
         }
     }
 
     func performBatchUpdates(_ items: [BatchUpdateItem]) async -> BatchUpdateSummary {
+        await mutationCoordinator.withAccess(to: Set(items.flatMap { mutationTargets(for: $0) }), otherwise: BatchUpdateSummary(results: items.map { BatchUpdateResult(item: $0, outcome: .failed, detail: "A selected item is already being changed. Wait for that operation to finish, then try again.") })) {
+            await performBatchUpdatesUnlocked(items)
+        }
+    }
+
+    private func performBatchUpdatesUnlocked(_ items: [BatchUpdateItem]) async -> BatchUpdateSummary {
         let batchID = OperationID.unifiedBatch
         guard !items.isEmpty, !isWorking(batchID) else { return BatchUpdateSummary(results: []) }
         updateExecutionState.activeOperations.insert(batchID)
@@ -1173,7 +1232,8 @@ final class UpkeepStore: ObservableObject {
             batchUpdateProgress = nil
         }
 
-        let runningApps = batchRunningApps(for: items)
+        refreshRunningApplications()
+        let runningApps = runningAppsForBatch(items)
         if !runningApps.isEmpty { try? await quitRunningApplications(for: runningApps) }
         let closedApps = runningApps.filter { !isRunning($0) }
 
@@ -1220,6 +1280,7 @@ final class UpkeepStore: ObservableObject {
         updateExecutionState.activeOperations.insert(workID)
         defer { updateExecutionState.activeOperations.remove(workID) }
 
+        var historyWarning: String?
         do {
             switch item {
             case let .application(update):
@@ -1230,21 +1291,21 @@ final class UpkeepStore: ObservableObject {
                         )
                         do {
                             try await dependencies.directAppInstaller.install(update: update)
-                            try await dependencies.history.add(record)
                         } catch {
                             await dependencies.history.discardBackup(for: record)
                             throw error
                         }
+                        let warning = await saveUpdateHistory(record)
                         return BatchUpdateResult(
-                            item: item,
-                            outcome: .updated,
-                            detail: "Updated \(update.app.name) in Upkeep."
+                            item: item, outcome: .updated,
+                            detail: "Updated \(update.app.name) in Upkeep.", warning: warning
                         )
                     }
-                    let target = update.requiresInAppInstallation ? update.app.url : update.actionURL
+                    let target = update.externalActionURL
                     guard let target, dependencies.externalOpener.open(target) else {
                         throw BatchUpdateError.couldNotOpen(update.source.rawValue)
                     }
+                    recordExternalUpdateAction(update, opened: true)
                     return BatchUpdateResult(
                         item: item,
                         outcome: .opened,
@@ -1254,7 +1315,7 @@ final class UpkeepStore: ObservableObject {
                     )
                 }
                 if let package = homebrewPackages.first(where: { $0.kind == .cask && $0.token == token }) {
-                    try await upgradeBatchPackage(package)
+                    historyWarning = try await upgradeBatchPackage(package)
                 } else if let adoptable = adoptableApps.first(where: { $0.caskToken == token && $0.app.id == update.app.id }) {
                     let record = try await dependencies.history.prepareAppBackup(
                         app: adoptable.app, toVersion: adoptable.caskVersion, kind: .homebrew
@@ -1264,7 +1325,7 @@ final class UpkeepStore: ObservableObject {
                         await dependencies.history.discardBackup(for: record)
                         throw error
                     }
-                    try await dependencies.history.add(record)
+                    historyWarning = await saveUpdateHistory(record)
                 } else {
                     let record = try await dependencies.history.prepareAppBackup(
                         app: update.app, toVersion: update.availableVersion, kind: .homebrew
@@ -1274,11 +1335,11 @@ final class UpkeepStore: ObservableObject {
                         await dependencies.history.discardBackup(for: record)
                         throw error
                     }
-                    try await dependencies.history.add(record)
+                    historyWarning = await saveUpdateHistory(record)
                 }
 
             case let .homebrew(package):
-                try await upgradeBatchPackage(package)
+                historyWarning = try await upgradeBatchPackage(package)
 
             case let .developer(package):
                 try await dependencies.developerPackages.install(package, version: package.latestVersion)
@@ -1288,7 +1349,7 @@ final class UpkeepStore: ObservableObject {
                     kind: .developer, originalAppPath: nil, backupPath: nil,
                     recoveryNote: "Package-manager updates do not have a universal rollback mechanism. Reinstall the previous version with \(package.manager.rawValue) if needed."
                 )
-                try? await dependencies.history.add(record)
+                historyWarning = await saveUpdateHistory(record)
 
             case let .model(model):
                 try await dependencies.localModels.update(model)
@@ -1298,15 +1359,15 @@ final class UpkeepStore: ObservableObject {
                     kind: .model, originalAppPath: nil, backupPath: nil,
                     recoveryNote: "Model files are managed by \(model.runtime.rawValue). Download the earlier model revision again if rollback is required."
                 )
-                try? await dependencies.history.add(record)
+                historyWarning = await saveUpdateHistory(record)
             }
-            return BatchUpdateResult(item: item, outcome: .updated, detail: "Updated to \(item.availableVersion).")
+            return BatchUpdateResult(item: item, outcome: .updated, detail: "Updated to \(item.availableVersion).", warning: historyWarning)
         } catch {
             return BatchUpdateResult(item: item, outcome: .failed, detail: error.localizedDescription)
         }
     }
 
-    private func upgradeBatchPackage(_ package: HomebrewPackage) async throws {
+    private func upgradeBatchPackage(_ package: HomebrewPackage) async throws -> String? {
         let record: UpdateRecord
         if package.kind == .cask, let app = matchingApp(for: package) {
             record = try await dependencies.history.prepareAppBackup(
@@ -1325,12 +1386,11 @@ final class UpkeepStore: ObservableObject {
             await dependencies.history.discardBackup(for: record)
             throw error
         }
-        try await dependencies.history.add(record)
+        return await saveUpdateHistory(record)
     }
 
-    private func batchRunningApps(for items: [BatchUpdateItem]) -> [InstalledApp] {
-        refreshRunningApplications()
-        return Dictionary(uniqueKeysWithValues: items.compactMap(batchApp(for:)).filter(isRunning).map { ($0.id, $0) })
+    func runningAppsForBatch(_ items: [BatchUpdateItem]) -> [InstalledApp] {
+        Dictionary(items.compactMap(batchApp(for:)).filter(isRunning).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             .values
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
@@ -1345,7 +1405,7 @@ final class UpkeepStore: ObservableObject {
     }
 
     func isExcluded(_ update: AvailableUpdate) -> Bool {
-        settings.isExcluded(key: exclusionKey(for: update.app), version: update.availableVersion)
+        settings.isExcluded(key: exclusionKey(for: update.app), version: update.exclusionVersion)
     }
 
     func isExcluded(_ package: HomebrewPackage) -> Bool {
@@ -1361,7 +1421,8 @@ final class UpkeepStore: ObservableObject {
     }
 
     func exclusion(for app: InstalledApp, version: String) -> UpdateExclusion? {
-        settings.exclusion(for: exclusionKey(for: app), version: version)
+        let candidate = update(for: app)?.candidates.first { $0.availableVersion == version }
+        return settings.exclusion(for: exclusionKey(for: app), version: candidate?.exclusionVersion ?? version)
     }
 
     func exclusion(for package: HomebrewPackage) -> UpdateExclusion? {
@@ -1381,7 +1442,7 @@ final class UpkeepStore: ObservableObject {
     }
 
     func skip(_ update: AvailableUpdate, duration: UpdateExclusionDuration? = nil) {
-        exclude(.skipped, key: exclusionKey(for: update.app), name: update.app.name, category: "App", version: update.availableVersion, duration: duration)
+        exclude(.skipped, key: exclusionKey(for: update.app), name: update.app.name, category: "App", version: update.exclusionVersion, duration: duration)
     }
 
     func ignore(_ app: InstalledApp, duration: UpdateExclusionDuration? = nil) {
@@ -1457,8 +1518,23 @@ final class UpkeepStore: ObservableObject {
     func openBetaSettings() { openSoftwareUpdateSettings() }
 
     func revert(_ record: UpdateRecord) async {
+        await mutationCoordinator.withAccess(to: mutationTargets(for: record), otherwise: ()) {
+            guard let path = record.originalAppPath else { return }
+            let url = URL(fileURLWithPath: path)
+            var app = apps.first { $0.url.standardizedFileURL == url.standardizedFileURL }
+            if app == nil { app = await dependencies.applicationDiscovery.discover(at: url) }
+            if app?.isUpkeep == true || Bundle(url: url)?.bundleIdentifier == InstalledApp.upkeepBundleIdentifier {
+                errorMessage = "Upkeep cannot restore itself while running. Quit Upkeep and copy the backup from \(record.backupPath ?? "History") to \(path) using Finder."
+                return
+            }
+            if let app, queueRunningAppConfirmation(for: [app], action: .restore(record)) { return }
+            _ = await revertNow(record)
+        }
+    }
+
+    private func revertNow(_ record: UpdateRecord) async -> Bool {
         let operationID = OperationID.historyRestore(record.id)
-        guard !isWorking(operationID) else { return }
+        guard !isWorking(operationID) else { return false }
         updateExecutionState.activeOperations.insert(operationID)
         defer { updateExecutionState.activeOperations.remove(operationID) }
 
@@ -1470,6 +1546,7 @@ final class UpkeepStore: ObservableObject {
             try await dependencies.history.revert(record)
         }
         if succeeded { await scan() }
+        return succeeded
     }
 
     func openMacOSRecoveryHelp() {
@@ -1594,20 +1671,19 @@ final class UpkeepStore: ObservableObject {
         externalVerificationTasks[update.id] = Task { @MainActor [weak self] in
             guard let self else { return }
             for _ in 0..<20 {
-                do { try await Task.sleep(for: .seconds(3)) }
+                do { try await Task.sleep(for: self.dependencies.externalVerificationInterval) }
                 catch { return }
                 guard let refreshed = await self.dependencies.applicationDiscovery.discover(
                     at: update.app.url
                 ) else { continue }
-                if VersionComparator.compare(
-                    refreshed.installedVersion,
-                    update.availableVersion
-                ) != .orderedAscending {
+                guard !Task.isCancelled else { return }
+                if update.primaryCandidate.isInstalled(in: refreshed) {
+                    await self.refresh(refreshed)
+                    guard !Task.isCancelled else { return }
                     self.externalUpdateVerifications[update.id] = ExternalUpdateVerification(
                         state: .completed,
                         detail: "Verified \(refreshed.installedVersion) from the installed app bundle."
                     )
-                    await self.refresh(refreshed)
                     self.externalVerificationTasks[update.id] = nil
                     return
                 }
@@ -1687,6 +1763,17 @@ final class UpkeepStore: ObservableObject {
             "Error": error.localizedDescription
         ])
         refreshDiagnostics()
+    }
+
+    private func saveUpdateHistory(_ record: UpdateRecord) async -> String? {
+        var warning: String?
+        do { try await dependencies.history.add(record) }
+        catch {
+            recordHistoryFailure(item: record.name, error: error)
+            warning = errorMessage
+        }
+        updateHistory = await dependencies.history.records()
+        return warning
     }
 
     private func recordHistoryFailure(item: String, error: Error) {
@@ -1770,11 +1857,9 @@ final class UpkeepStore: ObservableObject {
     }
 
     private func refreshRunningApplications() {
-        let runningApplications = NSWorkspace.shared.runningApplications.filter { !$0.isTerminated }
-        let identifiers = Set(runningApplications.compactMap(\.bundleIdentifier))
-        let paths = Set(runningApplications.compactMap(\.bundleURL).map(canonicalPath))
-        if identifiers != runningBundleIdentifiers { runningBundleIdentifiers = identifiers }
-        if paths != runningApplicationPaths { runningApplicationPaths = paths }
+        let running = dependencies.applicationLifecycle.runningApplications()
+        if running.identifiers != runningBundleIdentifiers { runningBundleIdentifiers = running.identifiers }
+        if running.paths != runningApplicationPaths { runningApplicationPaths = running.paths }
     }
 
     private func observeRunningApplications() {
@@ -1794,24 +1879,8 @@ final class UpkeepStore: ObservableObject {
     }
 
     private func quitRunningApplications(for apps: [InstalledApp]) async throws {
+        try await dependencies.applicationLifecycle.quit(apps)
         refreshRunningApplications()
-        let identifiers = Set(apps.compactMap(\.bundleIdentifier))
-        let paths = Set(apps.map { canonicalPath($0.url) })
-        let targets = NSWorkspace.shared.runningApplications.filter { runningApplication in
-            if let identifier = runningApplication.bundleIdentifier, identifiers.contains(identifier) { return true }
-            if let url = runningApplication.bundleURL, paths.contains(canonicalPath(url)) { return true }
-            return false
-        }
-
-        for target in targets where !target.isTerminated { target.terminate() }
-
-        for _ in 0..<40 {
-            try await Task.sleep(for: .milliseconds(250))
-            refreshRunningApplications()
-            if apps.allSatisfy({ !isRunning($0) }) { return }
-        }
-
-        throw RunningAppUpdateError.couldNotQuit(apps.filter(isRunning).map(\.name))
     }
 
     func reopenApplications(_ apps: [InstalledApp]) {
@@ -1928,7 +1997,7 @@ final class UpkeepStore: ObservableObject {
     ) -> [UpdateCandidate] {
         previous.candidates.filter {
             failedSources.contains($0.source)
-                && VersionComparator.isNewer($0.availableVersion, than: currentApp.installedVersion)
+                && $0.isNewer(than: currentApp)
         }
     }
 
