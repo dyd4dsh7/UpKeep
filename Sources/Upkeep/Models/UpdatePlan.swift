@@ -90,6 +90,18 @@ struct UpdatePlan: Sendable {
     }
 
     var primaryUpdateCount: Int {
+        Self.primaryUpdateCount(
+            applicationUpdates: applicationUpdates,
+            homebrewUpdates: homebrewUpdates,
+            macOSUpdates: macOSUpdates
+        )
+    }
+
+    static func primaryUpdateCount(
+        applicationUpdates: [AvailableUpdate],
+        homebrewUpdates: [HomebrewPackage],
+        macOSUpdates: [MacOSUpdate]
+    ) -> Int {
         let representedCaskTokens = Set(applicationUpdates.flatMap { $0.candidates.compactMap(\.homebrewToken) })
         let requestedHomebrewCount = homebrewUpdates.count {
             !$0.isDependency && !representedCaskTokens.contains($0.token)

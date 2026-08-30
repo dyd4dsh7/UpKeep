@@ -132,6 +132,33 @@ private func makeSettings() throws -> (AppSettings, UserDefaults, String) {
     return (AppSettings(defaults: defaults), defaults, suiteName)
 }
 
+@MainActor
+@Test func exclusionLookupsPreserveDuplicatePersistedKeysAndTrackReplacement() throws {
+    let (_, defaults, suiteName) = try makeSettings()
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let skipped = UpdateExclusion(
+        key: "same-key", name: "A", category: "App", version: "2.0",
+        mode: .skipped, expiresAt: nil
+    )
+    let ignored = UpdateExclusion(
+        key: "same-key", name: "B", category: "App", version: nil,
+        mode: .ignored, expiresAt: nil
+    )
+    defaults.set(try JSONEncoder().encode([ignored, skipped]), forKey: "updateExclusions")
+    let settings = AppSettings(defaults: defaults)
+    #expect(settings.exclusion(for: "same-key", version: "2.0") == skipped)
+    #expect(settings.exclusion(for: "same-key", version: "3.0") == ignored)
+    #expect(settings.ignoredExclusion(for: "same-key") == ignored)
+    settings.restore(skipped)
+    #expect(settings.exclusion(for: "same-key", version: "2.0") == ignored)
+    settings.skip(key: "same-key", name: "A", category: "App", version: "4.0")
+    #expect(settings.ignoredExclusion(for: "same-key") == nil)
+    #expect(!settings.isExcluded(key: "same-key", version: "2.0"))
+    #expect(settings.isExcluded(key: "same-key", version: "4.0"))
+    settings.restore(key: "same-key")
+    #expect(settings.exclusion(for: "same-key", version: "4.0") == nil)
+}
+
 private func installedApp(at path: String, bundleIdentifier: String?) -> InstalledApp {
     InstalledApp(
         name: "Example",

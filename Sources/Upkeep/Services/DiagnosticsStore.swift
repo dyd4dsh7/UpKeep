@@ -116,6 +116,13 @@ enum DiagnosticRedactor {
         var value = input
         if !homePath.isEmpty { value = value.replacingOccurrences(of: homePath, with: "~") }
 
+        // Every rule below requires an ASCII colon, equals sign, hyphen, or
+        // underscore. Plain status text cannot match any rule. Keep home-path
+        // redaction and the length limit on this path as well.
+        guard value.utf8.contains(where: { $0 == 58 || $0 == 61 || $0 == 45 || $0 == 95 }) else {
+            return String(value.prefix(2_000))
+        }
+
         for rule in rules.values {
             value = rule.expression.stringByReplacingMatches(
                 in: value,

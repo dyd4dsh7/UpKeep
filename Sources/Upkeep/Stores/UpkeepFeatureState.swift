@@ -35,9 +35,11 @@ final class UpkeepLibraryState: ObservableObject {
 
     private var appByID: [String: InstalledApp] = [:]
     private var appIndexByProductName: [String: Int] = [:]
+    private var appNameVariants: [String: Set<String>] = [:]
     private var updateByAppID: [String: AvailableUpdate] = [:]
     private var homebrewPackageByID: [String: HomebrewPackage] = [:]
     private var caskIndexByProductName: [String: Int] = [:]
+    private var homebrewNameVariants: [String: Set<String>] = [:]
     private var adoptableAppByID: [String: AdoptableApp] = [:]
     private var adoptableAppByAppID: [String: AdoptableApp] = [:]
     private var developerPackageByID: [String: DeveloperPackage] = [:]
@@ -72,15 +74,15 @@ final class UpkeepLibraryState: ObservableObject {
     }
 
     func homebrewPackage(forAppNamed name: String) -> HomebrewPackage? {
-        Self.productNameVariants(name)
+        (appNameVariants[name] ?? Self.productNameVariants(name))
             .compactMap { caskIndexByProductName[$0] }
             .min()
             .map { homebrewPackages[$0] }
     }
 
     func app(for package: HomebrewPackage) -> InstalledApp? {
-        Self.productNameVariants(package.displayName)
-            .union(Self.productNameVariants(package.token))
+        (homebrewNameVariants[package.displayName] ?? Self.productNameVariants(package.displayName))
+            .union(homebrewNameVariants[package.token] ?? Self.productNameVariants(package.token))
             .compactMap { appIndexByProductName[$0] }
             .min()
             .map { apps[$0] }
@@ -89,8 +91,11 @@ final class UpkeepLibraryState: ObservableObject {
     private func rebuildAppLookups() {
         appByID = Dictionary(apps.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         appIndexByProductName.removeAll(keepingCapacity: true)
+        appNameVariants.removeAll(keepingCapacity: true)
         for (index, app) in apps.enumerated() {
-            for name in Self.productNameVariants(app.name) where appIndexByProductName[name] == nil {
+            let variants = appNameVariants[app.name] ?? Self.productNameVariants(app.name)
+            appNameVariants[app.name] = variants
+            for name in variants where appIndexByProductName[name] == nil {
                 appIndexByProductName[name] = index
             }
         }
@@ -106,9 +111,16 @@ final class UpkeepLibraryState: ObservableObject {
             uniquingKeysWith: { first, _ in first }
         )
         caskIndexByProductName.removeAll(keepingCapacity: true)
+        // Retain only names in the current inventory, keeping memory bounded and
+        // allowing lookups of external snapshots to fall back to normalization.
+        homebrewNameVariants.removeAll(keepingCapacity: true)
         for (index, package) in homebrewPackages.enumerated() where package.kind == .cask {
-            let names = Self.productNameVariants(package.displayName)
-                .union(Self.productNameVariants(package.token))
+            let displayNames = homebrewNameVariants[package.displayName]
+                ?? Self.productNameVariants(package.displayName)
+            homebrewNameVariants[package.displayName] = displayNames
+            let tokenNames = homebrewNameVariants[package.token] ?? Self.productNameVariants(package.token)
+            homebrewNameVariants[package.token] = tokenNames
+            let names = displayNames.union(tokenNames)
             for name in names where caskIndexByProductName[name] == nil {
                 caskIndexByProductName[name] = index
             }

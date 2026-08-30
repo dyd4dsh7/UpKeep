@@ -269,7 +269,7 @@ func selectableDeveloperPackageVersions(
     if includePrereleases || !VersionComparator.isPrerelease(package.latestVersion) {
         allowed.append(package.latestVersion)
     }
-    return Set(allowed).sorted(by: VersionComparator.newestFirst)
+    return VersionComparator.sortedNewestFirst(Set(allowed))
 }
 
 struct ManagerScanResult: Sendable {
@@ -1096,7 +1096,7 @@ func parseUVPythonList(_ data: Data, matchingMinor minor: String) -> [String] {
         let version = String(line[range])
         return version.hasPrefix(minor + ".") ? version : nil
     }
-    return Set(versions).sorted(by: VersionComparator.newestFirst)
+    return VersionComparator.sortedNewestFirst(Set(versions))
 }
 
 func parseRustupCheck(_ data: Data) -> [(name: String, current: String, latest: String)] {
@@ -1671,8 +1671,9 @@ private func nodeReleaseVersions() async -> [String] {
           let data = await registryData(from: url),
           let releases = try? JSONDecoder().decode([NodeRelease].self, from: data)
     else { return [] }
-    return Set(releases.map { $0.version.trimmingCharacters(in: CharacterSet(charactersIn: "vV")) })
-        .sorted(by: VersionComparator.newestFirst)
+    return VersionComparator.sortedNewestFirst(
+        Set(releases.map { $0.version.trimmingCharacters(in: CharacterSet(charactersIn: "vV")) })
+    )
 }
 
 private func latestGitHubReleaseVersions(repository: String) async -> [String] {
@@ -1689,7 +1690,7 @@ private func npmRegistryVersions(package: String) async -> [String] {
           let data = await registryData(from: url),
           let response = try? JSONDecoder().decode(NPMRegistryPackage.self, from: data)
     else { return [] }
-    return response.versions.keys.sorted(by: VersionComparator.newestFirst)
+    return VersionComparator.sortedNewestFirst(response.versions.keys)
 }
 
 private func npmRegistryLatestVersion(package: String) async -> String? {
@@ -1732,8 +1733,7 @@ private func visualStudioMarketplaceVersions(extensionID: String) async -> [Stri
     let compatible = root.results.flatMap(\.extensions).flatMap(\.versions).filter {
         $0.targetPlatform == nil || $0.targetPlatform == "universal" || $0.targetPlatform == platform
     }
-    return Set(compatible.map(\.version))
-        .sorted(by: VersionComparator.newestFirst)
+    return VersionComparator.sortedNewestFirst(Set(compatible.map(\.version)))
 }
 
 private func goModuleVersions(module: String) async -> [String] {
@@ -1742,9 +1742,9 @@ private func goModuleVersions(module: String) async -> [String] {
           let url = URL(string: "https://proxy.golang.org/\(encoded)/@v/list"),
           let data = await registryData(from: url),
           let output = String(data: data, encoding: .utf8) else { return [] }
-    return Set(output.split(separator: "\n").map {
+    return VersionComparator.sortedNewestFirst(Set(output.split(separator: "\n").map {
         String($0).trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
-    }).sorted(by: VersionComparator.newestFirst)
+    }))
 }
 
 private func latestGoReleaseVersion() async -> String? {
@@ -1766,8 +1766,9 @@ private func composerPackageVersions(_ package: String) async -> [String] {
           let url = URL(string: "https://repo.packagist.org/p2/\(encoded).json"),
           let data = await registryData(from: url),
           let response = try? JSONDecoder().decode(PackagistResponse.self, from: data) else { return [] }
-    return Set((response.packages[package] ?? []).map { normalizedComposerVersion($0.version) })
-        .sorted(by: VersionComparator.newestFirst)
+    return VersionComparator.sortedNewestFirst(
+        Set((response.packages[package] ?? []).map { normalizedComposerVersion($0.version) })
+    )
 }
 
 private func nugetPackageVersions(_ package: String) async -> [String] {
@@ -1776,5 +1777,5 @@ private func nugetPackageVersions(_ package: String) async -> [String] {
           let url = URL(string: "https://api.nuget.org/v3-flatcontainer/\(encoded)/index.json"),
           let data = await registryData(from: url),
           let response = try? JSONDecoder().decode(NugetVersions.self, from: data) else { return [] }
-    return Set(response.versions).sorted(by: VersionComparator.newestFirst)
+    return VersionComparator.sortedNewestFirst(Set(response.versions))
 }

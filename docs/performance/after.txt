@@ -1,0 +1,14 @@
+RESPONSIVENESS size=200 sample=1 lookup_ms=0.379125 count20_ms=2.572084 exclusion20_ms=0.489666 rebuild_ms=0.569375 checksum=6500
+RESPONSIVENESS size=200 sample=2 lookup_ms=0.393084 count20_ms=2.702792 exclusion20_ms=0.475584 rebuild_ms=0.45425 checksum=6500
+RESPONSIVENESS size=200 sample=3 lookup_ms=0.3635 count20_ms=2.380291 exclusion20_ms=0.464417 rebuild_ms=0.481167 checksum=6500
+RESPONSIVENESS size=200 sample=4 lookup_ms=0.471625 count20_ms=2.762709 exclusion20_ms=0.478875 rebuild_ms=0.457709 checksum=6500
+RESPONSIVENESS size=200 sample=5 lookup_ms=0.414417 count20_ms=2.321375 exclusion20_ms=0.501 rebuild_ms=0.495583 checksum=6500
+RESPONSIVENESS size=200 sample=6 lookup_ms=0.421416 count20_ms=2.693167 exclusion20_ms=0.493 rebuild_ms=0.45 checksum=6500
+RESPONSIVENESS size=200 sample=7 lookup_ms=0.396125 count20_ms=2.462708 exclusion20_ms=0.444584 rebuild_ms=0.570125 checksum=6500
+RESPONSIVENESS size=2000 sample=1 lookup_ms=3.94825 count20_ms=25.716833 exclusion20_ms=5.427875 rebuild_ms=4.614167 checksum=65000
+RESPONSIVENESS size=2000 sample=2 lookup_ms=4.256292 count20_ms=26.025 exclusion20_ms=5.422459 rebuild_ms=5.075666 checksum=65000
+RESPONSIVENESS size=2000 sample=3 lookup_ms=4.521708 count20_ms=28.036125 exclusion20_ms=5.782959 rebuild_ms=4.887208 checksum=65000
+RESPONSIVENESS size=2000 sample=4 lookup_ms=4.954083 count20_ms=28.658834 exclusion20_ms=6.159708 rebuild_ms=5.467625 checksum=65000
+RESPONSIVENESS size=2000 sample=5 lookup_ms=4.617458 count20_ms=27.508542 exclusion20_ms=5.522625 rebuild_ms=5.51925 checksum=65000
+RESPONSIVENESS size=2000 sample=6 lookup_ms=4.711625 count20_ms=28.539042 exclusion20_ms=7.043958 rebuild_ms=5.091833 checksum=65000
+RESPONSIVENESS size=2000 sample=7 lookup_ms=4.39775 count20_ms=25.203875 exclusion20_ms=5.9245 rebuild_ms=5.221 checksum=65000

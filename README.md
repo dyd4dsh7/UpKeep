@@ -62,6 +62,20 @@ swift test
 open outputs/Upkeep.zip
 ```
 
+## Performance
+
+For repeatable, offline performance measurements, run
+`./scripts/benchmark-performance.sh outputs/performance/current.log`.
+The benchmark uses an optimized build and isolated fixtures; it does not run
+package managers or apply updates. See the [performance report](docs/performance/2026-08-31.md)
+for baseline measurements, results, tradeoffs, and comparison commands.
+The [second performance pass](docs/performance/2026-08-31-services.md) covers
+diagnostics loading/redaction and developer release sorting. Run it with
+`./scripts/benchmark-performance.sh outputs/performance/services.log services`.
+The [third performance pass](docs/performance/2026-08-31-search.md) covers global
+search across all seven result groups. Run it with
+`./scripts/benchmark-performance.sh outputs/performance/search.log search`.
+
 ## Release
 
 Direct distribution requires a Developer ID Application certificate and a

@@ -246,6 +246,7 @@ final class AppSettings: ObservableObject {
     @Published var selectedSection: SettingsSection = .general
     @Published var confirmingPrereleaseUpdates = false
     private var exclusionExpiryTask: Task<Void, Never>?
+    private var exclusionsByKey: [String: [UpdateExclusion]] = [:]
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -358,19 +359,17 @@ final class AppSettings: ObservableObject {
     }
 
     func isExcluded(key: String, version: String) -> Bool {
-        updateExclusions.contains {
-            $0.key == key && $0.isActive() && ($0.mode == .ignored || ($0.mode == .skipped && $0.version == version))
-        }
+        exclusion(for: key, version: version) != nil
     }
 
     func exclusion(for key: String, version: String) -> UpdateExclusion? {
-        updateExclusions.first {
-            $0.key == key && $0.isActive() && ($0.mode == .ignored || ($0.mode == .skipped && $0.version == version))
+        exclusionsByKey[key]?.first {
+            $0.isActive() && ($0.mode == .ignored || ($0.mode == .skipped && $0.version == version))
         }
     }
 
     func ignoredExclusion(for key: String) -> UpdateExclusion? {
-        updateExclusions.first { $0.key == key && $0.mode == .ignored && $0.isActive() }
+        exclusionsByKey[key]?.first { $0.mode == .ignored && $0.isActive() }
     }
 
     func skip(
@@ -498,6 +497,9 @@ final class AppSettings: ObservableObject {
     private func saveExclusions() {
         updateExclusions.removeAll { !$0.isActive() }
         updateExclusions.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        // Every exclusion mutation passes through here. Grouping preserves first-match
+        // ordering for older persisted data with duplicate keys; reads still check expiry.
+        exclusionsByKey = Dictionary(grouping: updateExclusions, by: \.key)
         if let data = try? JSONEncoder().encode(updateExclusions) { defaults.set(data, forKey: "updateExclusions") }
         scheduleExclusionExpiry()
     }

@@ -148,7 +148,15 @@ final class UpkeepStore: ObservableObject {
     var outdatedPackageCount: Int { homebrewPackages.count { $0.isOutdated && !isExcluded($0) } }
     var outdatedDeveloperPackageCount: Int { developerPackages.count { $0.isOutdated && !isExcluded($0) } }
     var outdatedLocalModelCount: Int { localModels.count { $0.isOutdated && !isExcluded($0) } }
-    var totalUpdateCount: Int { updatePlan.primaryUpdateCount }
+    var totalUpdateCount: Int {
+        // Badges do not include developer packages or models. Avoid comparing
+        // their versions and building their batch-plan arrays on every count read.
+        UpdatePlan.primaryUpdateCount(
+            applicationUpdates: visibleUpdates,
+            homebrewUpdates: visibleHomebrewUpdates,
+            macOSUpdates: macOSUpdates
+        )
+    }
     var filteredDeveloperPackages: [DeveloperPackage] {
         matching(developerPackages.filter {
             (settings.showCurrentDeveloperPackages || $0.isOutdated) &&
@@ -232,10 +240,14 @@ final class UpkeepStore: ObservableObject {
 
     var recommendedBatchUpdateItems: [BatchUpdateItem] { updatePlan.recommendedBatchItems }
 
+    private var visibleHomebrewUpdates: [HomebrewPackage] {
+        homebrewPackages.filter { $0.isOutdated && !isExcluded($0) }
+    }
+
     var updatePlan: UpdatePlan {
         UpdatePlan(
             applicationUpdates: visibleUpdates,
-            homebrewUpdates: homebrewPackages.filter { $0.isOutdated && !isExcluded($0) },
+            homebrewUpdates: visibleHomebrewUpdates,
             macOSUpdates: macOSUpdates,
             developerUpdates: developerPackages.filter {
                 $0.isOutdated && $0.canUpdateAutomatically && !isExcluded($0)

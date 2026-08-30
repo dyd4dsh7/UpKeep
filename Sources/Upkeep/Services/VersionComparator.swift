@@ -70,7 +70,11 @@ enum VersionComparator {
     }
 
     static func compare(_ lhs: String, _ rhs: String) -> ComparisonResult {
-        guard let left = parsedVersion(lhs), let right = parsedVersion(rhs) else {
+        compareParsed(parsedVersion(lhs), parsedVersion(rhs))
+    }
+
+    private static func compareParsed(_ lhs: ParsedVersion?, _ rhs: ParsedVersion?) -> ComparisonResult {
+        guard let left = lhs, let right = rhs else {
             // An unversioned value such as "latest" must not create an update.
             return .orderedSame
         }
@@ -98,7 +102,19 @@ enum VersionComparator {
     }
 
     static func newestFirst(_ lhs: String, _ rhs: String) -> Bool {
-        let result = compare(lhs, rhs)
+        newestFirst(lhs, rhs, comparison: compare(lhs, rhs))
+    }
+
+    /// A registry can contain thousands of releases, exceeding the shared cache.
+    /// Retain each parsed value for this sort so comparator calls never reparse it.
+    static func sortedNewestFirst<S: Sequence>(_ versions: S) -> [String] where S.Element == String {
+        let prepared = versions.map { (raw: $0, parsed: parsedVersion($0)) }
+        return prepared.sorted {
+            newestFirst($0.raw, $1.raw, comparison: compareParsed($0.parsed, $1.parsed))
+        }.map(\.raw)
+    }
+
+    private static func newestFirst(_ lhs: String, _ rhs: String, comparison result: ComparisonResult) -> Bool {
         if result != .orderedSame { return result == .orderedDescending }
         let leftIsPlatformBuild = isPlatformQualified(lhs)
         let rightIsPlatformBuild = isPlatformQualified(rhs)

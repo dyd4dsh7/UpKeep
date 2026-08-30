@@ -3,6 +3,62 @@ import Testing
 @testable import Upkeep
 
 @MainActor
+@Test func focusedCountMatchesPlanAcrossExclusionsAndCollectionChanges() throws {
+    let suite = "UpkeepTests.FocusedCount.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let settings = AppSettings(defaults: defaults)
+    let store = UpkeepStore(settings: settings)
+    let app = InstalledApp(
+        name: "Widget", bundleIdentifier: "test.widget", installedVersion: "1.0",
+        buildVersion: nil, url: URL(fileURLWithPath: "/Applications/Widget.app"),
+        sparkleFeedURL: nil, githubRepository: nil, hasAppStoreReceipt: false
+    )
+    store.updates = [AvailableUpdate(
+        app: app, availableVersion: "1.1", source: .homebrew,
+        releaseNotes: nil, actionURL: nil, homebrewToken: "widget"
+    )]
+    store.homebrewPackages = ["widget", "requested", "dependency"].map { token in
+        HomebrewPackage(
+            token: token, displayName: token, description: nil, homepage: nil, license: nil,
+            installedVersion: "1.0", currentVersion: "1.1",
+            kind: token == "widget" ? .cask : .formula, isOutdated: true,
+            isDependency: token == "dependency", dependencies: []
+        )
+    }
+    store.macOSUpdates = [false, true].map { installer in
+        MacOSUpdate(
+            label: "macOS-\(installer)", title: "macOS", version: "27.0", size: nil,
+            requiresRestart: true, isBeta: false, isFullInstaller: installer
+        )
+    }
+    store.developerPackages = [DeveloperPackage(
+        name: "tool", currentVersion: "1.0", latestVersion: "1.1",
+        manager: .npm, executablePath: "/usr/local/bin/npm"
+    )]
+    store.localModels = [LocalLLMModel(
+        id: "ollama:widget", name: "Widget", variant: nil, runtime: .ollama,
+        installedRevision: "old", latestRevision: "new", sizeBytes: nil,
+        modifiedAt: nil, homepage: nil, executablePath: nil,
+        updateReference: "widget:latest", isOutdated: true
+    )]
+    #expect(store.totalUpdateCount == 3)
+    #expect(store.totalUpdateCount == store.updatePlan.primaryUpdateCount)
+    #expect(store.availableBatchUpdateItems.count == 5)
+    settings.ignore(key: app.updateExclusionKey, name: app.name, category: "App")
+    // The cask becomes unrepresented when its app update is excluded.
+    #expect(store.totalUpdateCount == 3)
+    #expect(store.totalUpdateCount == store.updatePlan.primaryUpdateCount)
+    store.homebrewPackages = []
+    #expect(store.totalUpdateCount == 1)
+    settings.restoreAllExclusions()
+    #expect(store.totalUpdateCount == 2)
+    store.macOSUpdates = []
+    #expect(store.totalUpdateCount == 1)
+    #expect(store.totalUpdateCount == store.updatePlan.primaryUpdateCount)
+}
+
+@MainActor
 @Test func batchReviewDeduplicatesHomebrewCasksRepresentedByAnAppUpdate() {
     let suiteName = "BatchUpdateTests.\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suiteName)!
