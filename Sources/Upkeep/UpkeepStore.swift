@@ -699,6 +699,9 @@ final class UpkeepStore: ObservableObject {
             } else if let item = adoptableApps.first(where: { $0.caskToken == token && $0.app.id == update.app.id }) {
                 return await updateAdoptableAppNow(item)
             } else {
+                let operationID = OperationID.applicationUpdate(update.id)
+                beginUpdateActivity(operationID, targets: mutationTargets(for: .application(update)), phase: .backingUp)
+                defer { endUpdateActivity(operationID) }
                 let record: UpdateRecord
                 do {
                     record = try await dependencies.history.prepareAppBackup(
@@ -709,6 +712,7 @@ final class UpkeepStore: ObservableObject {
                     recordUpdateFailure(item: update.app.name, action: "Prepare rollback backup", error: error)
                     return false
                 }
+                setUpdatePhase(.updating, for: operationID)
                 let succeeded = await execute(
                     label: update.app.name,
                     metadata: updateDiagnosticMetadata(update)
@@ -717,6 +721,7 @@ final class UpkeepStore: ObservableObject {
                     var historyError: Error?
                     do { try await dependencies.history.add(record) }
                     catch { historyError = error }
+                    setUpdatePhase(.refreshing, for: operationID)
                     await scan()
                     if let historyError { recordHistoryFailure(item: update.app.name, error: historyError) }
                     reconcileHomebrewUpdate(token: token, name: update.app.name)
@@ -726,6 +731,9 @@ final class UpkeepStore: ObservableObject {
                 return succeeded
             }
         } else if update.canInstallDirectly {
+            let operationID = OperationID.applicationUpdate(update.id)
+            beginUpdateActivity(operationID, targets: mutationTargets(for: .application(update)), phase: .backingUp)
+            defer { endUpdateActivity(operationID) }
             let record: UpdateRecord
             do {
                 record = try await dependencies.history.prepareAppBackup(
@@ -744,12 +752,15 @@ final class UpkeepStore: ObservableObject {
                 label: update.app.name,
                 metadata: updateDiagnosticMetadata(update)
             ) {
-                try await self.dependencies.directAppInstaller.install(update: update)
+                try await self.dependencies.directAppInstaller.install(update: update) { phase in
+                    await self.setUpdatePhase(phase, for: operationID)
+                }
             }
             if succeeded {
                 var historyError: Error?
                 do { try await dependencies.history.add(record) }
                 catch { historyError = error }
+                setUpdatePhase(.refreshing, for: operationID)
                 await scan()
                 if let historyError {
                     recordHistoryFailure(item: update.app.name, error: historyError)
@@ -759,6 +770,9 @@ final class UpkeepStore: ObservableObject {
             }
             return succeeded
         } else if let actionURL = update.externalActionURL {
+            let operationID = OperationID.applicationUpdate(update.id)
+            beginUpdateActivity(operationID, targets: mutationTargets(for: .application(update)), phase: .opening)
+            defer { endUpdateActivity(operationID) }
             let opened = dependencies.externalOpener.open(actionURL)
             recordExternalUpdateAction(update, opened: opened)
             return opened
@@ -795,9 +809,12 @@ final class UpkeepStore: ObservableObject {
         guard !isWorking(operationID) else { return false }
         updateExecutionState.activeOperations.insert(operationID)
         defer { updateExecutionState.activeOperations.remove(operationID) }
+        beginUpdateActivity(operationID, targets: mutationTargets(for: .homebrew(package)), phase: .backingUp)
+        defer { endUpdateActivity(operationID) }
 
         let record = await recoveryRecord(for: package)
         if package.kind == .cask, matchingApp(for: package) != nil, record == nil { return false }
+        setUpdatePhase(.updating, for: operationID)
         let succeeded = await execute(label: package.displayName, metadata: [
             "Source": "Homebrew",
             "From": package.installedVersion,
@@ -809,6 +826,7 @@ final class UpkeepStore: ObservableObject {
                 do { try await dependencies.history.add(record) }
                 catch { historyError = error }
             }
+            setUpdatePhase(.refreshing, for: operationID)
             await scan()
             if let historyError { recordHistoryFailure(item: package.displayName, error: historyError) }
             reconcileHomebrewUpdate(token: package.token, name: package.displayName)
@@ -953,13 +971,19 @@ final class UpkeepStore: ObservableObject {
         guard !isWorking(operationID) else { return false }
         updateExecutionState.activeOperations.insert(operationID)
         defer { updateExecutionState.activeOperations.remove(operationID) }
+        beginUpdateActivity(operationID, targets: mutationTargets(for: item), phase: .adopting)
+        defer { endUpdateActivity(operationID) }
 
+        setUpdatePhase(.adopting, for: operationID)
         let succeeded = await execute(label: item.app.name, metadata: [
             "Source": "Homebrew adoption",
             "Installed": item.app.installedVersion,
             "Catalog": item.caskVersion
         ]) { try await self.dependencies.homebrew.adopt(item) }
-        if succeeded { await scan() }
+        if succeeded {
+            setUpdatePhase(.refreshing, for: operationID)
+            await scan()
+        }
         return succeeded
     }
 
@@ -986,6 +1010,8 @@ final class UpkeepStore: ObservableObject {
         guard !isWorking(operationID) else { return false }
         updateExecutionState.activeOperations.insert(operationID)
         defer { updateExecutionState.activeOperations.remove(operationID) }
+        beginUpdateActivity(operationID, targets: mutationTargets(for: item), phase: .backingUp)
+        defer { endUpdateActivity(operationID) }
 
         let record: UpdateRecord
         do {
@@ -997,6 +1023,7 @@ final class UpkeepStore: ObservableObject {
             recordUpdateFailure(item: item.app.name, action: "Prepare rollback backup", error: error)
             return false
         }
+        setUpdatePhase(.updating, for: operationID)
         let succeeded = await execute(label: item.app.name, metadata: [
             "Source": "Homebrew adoption",
             "From": item.app.installedVersion,
@@ -1006,6 +1033,7 @@ final class UpkeepStore: ObservableObject {
             var historyError: Error?
             do { try await dependencies.history.add(record) }
             catch { historyError = error }
+            setUpdatePhase(.refreshing, for: operationID)
             await scan()
             if let historyError { recordHistoryFailure(item: item.app.name, error: historyError) }
             reconcileHomebrewUpdate(token: item.caskToken, name: item.app.name)
@@ -1081,6 +1109,9 @@ final class UpkeepStore: ObservableObject {
 
     private func confirmRunningAppUpdateUnlocked(_ confirmation: RunningAppConfirmation) async {
         pendingRunningAppConfirmation = nil
+        let progressID = confirmation.operationID
+        beginUpdateActivity(progressID, targets: mutationTargets(for: confirmation), phase: .quitting)
+        defer { endUpdateActivity(progressID) }
         do {
             try await quitRunningApplications(for: confirmation.apps)
         } catch {
@@ -1088,6 +1119,7 @@ final class UpkeepStore: ObservableObject {
             return
         }
 
+        endUpdateActivity(progressID)
         let succeeded: Bool
         switch confirmation.action {
         case let .update(update): succeeded = await performApplicationUpdate(update)
@@ -1141,7 +1173,10 @@ final class UpkeepStore: ObservableObject {
         guard !isWorking(operationID) else { return }
         updateExecutionState.activeOperations.insert(operationID)
         defer { updateExecutionState.activeOperations.remove(operationID) }
+        beginUpdateActivity(operationID, targets: mutationTargets(for: .developer(package)), phase: .installing)
+        defer { endUpdateActivity(operationID) }
 
+        setUpdatePhase(.installing, for: operationID)
         let succeeded = await execute(label: package.name, metadata: [
             "Source": package.manager.rawValue,
             "From": package.currentVersion,
@@ -1157,6 +1192,7 @@ final class UpkeepStore: ObservableObject {
                 recoveryNote: "Package-manager updates do not have a universal rollback mechanism. Reinstall the previous version with \(package.manager.rawValue) if needed."
             )
             let historyWarning = await saveUpdateHistory(record)
+            setUpdatePhase(.refreshing, for: operationID)
             await scan()
             if let historyWarning { errorMessage = historyWarning }
         }
@@ -1218,7 +1254,10 @@ final class UpkeepStore: ObservableObject {
         guard !isWorking(operationID) else { return }
         updateExecutionState.activeOperations.insert(operationID)
         defer { updateExecutionState.activeOperations.remove(operationID) }
+        beginUpdateActivity(operationID, targets: mutationTargets(for: .model(model)), phase: .updating)
+        defer { endUpdateActivity(operationID) }
 
+        setUpdatePhase(.updating, for: operationID)
         let succeeded = await execute(label: model.name, metadata: [
             "Source": model.runtime.rawValue,
             "From": model.installedRevision,
@@ -1232,6 +1271,7 @@ final class UpkeepStore: ObservableObject {
                 recoveryNote: "Model files are managed by \(model.runtime.rawValue). Download the earlier model revision again if rollback is required."
             )
             let historyWarning = await saveUpdateHistory(record)
+            setUpdatePhase(.refreshing, for: operationID)
             await scanLocalModels()
             if let historyWarning { errorMessage = historyWarning }
         }
@@ -1251,12 +1291,22 @@ final class UpkeepStore: ObservableObject {
         defer {
             updateExecutionState.activeOperations.remove(batchID)
             batchUpdateProgress = nil
+            for item in items { endUpdateActivity(item.updateOperationID) }
         }
 
+        for item in items {
+            beginUpdateActivity(item.updateOperationID, targets: mutationTargets(for: item), phase: .queued)
+        }
         refreshRunningApplications()
         let runningApps = runningAppsForBatch(items)
+        for item in items {
+            if let app = batchApp(for: item), runningApps.contains(where: { $0.id == app.id }) {
+                setUpdatePhase(.quitting, for: item.updateOperationID)
+            }
+        }
         if !runningApps.isEmpty { try? await quitRunningApplications(for: runningApps) }
         let closedApps = runningApps.filter { !isRunning($0) }
+        for item in items { setUpdatePhase(.queued, for: item.updateOperationID) }
 
         var results: [BatchUpdateResult] = []
         for (index, item) in items.enumerated() {
@@ -1271,6 +1321,11 @@ final class UpkeepStore: ObservableObject {
             }
             let result = await performBatchItem(item)
             results.append(result)
+            if result.outcome == .updated {
+                setUpdatePhase(.queued, for: item.updateOperationID)
+            } else {
+                endUpdateActivity(item.updateOperationID)
+            }
             DiagnosticsStore.shared.record(
                 result.outcome == .failed ? .error : .info,
                 category: .update,
@@ -1285,7 +1340,12 @@ final class UpkeepStore: ObservableObject {
         }
         batchUpdateProgress = BatchUpdateProgress(completed: items.count, total: items.count, itemName: "Refreshing updates")
 
-        if results.contains(where: { $0.outcome == .updated }) { await scan() }
+        if results.contains(where: { $0.outcome == .updated }) {
+            for result in results where result.outcome == .updated {
+                setUpdatePhase(.refreshing, for: result.item.updateOperationID)
+            }
+            await scan()
+        }
         let updatedItemIDs = Set(results.compactMap { result in
             result.outcome == .updated ? result.item.id : nil
         })
@@ -1301,6 +1361,8 @@ final class UpkeepStore: ObservableObject {
         updateExecutionState.activeOperations.insert(workID)
         defer { updateExecutionState.activeOperations.remove(workID) }
 
+        let progressID = item.updateOperationID
+        setUpdatePhase(.backingUp, for: progressID)
         var historyWarning: String?
         do {
             switch item {
@@ -1311,7 +1373,9 @@ final class UpkeepStore: ObservableObject {
                             app: update.app, toVersion: update.availableVersion, kind: .app
                         )
                         do {
-                            try await dependencies.directAppInstaller.install(update: update)
+                            try await dependencies.directAppInstaller.install(update: update) { phase in
+                                await self.setUpdatePhase(phase, for: progressID)
+                            }
                         } catch {
                             await dependencies.history.discardBackup(for: record)
                             throw error
@@ -1336,11 +1400,12 @@ final class UpkeepStore: ObservableObject {
                     )
                 }
                 if let package = homebrewPackages.first(where: { $0.kind == .cask && $0.token == token }) {
-                    historyWarning = try await upgradeBatchPackage(package)
+                    historyWarning = try await upgradeBatchPackage(package, progressID: progressID)
                 } else if let adoptable = adoptableApps.first(where: { $0.caskToken == token && $0.app.id == update.app.id }) {
                     let record = try await dependencies.history.prepareAppBackup(
                         app: adoptable.app, toVersion: adoptable.caskVersion, kind: .homebrew
                     )
+                    setUpdatePhase(.updating, for: progressID)
                     do { try await dependencies.homebrew.installOrReplace(adoptable) }
                     catch {
                         await dependencies.history.discardBackup(for: record)
@@ -1351,6 +1416,7 @@ final class UpkeepStore: ObservableObject {
                     let record = try await dependencies.history.prepareAppBackup(
                         app: update.app, toVersion: update.availableVersion, kind: .homebrew
                     )
+                    setUpdatePhase(.updating, for: progressID)
                     do { try await dependencies.homebrew.upgradeCask(token: token) }
                     catch {
                         await dependencies.history.discardBackup(for: record)
@@ -1360,9 +1426,10 @@ final class UpkeepStore: ObservableObject {
                 }
 
             case let .homebrew(package):
-                historyWarning = try await upgradeBatchPackage(package)
+                historyWarning = try await upgradeBatchPackage(package, progressID: progressID)
 
             case let .developer(package):
+                setUpdatePhase(.installing, for: progressID)
                 try await dependencies.developerPackages.install(package, version: package.latestVersion)
                 let record = UpdateRecord(
                     id: UUID(), date: Date(), name: package.name,
@@ -1373,6 +1440,7 @@ final class UpkeepStore: ObservableObject {
                 historyWarning = await saveUpdateHistory(record)
 
             case let .model(model):
+                setUpdatePhase(.updating, for: progressID)
                 try await dependencies.localModels.update(model)
                 let record = UpdateRecord(
                     id: UUID(), date: Date(), name: model.name,
@@ -1388,7 +1456,7 @@ final class UpkeepStore: ObservableObject {
         }
     }
 
-    private func upgradeBatchPackage(_ package: HomebrewPackage) async throws -> String? {
+    private func upgradeBatchPackage(_ package: HomebrewPackage, progressID: OperationID) async throws -> String? {
         let record: UpdateRecord
         if package.kind == .cask, let app = matchingApp(for: package) {
             record = try await dependencies.history.prepareAppBackup(
@@ -1402,6 +1470,7 @@ final class UpkeepStore: ObservableObject {
                 recoveryNote: "Homebrew formula versions cannot always be rolled back automatically. Restore from Time Machine or install a versioned formula when available."
             )
         }
+        setUpdatePhase(.updating, for: progressID)
         do { try await dependencies.homebrew.upgrade(package) }
         catch {
             await dependencies.history.discardBackup(for: record)

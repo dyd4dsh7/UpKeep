@@ -722,7 +722,8 @@ struct AppDetailView: View {
                 } label: {
                     WorkingActionLabel(
                         isWorking: store.isUpdating(update),
-                        idleTitle: primaryActionTitle
+                        idleTitle: primaryActionTitle,
+                        phase: store.updatePhase(for: .applicationUpdate(update.id))
                     )
                     .frame(maxWidth: .infinity)
                 }
@@ -736,7 +737,8 @@ struct AppDetailView: View {
                     WorkingActionLabel(
                         isWorking: store.isWorking(.homebrewAdoption(adoptableItem.id)),
                         idleTitle: "Adopt",
-                        workingTitle: "Adopting…"
+                        workingTitle: "Adopting…",
+                        phase: store.updatePhase(for: .homebrewAdoption(adoptableItem.id))
                     )
                     .frame(maxWidth: .infinity)
                 }

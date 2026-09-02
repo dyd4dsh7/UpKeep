@@ -90,7 +90,8 @@ private struct LocalModelRow: View, Equatable {
                 Button { Task { await store.updateLocalModel(model) } } label: {
                     WorkingActionLabel(
                         isWorking: isWorking,
-                        idleTitle: "Update"
+                        idleTitle: "Update",
+                        phase: store.updatePhase(for: .localModel(model.id))
                     )
                 }
                     .buttonStyle(.bordered).controlSize(.small)
@@ -178,7 +179,8 @@ struct LocalModelDetail: View {
                 Button { Task { await store.updateLocalModel(model) } } label: {
                     WorkingActionLabel(
                         isWorking: isUpdating,
-                        idleTitle: "Update with \(model.runtime.rawValue)"
+                        idleTitle: "Update with \(model.runtime.rawValue)",
+                        phase: store.updatePhase(for: .localModel(model.id))
                     )
                 }
                     .buttonStyle(.borderedProminent)

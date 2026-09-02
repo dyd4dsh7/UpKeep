@@ -206,7 +206,8 @@ private struct DeveloperPackageRow: View, Equatable {
                 Button { Task { await store.updateDeveloperPackage(package) } } label: {
                     WorkingActionLabel(
                         isWorking: isWorking,
-                        idleTitle: package.canUpdateAutomatically ? "Update" : "View Update"
+                        idleTitle: package.canUpdateAutomatically ? "Update" : "View Update",
+                        phase: store.updatePhase(for: .developerPackage(package.id))
                     )
                 }
                     .listRowPrimaryAction()
@@ -339,7 +340,8 @@ private struct DeveloperPackageDetailContent: View {
                             WorkingActionLabel(
                                 isWorking: store.isWorking(.developerPackage(package.id)),
                                 idleTitle: "Install Version",
-                                workingTitle: "Installing…"
+                                workingTitle: "Installing…",
+                                phase: store.updatePhase(for: .developerPackage(package.id))
                             )
                         }
                         .buttonStyle(.borderedProminent)
@@ -438,7 +440,8 @@ private struct DeveloperPackageDetailContent: View {
                 Button { Task { await store.updateDeveloperPackage(package) } } label: {
                     WorkingActionLabel(
                         isWorking: isUpdating,
-                        idleTitle: package.canUpdateAutomatically ? "Update" : "View Update"
+                        idleTitle: package.canUpdateAutomatically ? "Update" : "View Update",
+                        phase: store.updatePhase(for: .developerPackage(package.id))
                     )
                 }
                     .buttonStyle(.borderedProminent)

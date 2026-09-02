@@ -705,7 +705,8 @@ private struct DeveloperUpdateCard: View {
             Button { Task { await store.updateDeveloperPackage(package) } } label: {
                 WorkingActionLabel(
                     isWorking: store.isWorking(.developerPackage(package.id)),
-                    idleTitle: package.canUpdateAutomatically ? "Update" : "View Update"
+                    idleTitle: package.canUpdateAutomatically ? "Update" : "View Update",
+                    phase: store.updatePhase(for: .developerPackage(package.id))
                 )
             }
                 .listRowPrimaryAction()
@@ -784,7 +785,7 @@ struct UpdateCard: View {
             Button {
                 Task { await store.performUpdate(update) }
             } label: {
-                WorkingActionLabel(isWorking: store.isUpdating(update), idleTitle: actionTitle)
+                WorkingActionLabel(isWorking: store.isUpdating(update), idleTitle: actionTitle, phase: store.updatePhase(for: .applicationUpdate(update.id)))
             }
             .listRowPrimaryAction()
             .disabled(store.isUpdating(update))
@@ -853,7 +854,8 @@ private struct HomebrewUpdateCard: View {
             Button { Task { await store.updatePackage(package) } } label: {
                 WorkingActionLabel(
                     isWorking: store.isWorking(.homebrewPackage(package.id)),
-                    idleTitle: "Update"
+                    idleTitle: "Update",
+                    phase: store.updatePhase(for: .homebrewPackage(package.id))
                 )
             }
                 .listRowPrimaryAction()
@@ -891,7 +893,8 @@ private struct LocalModelUpdateCard: View {
             Button { Task { await store.updateLocalModel(model) } } label: {
                 WorkingActionLabel(
                     isWorking: store.isWorking(.localModel(model.id)),
-                    idleTitle: "Update"
+                    idleTitle: "Update",
+                    phase: store.updatePhase(for: .localModel(model.id))
                 )
             }
                 .listRowPrimaryAction()

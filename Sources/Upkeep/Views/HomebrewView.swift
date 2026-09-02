@@ -211,7 +211,8 @@ private struct PackageRow: View, Equatable {
                 Button { Task { await store.updatePackage(package) } } label: {
                     WorkingActionLabel(
                         isWorking: isWorking,
-                        idleTitle: "Update"
+                        idleTitle: "Update",
+                        phase: store.updatePhase(for: .homebrewPackage(package.id))
                     )
                 }
                     .listRowPrimaryAction()
@@ -305,8 +306,9 @@ struct PackageDetail: View {
 
     private func updateCard(_ package: HomebrewPackage) -> some View {
         let isUpdating = store.isWorking(.homebrewPackage(package.id))
+        let phase = store.updatePhase(for: .homebrewPackage(package.id))
         return InspectorUpdateStatusCard(
-            title: isUpdating ? "Updating…" : "Update available",
+            title: phase?.title ?? (isUpdating ? "Updating…" : "Update available"),
             subtitle: isUpdating
                 ? "Preparing and running Homebrew"
                 : (package.kind == .cask
@@ -319,16 +321,12 @@ struct PackageDetail: View {
                     .foregroundStyle(.orange)
                 Button("Restore Updates") { store.restore(exclusion) }
                     .buttonStyle(.borderedProminent)
-            } else if isUpdating {
-                ProgressView()
-                    .controlSize(.small)
-                    .accessibilityLabel("Updating \(package.displayName)")
-                Text("Updating \(package.displayName)…")
-                    .font(.callout.weight(.medium))
-                    .foregroundStyle(.secondary)
             } else {
-                Button("Update") { Task { await store.updatePackage(package) } }
+                Button { Task { await store.updatePackage(package) } } label: {
+                    WorkingActionLabel(isWorking: isUpdating, idleTitle: "Update", phase: phase)
+                }
                     .buttonStyle(.borderedProminent)
+                    .disabled(isUpdating || phase != nil)
             }
         } options: {
             Button("Refresh") { Task { await store.refresh(package) } }

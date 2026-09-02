@@ -172,18 +172,26 @@ import Testing
 
     await store.performUpdate(update)
     let authorization = try #require(store.pendingHomebrewAuthorizationConfirmation)
+    #expect(store.updatePhase(for: .applicationUpdate(update.id)) == .confirmation)
+    #expect(store.updatePhase(for: .homebrewPackage(package.id)) == .confirmation)
+    store.pendingHomebrewAuthorizationConfirmation = nil
+    #expect(store.updatePhase(for: .applicationUpdate(update.id)) == nil)
     let updateTask = Task { await store.confirmHomebrewAuthorization(authorization) }
     await history.waitUntilBackupStarts()
 
     #expect(store.isUpdating(update))
     #expect(store.isWorking(.applicationUpdate(update.id)))
     #expect(store.isWorking(.homebrewPackage(package.id)))
+    #expect(store.updatePhase(for: .applicationUpdate(update.id)) == .backingUp)
+    #expect(store.updatePhase(for: .homebrewPackage(package.id)) == .backingUp)
 
     await history.resumeBackup()
     await updateTask.value
 
     #expect(!store.isUpdating(update))
     #expect(!store.isWorking(.homebrewPackage(package.id)))
+    #expect(store.updatePhase(for: .applicationUpdate(update.id)) == nil)
+    #expect(store.updateExecutionState.activities.isEmpty)
 }
 
 @MainActor
@@ -227,11 +235,13 @@ import Testing
 
     #expect(store.pendingHomebrewAuthorizationConfirmation == nil)
     #expect(store.isWorking(.homebrewAdoption(item.id)))
+    #expect(store.updatePhase(for: .homebrewAdoption(item.id)) == .adopting)
 
     await homebrew.resumeAdoption()
     await adoptionTask.value
 
     #expect(!store.isWorking(.homebrewAdoption(item.id)))
+    #expect(store.updateExecutionState.activities.isEmpty)
 }
 
 private actor TransactionRecorder {

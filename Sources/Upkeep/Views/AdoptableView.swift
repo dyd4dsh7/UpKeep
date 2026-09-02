@@ -35,7 +35,8 @@ struct AdoptableView: View {
                             WorkingActionLabel(
                                 isWorking: store.isWorking(.homebrewAdoption(item.id)),
                                 idleTitle: "Adopt",
-                                workingTitle: "Adopting…"
+                                workingTitle: "Adopting…",
+                                phase: store.updatePhase(for: .homebrewAdoption(item.id))
                             )
                         }
                         .listRowPrimaryAction()

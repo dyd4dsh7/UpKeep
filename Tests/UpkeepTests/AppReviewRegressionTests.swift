@@ -309,7 +309,11 @@ private func eventually(_ condition: () async -> Bool) async -> Bool {
 private enum ReviewError: Error { case historyWrite, quit }
 private struct ReviewScanner: UpdateScanning {
     var failedSources: Set<UpdateSource> = [.sparkle]
-    func scan(settings: ScanSettings) async -> ScanReport { .empty }
+    var onScan: (@Sendable () async -> Void)?
+    func scan(settings: ScanSettings) async -> ScanReport {
+        await onScan?()
+        return .empty
+    }
     func scan(app: InstalledApp, settings: ScanSettings) async -> UpdateScanner.TargetedAppReport {
         .init(updates: [], failedSources: failedSources, warnings: [])
     }
@@ -392,16 +396,79 @@ private actor ReviewInstaller: DirectAppInstalling {
     let store: UpkeepStore
     init(history: ReviewHistory = ReviewHistory(), installer: ReviewInstaller = ReviewInstaller(),
          discoveredApp: InstalledApp = reviewApp(), developerReport: DeveloperPackageClient.Report = .empty,
-         scanner: ReviewScanner = ReviewScanner()) {
+         scanner: ReviewScanner = ReviewScanner(), progressInstaller: (any DirectAppInstalling)? = nil) {
         defaults = UserDefaults(suiteName: suite)!
         settings = AppSettings(defaults: defaults)
         self.history = history; self.installer = installer
         store = UpkeepStore(settings: settings, dependencies: UpkeepDependencies(
             scanner: scanner, applicationDiscovery: ReviewDiscovery(app: discoveredApp), homebrew: ReviewBrew(),
             developerPackages: ReviewDeveloper(report: developerReport), localModels: ReviewModels(), history: history,
-            externalOpener: opener, directAppInstaller: installer, applicationLifecycle: lifecycle,
+            externalOpener: opener, directAppInstaller: progressInstaller ?? installer, applicationLifecycle: lifecycle,
             externalVerificationInterval: .milliseconds(1)
         ))
     }
     func cleanUp() { defaults.removePersistentDomain(forName: suite) }
+}
+
+@MainActor
+@Test(arguments: [false, true], [false, true])
+func updateButtonTracksDirectInstallStagesAndClearsAfterCompletion(fails: Bool, batch: Bool) async {
+    let probe = ReviewProgressProbe()
+    let app = reviewApp()
+    let update = reviewUpdate(app)
+    let operation = OperationID.applicationUpdate(update.id)
+    let f = ReviewFixture(
+        scanner: ReviewScanner(onScan: {
+            await probe.observe(.refreshing, operation: operation)
+        }),
+        progressInstaller: ReviewProgressInstaller(fails: fails, observe: { phase in
+            await probe.observe(phase, operation: operation)
+        })
+    )
+    defer { f.cleanUp() }
+    probe.store = f.store
+    f.store.apps = [app]
+    f.store.updates = [update]
+
+    if batch {
+        let result = await f.store.performBatchUpdates([.application(update)])
+        #expect(result.failedCount == (fails ? 1 : 0))
+    } else {
+        await f.store.performUpdate(update)
+    }
+
+    #expect(probe.observed == (fails
+        ? [.downloading, .preparing, .installing]
+        : [.downloading, .preparing, .installing, .refreshing]))
+    #expect(f.store.updatePhase(for: operation) == nil)
+    #expect(!f.store.isUpdating(update))
+    #expect(f.store.updateExecutionState.activities.isEmpty)
+    #expect(await f.history.discarded == fails)
+}
+
+@MainActor private final class ReviewProgressProbe {
+    var store: UpkeepStore?
+    var observed: [UpdatePhase] = []
+    func observe(_ expected: UpdatePhase, operation: OperationID) {
+        #expect(store?.updatePhase(for: operation) == expected)
+        MutationContext.$owner.withValue(nil) {
+            #expect(store?.isWorking(operation) == true)
+        }
+        observed.append(expected)
+    }
+}
+
+private struct ReviewProgressInstaller: DirectAppInstalling {
+    let fails: Bool
+    let observe: @Sendable (UpdatePhase) async -> Void
+    func install(update: AvailableUpdate) async throws {
+        try await install(update: update, progress: { _ in })
+    }
+    func install(update: AvailableUpdate, progress: @escaping UpdateProgressReporter) async throws {
+        for phase: UpdatePhase in [.downloading, .preparing, .installing] {
+            await progress(phase)
+            await observe(phase)
+        }
+        if fails { throw ReviewError.historyWrite }
+    }
 }

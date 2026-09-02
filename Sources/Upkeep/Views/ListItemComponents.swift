@@ -376,7 +376,8 @@ struct ListRowPrimaryAction: ViewModifier {
             .buttonStyle(.bordered)
             .buttonBorderShape(.capsule)
             .controlSize(.small)
-            .frame(width: 108, alignment: .trailing)
+            .fixedSize(horizontal: true, vertical: false)
+            .frame(minWidth: 108, alignment: .trailing)
     }
 }
 
@@ -486,13 +487,16 @@ struct WorkingActionLabel: View {
     let isWorking: Bool
     let idleTitle: String
     var workingTitle = "Updating…"
+    var phase: UpdatePhase?
 
     var body: some View {
         ZStack {
-            if isWorking {
+            if isWorking || phase != nil {
                 HStack(spacing: 6) {
-                    ProgressView().controlSize(.small)
-                    Text(workingTitle)
+                    if phase?.showsProgress != false {
+                        ProgressView().controlSize(.small)
+                    }
+                    Text(phase?.title ?? workingTitle)
                 }
                 .accessibilityElement(children: .combine)
                 .upkeepStateTransition()
@@ -501,7 +505,7 @@ struct WorkingActionLabel: View {
                     .upkeepStateTransition()
             }
         }
-        .upkeepAnimated(for: isWorking, animation: UpkeepMotion.quick)
+        .upkeepAnimated(for: phase?.title ?? (isWorking ? workingTitle : idleTitle), animation: UpkeepMotion.quick)
     }
 }
 

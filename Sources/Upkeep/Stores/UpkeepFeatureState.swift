@@ -206,6 +206,7 @@ final class UpkeepScanState: ObservableObject {
 @MainActor
 final class UpkeepUpdateExecutionState: ObservableObject {
     @Published var activeOperations = Set<OperationID>()
+    @Published var activities: [OperationID: UpdateActivity] = [:]
     @Published var batchUpdateProgress: BatchUpdateProgress?
     @Published var appManagementPermissionCheck: AppManagementPermissionCheck?
     @Published var runningBundleIdentifiers = Set<String>()

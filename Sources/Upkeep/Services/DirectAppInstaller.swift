@@ -2,24 +2,38 @@ import Foundation
 
 protocol DirectAppInstalling: Sendable {
     func install(update: AvailableUpdate) async throws
+    func install(update: AvailableUpdate, progress: @escaping UpdateProgressReporter) async throws
+}
+
+extension DirectAppInstalling {
+    func install(update: AvailableUpdate, progress: @escaping UpdateProgressReporter) async throws {
+        await progress(.installing)
+        try await install(update: update)
+    }
 }
 
 struct DirectAppInstaller: DirectAppInstalling, Sendable {
     func install(update: AvailableUpdate) async throws {
+        try await install(update: update, progress: { _ in })
+    }
+
+    func install(update: AvailableUpdate, progress: @escaping UpdateProgressReporter) async throws {
         guard let downloadURL = update.directInstallURL else {
             throw InstallError.unsupportedDownload
         }
         try await Task.detached(priority: .userInitiated) {
             try await installSynchronouslyDownloaded(
                 update: update,
-                downloadURL: downloadURL
+                downloadURL: downloadURL,
+                progress: progress
             )
         }.value
     }
 
     private func installSynchronouslyDownloaded(
         update: AvailableUpdate,
-        downloadURL: URL
+        downloadURL: URL,
+        progress: @escaping UpdateProgressReporter
     ) async throws {
         let fileManager = FileManager.default
         let workspace = fileManager.temporaryDirectory
@@ -29,6 +43,7 @@ struct DirectAppInstaller: DirectAppInstalling, Sendable {
 
         var request = URLRequest(url: downloadURL)
         request.timeoutInterval = 120
+        await progress(.downloading)
         let (temporaryDownload, response) = try await PublisherHTTPClient.download(for: request)
         defer { try? fileManager.removeItem(at: temporaryDownload) }
         guard 200..<300 ~= response.statusCode else {
@@ -46,6 +61,7 @@ struct DirectAppInstaller: DirectAppInstalling, Sendable {
                 try? run("/usr/bin/hdiutil", ["detach", mountedRoot.path, "-force"])
             }
         }
+        await progress(.preparing)
         let extractedRoot: URL
         switch downloadURL.pathExtension.lowercased() {
         case "zip":
@@ -69,6 +85,7 @@ struct DirectAppInstaller: DirectAppInstalling, Sendable {
             under: extractedRoot,
             bundleIdentifier: update.app.bundleIdentifier
         )
+        await progress(.installing)
         try replace(update.app.url, with: replacement, for: update)
     }
 
