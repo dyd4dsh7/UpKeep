@@ -30,6 +30,7 @@ jobs:
       - name: Test with warnings as errors
         run: swift test -Xswiftc -warnings-as-errors
       - name: Package debug app
+        id: package
         run: ./scripts/package-app.sh debug
       - name: Extract debug app
         run: ditto -x -k outputs/Upkeep.zip ci-artifact
@@ -46,11 +47,20 @@ jobs:
           fi
       - name: Launch smoke test
         run: |
-          open -n ci-artifact/Upkeep.app
+          open -n --stdout "$RUNNER_TEMP/upkeep-stdout.log" --stderr "$RUNNER_TEMP/upkeep-stderr.log" ci-artifact/Upkeep.app
+          for attempt in {1..15}; do
+            if pgrep -x Upkeep >/dev/null; then break; fi
+            sleep 1
+          done
           sleep 3
-          pgrep -x Upkeep
+          if ! pgrep -x Upkeep; then
+            cat "$RUNNER_TEMP/upkeep-stdout.log" "$RUNNER_TEMP/upkeep-stderr.log" || true
+            /usr/bin/log show --last 2m --style compact --predicate 'process == "Upkeep"' || true
+            exit 1
+          fi
           pkill -x Upkeep
       - name: Retain debug package for verification
+        if: always() && steps.package.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: Upkeep-debug
