@@ -4,6 +4,10 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+- Prevented a SwiftUI navigation crash by avoiding animation of outgoing native list and toolbar hierarchies.
+- Kept item names visible in narrow inspectors by moving version/action controls below the name when space is limited.
+- Made packaged resource loading independent of temporary SwiftPM build directories.
+
 - Prepared the project for open-source contribution with an MIT licence, privacy and security guidance, contribution instructions, and issue templates.
 - Added dependency notices to app packages and replaced bundled third-party logos with native system symbols.
 - Fixed main-actor isolation of app icon images and optional signature-status matching.

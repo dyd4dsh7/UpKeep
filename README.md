@@ -5,6 +5,8 @@
 
 A native macOS app for keeping applications and developer tools up to date.
 
+![Upkeep settings showing navigation, list density, and automatic checks](docs/images/settings.png)
+
 ## Install and support
 
 Requires **macOS 14 or newer**. Official download builds target **Apple Silicon**.

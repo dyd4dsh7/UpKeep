@@ -89,7 +89,7 @@ scans Git history. Actions and the downloaded secret scanner are pinned.
 
 The local macOS 27 beta Command Line Tools lacks its SwiftUI macro plugin. Use the
 installed stable macOS 26.5 SDK for local verification, and the pinned Xcode CI
-job for the supported contributor toolchain. Record results below after execution.
+job for the supported contributor toolchain.
 
 There are currently no GitHub signing secrets and no valid local code-signing
 identities. A signed/notarized release cannot be produced until the maintainer
@@ -99,5 +99,41 @@ signing, notarization and validation succeed. See [releasing.md](releasing.md).
 
 ## Verification results
 
-Pending completion of the preparation branch. Local tests, packaged-app QA,
-GitHub CI, repository protections, notarization and publication are separate gates.
+- All 214 local tests passed with compiler warnings treated as errors using the
+  installed stable macOS 26.5 SDK.
+- Debug packaging and process launch passed. The bundle includes MIT and dependency
+  notices, contains no removed logos, and passes strict code-signature validation.
+  Release validation correctly rejects its ad-hoc signature.
+- The Xcode 26.3 CI jobs passed on `3884b59`, including startup after temporary build
+  directory cleanup. Subsequent commits remain subject to the PR's required checks:
+  https://github.com/dyd4dsh7/UpKeep/pull/2
+- Reproduced and fixed a local SwiftUI navigation crash by removing animation around
+  outgoing destination hierarchies. Verified navigation between Updates, Developer,
+  and AI Models. No package installation, cleanup, restore, or application update
+  was performed during these UI checks.
+- Checked the Developer list and inspector at approximately 1,492 and 760 points
+  wide. Added a stacked row layout where version controls previously hid names.
+  Private screenshots remain in the ignored audit directory. The README screenshot
+  contains only the Settings interface, without app inventories or personal paths.
+- Actionlint 1.7.12 passed (ShellCheck not installed); YAML parsing, shell syntax,
+  diff whitespace, and valid/missing/invalid release-note checks passed.
+
+## Repository safeguards applied
+
+- `main` requires a pull request and current passing `test-and-package` and
+  `secret-scan` checks from GitHub Actions. Admins are included. Force pushes and
+  branch deletion are prohibited; conversations must be resolved. A separate
+  approval is not required for this sole-maintainer project.
+- Active `v*` tag rules restrict creation, updates, and deletion to repository
+  admins through an explicit bypass role.
+- The `release` environment permits only `main` and `v*` tags. There are no signing
+  secrets in it yet. Add its maintainer approval gate when publishing publicly.
+- Dependency vulnerability alerts are enabled. Default Actions token permissions
+  are read-only and Actions cannot approve pull requests.
+- Private vulnerability reporting and external-fork approval settings are not
+  available on this private repository through the checked API. Enable those,
+  secret scanning and push protection after public creation; do not claim them
+  enabled until their state is read back.
+- Repository visibility is still private. Source publication/history handling and
+  signed binary publication remain distinct final steps requiring the outstanding
+  history decision and Apple signing credentials respectively.
