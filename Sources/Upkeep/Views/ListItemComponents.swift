@@ -7,29 +7,6 @@ enum UpkeepLayout {
     static let inspectorMaximumWidth: CGFloat = 500
 }
 
-@MainActor
-final class BundledImageCache {
-    static let shared = BundledImageCache()
-
-    private var images: [String: NSImage] = [:]
-    private var missingImageNames = Set<String>()
-
-    func image(named name: String, extensions: [String] = ["png", "svg"]) -> NSImage? {
-        let cacheKey = "\(name).\(extensions.joined(separator: ","))"
-        if let image = images[cacheKey] { return image }
-        guard !missingImageNames.contains(cacheKey),
-              let url = extensions.lazy.compactMap({
-                  Bundle.module.url(forResource: name, withExtension: $0)
-              }).first,
-              let image = NSImage(contentsOf: url) else {
-            missingImageNames.insert(cacheKey)
-            return nil
-        }
-        images[cacheKey] = image
-        return image
-    }
-}
-
 struct StandardItemRow<Icon: View, Content: View, Accessories: View>: View {
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -52,20 +29,21 @@ struct StandardItemRow<Icon: View, Content: View, Accessories: View>: View {
     }
 
     var body: some View {
-        HStack(spacing: settings.listDensity == .compact ? 10 : 14) {
-            icon
-                .scaleEffect(settings.listDensity == .compact ? 0.82 : 1.08)
-                .frame(width: settings.listDensity == .compact ? 32 : 42,
-                       height: settings.listDensity == .compact ? 32 : 42)
-
-            content
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .layoutPriority(1)
-
-            HStack(spacing: settings.listDensity == .compact ? 8 : 12) {
-                accessories
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: rowSpacing) {
+                rowIcon
+                content
+                    .frame(minWidth: 140, maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(1)
+                rowAccessories
             }
-            .fixedSize(horizontal: true, vertical: false)
+            HStack(alignment: .top, spacing: rowSpacing) {
+                rowIcon
+                VStack(alignment: .leading, spacing: 8) {
+                    content.frame(maxWidth: .infinity, alignment: .leading)
+                    rowAccessories
+                }
+            }
         }
         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, settings.listDensity == .compact ? 2 : 6)
@@ -81,6 +59,22 @@ struct StandardItemRow<Icon: View, Content: View, Accessories: View>: View {
         .upkeepAnimated(for: isHovering, animation: UpkeepMotion.quick)
         .upkeepAnimated(for: isSelected, animation: UpkeepMotion.quick)
         .upkeepRowTransition()
+    }
+
+    private var rowSpacing: CGFloat { settings.listDensity == .compact ? 10 : 14 }
+
+    private var rowIcon: some View {
+        icon
+            .scaleEffect(settings.listDensity == .compact ? 0.82 : 1.08)
+            .frame(width: settings.listDensity == .compact ? 32 : 42,
+                   height: settings.listDensity == .compact ? 32 : 42)
+    }
+
+    private var rowAccessories: some View {
+        HStack(spacing: settings.listDensity == .compact ? 8 : 12) {
+            accessories
+        }
+        .fixedSize(horizontal: true, vertical: false)
     }
 }
 

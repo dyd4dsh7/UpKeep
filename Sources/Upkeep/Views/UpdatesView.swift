@@ -677,7 +677,7 @@ private struct BatchReviewRow: View {
     @ViewBuilder private var itemIcon: some View {
         switch item {
         case let .application(update): AppIcon(url: update.app.url, size: 34)
-        case .homebrew: BundledPackageIcon(name: "homebrew", size: 34)
+        case .homebrew: PackageSourceIcon(name: "homebrew", size: 34)
         case let .developer(package): PackageManagerIcon(manager: package.manager, size: 34)
         case let .model(model): LocalModelRuntimeIcon(runtime: model.runtime, size: 34)
         }
@@ -836,7 +836,7 @@ private struct HomebrewUpdateCard: View {
 
     var body: some View {
         StandardItemRow(isSelected: store.updateInspectorSelection == .homebrew(package.id)) {
-            BundledPackageIcon(name: "homebrew", size: 36)
+            PackageSourceIcon(name: "homebrew", size: 36)
         } content: {
             ItemIdentityView(
                 title: package.displayName,

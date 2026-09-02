@@ -76,7 +76,11 @@ struct AppSecuritySection: View {
     }
 
     private var signatureText: String {
-        switch report?.signatureValid { case true: "Valid"; case false: "Invalid"; case nil: "Unavailable" }
+        switch report?.signatureValid {
+        case .some(true): "Valid"
+        case .some(false): "Invalid"
+        case .none: "Unavailable"
+        }
     }
 
     private func value(_ title: String, boolean: Bool?) -> some View {

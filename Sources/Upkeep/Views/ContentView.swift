@@ -152,7 +152,9 @@ struct ContentView: View {
                 }
             }
         }
-        .upkeepAnimated(for: detailSurfaceID)
+        // Destination changes replace native Lists, toolbars, and inspectors.
+        // Keeping the outgoing hierarchy alive in an animated transaction can
+        // leave SwiftUI reading a disposed view phase during navigation.
     }
 
     @ViewBuilder private var destinationDetail: some View {
@@ -234,10 +236,6 @@ struct ContentView: View {
 
     private var isSearching: Bool {
         !store.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private var detailSurfaceID: String {
-        isSearching ? "search" : "destination:\(store.selection.rawValue)"
     }
 
     private var selectedHomebrewPackage: HomebrewPackage? {

@@ -1,5 +1,30 @@
 # Upkeep
 
+[![CI](https://github.com/dyd4dsh7/UpKeep/actions/workflows/ci.yml/badge.svg)](https://github.com/dyd4dsh7/UpKeep/actions/workflows/ci.yml)
+[![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
+
+A native macOS app for keeping applications and developer tools up to date.
+
+![Upkeep settings showing navigation, list density, and automatic checks](docs/images/settings.png)
+
+## Install and support
+
+Requires **macOS 14 or newer**. Official download builds target **Apple Silicon**.
+Intel source builds are not currently covered by CI. Download signed, notarized
+archives only from [GitHub Releases](https://github.com/dyd4dsh7/UpKeep/releases).
+If no release is listed, use the source-build instructions below; a successful
+CI run or a debug ZIP is not a notarized release.
+
+For a published release, download `Upkeep.zip` and `Upkeep.zip.sha256`, run
+`shasum -a 256 -c Upkeep.zip.sha256` in the download directory, extract the ZIP,
+and move `Upkeep.app` into Applications. Open it normally through Finder.
+Do not disable Gatekeeper to run an unverified download.
+
+Homebrew and other managers are optional. Upkeep uses tools already installed on
+your Mac. Start with application management and enable developer or model checks
+when you need them.
+
+
 Upkeep is a native SwiftUI macOS application that scans installed apps and checks publisher and package-manager update sources. First-run setup starts with focused application management; Homebrew and the broader developer environment are explicit opt-ins.
 
 The app includes a standard unified macOS toolbar with a prominent live update counter, a menu-bar status item, and a Dock icon badge using the same focused count. The primary count covers application updates, requested Homebrew packages, and macOS updates; global developer packages and Homebrew dependencies remain available in their dedicated workspaces without overwhelming the main queue. It also provides native Settings for every source and supported developer manager, configurable launch/background checks, beta visibility, and notifications.
@@ -38,7 +63,7 @@ The macOS section reads Apple's Software Update catalog, lists compatible full i
 
 Upkeep inventories globally installed npm, pnpm, Python/pip, RubyGems, and Cargo packages when their package managers are available. Manager filters only appear for installed tools, and packages without updates remain visible with a Current status. It preserves the discovered executable path—such as an NVM Node installation—when applying an update. Apps not currently managed by Homebrew also contribute to the update count when Homebrew's official cask catalog has a newer version; Upkeep backs up the app before replacing it and enrolling it under Homebrew management.
 
-Package rows use bundled manager artwork and open detailed metadata when selected. npm, pnpm, pip, RubyGems, and Cargo packages can be installed at an explicit published version. Homebrew version selection follows its versioned-formula model; historical cask releases are only available when the cask itself exposes them.
+Package rows use native system symbols and open detailed metadata when selected. npm, pnpm, pip, RubyGems, and Cargo packages can be installed at an explicit published version. Homebrew version selection follows its versioned-formula model; historical cask releases are only available when the cask itself exposes them.
 
 Developer package details load available releases from the package manager or registry into a version menu and select the latest release by default. The Developer toolbar can refresh all installed managers or only npm, pnpm, Python, RubyGems, or Cargo.
 
@@ -48,7 +73,7 @@ The Homebrew and Developer toolbars also expose supported cleanup operations for
 
 Upkeep detects locally installed Ollama and LM Studio models without showing empty runtime sections. Ollama models are checked by comparing their local and registry manifest digests. LM Studio model files are checked against their originating Hugging Face repository. Supported updates run through `ollama pull` or `lms get`, so credentials, storage, and model management remain with the installed runtime.
 
-The model workspace uses bundled artwork downloaded from the official Ollama and LM Studio websites, with a native generic AI symbol when a logo is unavailable.
+The model workspace uses native system symbols to identify model runtimes.
 
 ## Changelog
 
@@ -58,12 +83,18 @@ Upkeep never downloads executables from its own servers. App Store updates open 
 
 ## Build
 
-Requires macOS 14 or newer and Apple Command Line Tools.
+Use **Xcode 26.3 or newer**, or matching Apple Command Line Tools, with the
+**macOS 26 SDK or newer**. CI explicitly selects Xcode 26.3. The build SDK is newer
+than the macOS 14 deployment target because the source uses newer SwiftUI APIs
+behind availability checks. A complete stable toolchain is recommended; beta
+Command Line Tools may omit SwiftUI macro plugins.
+
+No Apple Developer membership or signing secrets are needed for local debug builds.
+Clone this repository, then:
 
 ```sh
-swift test
-./scripts/package-app.sh debug
-open outputs/Upkeep.zip
+swift test -Xswiftc -warnings-as-errors
+./script/build_and_run.sh
 ```
 
 ## Performance
@@ -80,29 +111,41 @@ The [third performance pass](docs/performance/2026-08-31-search.md) covers globa
 search across all seven result groups. Run it with
 `./scripts/benchmark-performance.sh outputs/performance/search.log search`.
 
-## Release
+## Privacy and permissions
 
-Direct distribution requires a Developer ID Application certificate and a
-`notarytool` keychain profile. The release command signs with Hardened Runtime,
-submits the archive to Apple's notary service, staples the ticket, and verifies
-the result with `codesign`, `stapler`, and Gatekeeper before keeping the ZIP.
+Update checks contact publishers and registries for the sources you enable.
+Preferences, diagnostics, history, and backups stay on your Mac; Upkeep has no
+Upkeep-operated analytics endpoint. See [PRIVACY.md](PRIVACY.md) for the data read,
+network requests, retention, and export behaviour.
 
-```sh
-xcrun notarytool store-credentials upkeep-notary
-export UPKEEP_SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)"
-export UPKEEP_NOTARY_PROFILE="upkeep-notary"
-./scripts/release.sh
-```
+macOS may request App Management access, notifications, or authentication for a
+specific action. Review updates and cleanup before confirming them. App backups
+are limited and do not replace a system backup.
 
-Release packaging intentionally fails rather than producing an ad-hoc signed
-artifact when either credential is missing.
+## Limitations
 
-The `Release` GitHub Actions workflow runs the same script for version tags and
-manual dispatches. It expects repository secrets named
-`DEVELOPER_ID_P12_BASE64`, `DEVELOPER_ID_P12_PASSWORD`, `KEYCHAIN_PASSWORD`,
-`APPLE_ID`, `APPLE_TEAM_ID`, `NOTARY_PASSWORD`, and
-`UPKEEP_SIGNING_IDENTITY`.
+- Some apps can only update through their publisher's own updater or the App Store.
+- Unavailable, blocked, or rate-limited sources may leave an update check incomplete.
+- Package-manager changes can affect your development environment; arbitrary package
+  downgrades and automatic system rollback are not supported.
+- Apple Silicon migration verifies the main executable, not every helper or plugin.
+- macOS 14 is the deployment target; the current CI smoke test runs on macOS 26.
+  This is not evidence of an end-to-end test on every supported macOS version.
 
-The app bundle declares its canonical GitHub repository, so Upkeep discovers
-its own published releases and routes users to the signed release artifact when
-an Upkeep update is available.
+## Contributing and security
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, project structure, and PR guidance.
+Use [GitHub Issues](https://github.com/dyd4dsh7/UpKeep/issues) for bugs and proposals.
+Report vulnerabilities privately using [SECURITY.md](SECURITY.md).
+
+## Licence
+
+Upkeep's original code and artwork are licensed under [MIT](LICENSE).
+[Third-party notices](THIRD_PARTY_NOTICES.md) describe dependency licences, system
+resources, and trademarks. Third-party names do not imply endorsement.
+
+## Maintainer releases
+
+See [the release guide](docs/releasing.md) for protected signing credentials,
+notarization, version tags, draft releases, and distribution verification.
+The app declares its canonical GitHub repository to discover published releases.

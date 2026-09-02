@@ -209,14 +209,8 @@ struct LocalModelRuntimeIcon: View {
     let size: CGFloat
 
     var body: some View {
-        Group {
-            if let image = BundledImageCache.shared.image(named: runtime.assetName, extensions: ["png"]) {
-                Image(nsImage: image).resizable().scaledToFit()
-            } else {
-                Image(systemName: runtime.systemImage)
-                    .resizable().scaledToFit().padding(size * 0.2).foregroundStyle(.blue)
-            }
-        }
+        Image(systemName: runtime.systemImage)
+            .resizable().scaledToFit().padding(size * 0.2).foregroundStyle(.blue)
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: size * 0.22))
         .accessibilityLabel(runtime.rawValue)
