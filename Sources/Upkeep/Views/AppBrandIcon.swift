@@ -10,7 +10,13 @@ enum AppBrand {
     private static let darkImage = loadImage(named: "AppIconDark")
 
     private static func loadImage(named name: String) -> NSImage {
-        if let url = Bundle.module.url(forResource: name, withExtension: "png"),
+        // Native SwiftPM's generated Bundle.module accessor checks beside the
+        // executable and in its build directory, not Contents/Resources. Resolve
+        // the packaged bundle first so distribution works after build cleanup.
+        let packagedResources = Bundle.main.url(forResource: "Upkeep_Upkeep", withExtension: "bundle")
+            .flatMap(Bundle.init(url:))
+        let resources = packagedResources ?? Bundle.module
+        if let url = resources.url(forResource: name, withExtension: "png"),
            let image = NSImage(contentsOf: url) { return image }
         return NSImage(systemSymbolName: "arrow.triangle.2.circlepath", accessibilityDescription: "Upkeep") ?? NSImage()
     }
