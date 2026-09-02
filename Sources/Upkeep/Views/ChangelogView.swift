@@ -46,22 +46,40 @@ private struct UpkeepRelease: Identifiable {
     var isUnreleased: Bool { version == "Next" }
 
     static let all = [
-        UpkeepRelease(version: "Next", date: "In development", changes: [
+        UpkeepRelease(version: "0.24.0", date: "2 September 2026", changes: [
+            "Flags Intel-only apps on Apple Silicon Macs and guides replacement through their existing update manager, Homebrew cask, or developer releases. Native availability is not assumed.",
+            "Verifies Apple Silicon and Universal replacements locally, including same-version installs, while leaving missing, unreadable, or differently identified apps unverified.",
+            "Adds focused first-run profiles and persistent Basic and Advanced views, keeping developer tools, dependencies, prereleases, and technical details opt-in.",
+            "Adopts native Liquid Glass navigation, toolbar search, shared resizable inspectors, clearer rows and actions, updated app artwork, and a reliable Dock update counter.",
+            "Simplifies Settings, application filters, and batch review; only stable updates Upkeep can complete directly are selected by default.",
+            "Adds targeted app and package refreshes with progress and Last checked times, richer technical details, and source diagnostics.",
+            "Adds check-first cleanup for Homebrew, npm, pnpm, and uv with confirmation, available estimates, and reclaimed disk-space reporting.",
+            "Distinguishes unchecked, disabled, failed, partial, and completed scans, and explains incomplete publisher checks in app details.",
+            "Preserves Sparkle build-only updates through detection, download validation, source selection, and exclusions.",
+            "Prevents conflicting updates, adoption, cleanup, and restores; stages and validates restore backups before replacement and preserves recovery copies on failure.",
+            "Keeps successful installations recoverable when history cannot be saved, refreshes model history, and handles Upkeep self-updates externally.",
+            "Deduplicates Homebrew casks in update lists and batch review without hiding same-named formulae.",
+            "Hardens publisher destinations, redirects, downloads, archive extraction, staged app validation, and privileged Homebrew terminal handoffs.",
+            "Fixes developer-package and pnpm cleanup failures caused by unavailable or read-only working and temporary directories.",
+            "Speeds up library lookups, global search, diagnostics, and release menus, with repeatable offline benchmarks and regression coverage.",
+            "Separates hover from selection, respects Reduce Motion, and fixes Settings and inspector constraint failures, progress-size faults, and search-selection state faults.",
+            "Keeps test and standalone review diagnostics out of the app's persistent log.",
             "Automatically reopens applications that Upkeep temporarily quits after successful single or batch updates.",
             "Adds trusted GitHub release discovery for Stats and UniGetUI plus validated, user-supplied repository mappings.",
             "Finds runtime-configured Sparkle feeds and identifies apps that own their updater without incorrectly calling them unsupported.",
             "Routes Steam, Adobe Creative Cloud, JetBrains Toolbox, Epic Games, Spotify, Discord, standalone Tailscale, and macOS-managed apps to their publisher-owned updater.",
             "Reads Steam queue and download progress from local manifests and verifies external updates against the installed app bundle.",
             "Displays release provenance and Sparkle signature declarations, and matches Homebrew casks by their declared app artifacts.",
-            "Adds signed and notarized release packaging with CI, release, and validation workflows."
-        ]),
-        UpkeepRelease(version: "0.23.1", date: "22 July 2026", changes: [
+            "Adds signed and notarized release packaging with CI, release, and validation workflows.",
+            "Rejects unrelated GitHub release tags from multi-product repositories and preserves installed prerelease channels.",
             "Scans every NVM installation, editor extensions, Python tool environments, Rust toolchains, GitHub CLI extensions, Go tools, Composer, .NET, MacPorts, Nix, mise, asdf, Volta, and fnm only when they are detected.",
             "Finds Bun and Yarn global packages and keeps packages from separate Node installations distinct.",
             "Parallelizes source work, caches Homebrew catalog data, and coalesces registry requests, reducing repeated full scans from about 18 seconds to roughly 2–3 seconds in local benchmarks.",
             "Includes recognizable artwork and safe manual-update handoffs for every newly supported manager.",
             "Groups Node.js, Bun, Deno, Yarn, npm, and pnpm in one JavaScript workspace with runtime and global-tool update checks.",
-            "Moves Developer manager filtering into a compact, single-level toolbar menu that lists every detected ecosystem.",
+            "Moves Developer manager filtering into a compact, single-level toolbar menu that lists every detected ecosystem."
+        ]),
+        UpkeepRelease(version: "0.23.1", date: "22 July 2026", changes: [
             "Drops stale update candidates when an app has already been updated outside Upkeep.",
             "Prevents Homebrew from replacing TestFlight, Setapp, or Microsoft AutoUpdate-managed apps.",
             "Treats stable platform-qualified versions correctly while preserving genuine prerelease channels.",

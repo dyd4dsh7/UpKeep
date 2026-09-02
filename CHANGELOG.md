@@ -2,8 +2,23 @@
 
 All notable changes to Upkeep are documented here.
 
-## Unreleased
+## 0.24.0 — 2026-09-02
 
+- Added Intel-only app warnings on Apple Silicon Macs and a migration guide that preserves the existing update manager, Homebrew cask, or developer release source without assuming a native edition is available.
+- Added local verification of Apple Silicon and Universal replacements, including same-version installations; missing, unreadable, or differently identified apps remain unverified.
+- Distinguished unchecked, disabled, failed, partial, and completed update scans, and now show “Update check incomplete” when an app's publisher checks fail.
+- Preserved Sparkle build-only releases through detection, download validation, source selection, and version exclusions.
+- Prevented overlapping update, adoption, cleanup, and restore operations on the same application or package environment.
+- Made restores stage and validate the backup before replacing the installed app, wait for running apps to quit, and preserve a recovery copy if replacement fails.
+- Kept successful installations and their backups recoverable when history persistence fails, refreshed model history immediately, and routed Upkeep's own updates through an external replacement workflow.
+- Deduplicated Homebrew casks across combined update lists and batch review without hiding same-named formulae.
+- Hardened publisher requests with HTTPS-only destinations, validated and pinned public addresses, checked redirects, bounded responses, and clearer blocked-address diagnostics.
+- Added archive traversal and expansion checks and revalidated staged app identity, version, and signing before replacement.
+- Hardened privileged Homebrew terminal handoffs and stopped waiting when an authorization command exits or times out.
+- Fixed developer-package and pnpm cleanup commands failing because temporary or working directories were unavailable or read-only.
+- Improved library counts, exclusion and source lookups, diagnostics loading and redaction, developer release sorting, and global search, with repeatable offline benchmarks and regression coverage.
+- Separated row hover from selection, refined transitions with Reduce Motion support, and fixed native progress-size faults and state-publication faults during search selection.
+- Kept test and standalone review diagnostics in memory so they do not alter the packaged app's persistent log.
 - Added check-first, confirmed native cleanup actions for Homebrew, npm, pnpm, and uv, with honest estimate availability, reclaimed disk-space reporting, and diagnostics.
 - Automatically reopens applications that Upkeep temporarily quits after successful single or batch updates.
 - Added trusted GitHub release discovery for Stats and UniGetUI, plus validated per-app repository mappings for advanced users.
@@ -27,6 +42,7 @@ All notable changes to Upkeep are documented here.
 - Extracted update planning, workspace models, and sidebar composition from the central store and root view.
 - Added fast, detection-based update scans for every NVM installation, VS Code and Cursor extensions, uv and pipx tools, uv-managed Python runtimes, Rustup toolchains, GitHub CLI extensions, Go tools and runtimes, Composer packages, .NET global tools, MacPorts, Nix profiles, mise, asdf, Volta, and fnm.
 - Added global-package discovery for Bun and Yarn, plus npm, pnpm, and Yarn discovery across NVM, fnm, Volta, asdf, and mise installations.
+- Grouped Node.js, Bun, Deno, Yarn, npm, and pnpm in one JavaScript workspace with runtime and global-tool update checks.
 - Kept duplicate packages from separate runtime installations distinct, retained healthy results when one installation fails, and prevented non-default Node updates from changing the NVM default alias.
 - Parallelized scan sources, cached Homebrew catalog data, batched registry lookups by package identity, and coalesced identical requests, reducing repeated full scans from about 18 seconds to roughly 2–3 seconds in local benchmarks.
 - Added official project artwork for every new developer manager and manual-update handling for sources that require an external privileged installer.
@@ -44,7 +60,7 @@ All notable changes to Upkeep are documented here.
 - Moved secondary row controls into complete right-click menus and consolidated Skip and Ignore actions into the inspector’s trailing Options menu.
 - Added targeted per-app and per-package refresh operations with live progress and a persisted Last checked time, without triggering an unrelated full scan.
 - Expanded application and package inspectors with richer metadata, declared macOS permissions, signing and sandbox status, notarization and Gatekeeper details, and package provenance guidance.
-- Removed warning banners, warning filters, and inline warning markers from the main interface; source failures are now normalized, redacted, and retained in Diagnostics.
+- Moved detailed source-failure reporting into Diagnostics, with normalized and redacted entries; scan status and app details explain when checks are incomplete.
 - Stabilized toolbar and inspector transitions across scans, selections, and settings changes to prevent macOS 27 AppKit constraint failures.
 
 ## 0.23.1 — 2026-07-22
