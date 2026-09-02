@@ -122,7 +122,8 @@ enum AppDiscovery {
             steamAppID: steamAppID,
             managedUpdateStatus: managedStatus,
             installedAt: dates?.creationDate,
-            modifiedAt: dates?.contentModificationDate
+            modifiedAt: dates?.contentModificationDate,
+            architectures: AppArchitectureInspector.architectures(at: url, info: info)
         )
     }
 

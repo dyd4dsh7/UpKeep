@@ -773,7 +773,8 @@ struct UpdateCard: View {
                 detail: appUpdateDetail,
                 isRunning: store.isRunning(update.app),
                 prereleaseChannel: update.prereleaseChannel,
-                prereleaseIsInstalled: update.prereleaseIsInstalled
+                prereleaseIsInstalled: update.prereleaseIsInstalled,
+                showsIntelWarning: update.app.needsAppleSiliconMigration
             )
         } accessories: {
             if store.isRefreshing(update.app) {

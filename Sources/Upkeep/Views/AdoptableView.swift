@@ -24,7 +24,8 @@ struct AdoptableView: View {
                             title: item.app.name,
                             detail: "Homebrew cask · \(item.caskToken) · May require password",
                             isRunning: store.isRunning(item.app),
-                            prereleaseChannel: item.prereleaseChannel
+                            prereleaseChannel: item.prereleaseChannel,
+                            showsIntelWarning: item.app.needsAppleSiliconMigration
                         )
                     } accessories: {
                         VersionTransitionView(current: item.app.installedVersion, latest: item.caskVersion)

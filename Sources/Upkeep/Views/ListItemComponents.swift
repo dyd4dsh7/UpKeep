@@ -92,6 +92,7 @@ struct ItemIdentityView: View {
     var tag: String?
     var prereleaseChannel: PrereleaseChannel?
     var prereleaseIsInstalled = false
+    var showsIntelWarning = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: settings.listDensity == .compact ? 1 : 4) {
@@ -100,6 +101,7 @@ struct ItemIdentityView: View {
                     .font(settings.listDensity == .compact ? .body.weight(.semibold) : .title3.weight(.semibold))
                     .lineLimit(1)
                 if isRunning { RunningIndicator() }
+                if showsIntelWarning { IntelAppBadge() }
                 if let tag {
                     Text(tag.uppercased())
                         .font(.caption.weight(.bold))

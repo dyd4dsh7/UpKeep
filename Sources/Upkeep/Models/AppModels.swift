@@ -20,6 +20,11 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
     let managedUpdateStatus: ManagedUpdateStatus?
     let installedAt: Date?
     let modifiedAt: Date?
+    let architectures: [String]
+    var architecture: AppArchitecture { AppArchitecture(architectures: architectures) }
+    var needsAppleSiliconMigration: Bool {
+        architecture.needsMigration(onAppleSilicon: AppArchitectureInspector.isAppleSilicon)
+    }
     var prereleaseChannel: PrereleaseChannel? { VersionComparator.prereleaseChannel(for: installedVersion) }
 
     init(
@@ -40,7 +45,8 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
         steamAppID: String? = nil,
         managedUpdateStatus: ManagedUpdateStatus? = nil,
         installedAt: Date? = nil,
-        modifiedAt: Date? = nil
+        modifiedAt: Date? = nil,
+        architectures: [String] = []
     ) {
         self.id = bundleIdentifier.map { "\($0)|\(url.path)" } ?? url.path
         self.name = name
@@ -66,6 +72,7 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
         self.managedUpdateStatus = managedUpdateStatus
         self.installedAt = installedAt
         self.modifiedAt = modifiedAt
+        self.architectures = architectures
     }
 
     var updateExclusionKey: String {
@@ -101,7 +108,8 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
             steamAppID: steamAppID,
             managedUpdateStatus: managedUpdateStatus,
             installedAt: installedAt,
-            modifiedAt: modifiedAt
+            modifiedAt: modifiedAt,
+            architectures: architectures
         )
     }
 }

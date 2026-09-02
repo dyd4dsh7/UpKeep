@@ -90,7 +90,8 @@ struct GlobalSearchView: View {
                 detail: appSourceSummary(app),
                 isRunning: store.isRunning(app),
                 prereleaseChannel: app.prereleaseChannel,
-                prereleaseIsInstalled: app.prereleaseChannel != nil
+                prereleaseIsInstalled: app.prereleaseChannel != nil,
+                showsIntelWarning: app.needsAppleSiliconMigration
             )
         } accessories: {
             InstalledVersionView(version: app.installedVersion)
@@ -102,7 +103,7 @@ struct GlobalSearchView: View {
         StandardItemRow(isSelected: selection == .adoptable(item.id)) {
             AppIcon(url: item.app.url, size: 36)
         } content: {
-            ItemIdentityView(title: item.app.name, detail: "Adoptable · Homebrew \(item.caskToken)")
+            ItemIdentityView(title: item.app.name, detail: "Adoptable · Homebrew \(item.caskToken)", showsIntelWarning: item.app.needsAppleSiliconMigration)
         } accessories: {
             VersionTransitionView(current: item.app.installedVersion, latest: item.caskVersion)
         }

@@ -22,6 +22,10 @@ attach an `owner/project` GitHub repository; Upkeep validates that it has
 published releases before saving the bundle-specific mapping. External update
 actions remain pending until the installed bundle reports the expected version.
 
+## Apple Silicon migration
+
+On Apple Silicon Macs, Intel-only apps show a warning in application lists and details. **Move to Apple Silicon** opens a guide to the existing update manager, Homebrew cask, or developer releases. Installation is completed through that source; Upkeep does not assume that a native download exists or automatically replace the app. **Verify Installed App** rereads the original app location and confirms ARM support, including Universal builds and same-version replacements. Missing or unreadable executables remain unverified. Detection describes the main executable, not every embedded helper or the architecture of an already-running process.
+
 ## Homebrew workspace
 
 Upkeep inventories installed formulae and casks, separates requested packages from dependencies, filters available updates, and exposes package details. Apps matched against Homebrew's official cask catalog can be adopted with Homebrew's native `--adopt` workflow.

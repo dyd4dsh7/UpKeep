@@ -79,13 +79,7 @@ enum AppSecurityInspector {
         let signature = command("/usr/bin/codesign", ["--verify", "--deep", "--strict", app.url.path])
         let assessment = command("/usr/sbin/spctl", ["-a", "-vv", "--type", "execute", app.url.path])
         let quarantine = command("/usr/bin/xattr", ["-p", "com.apple.quarantine", app.url.path]).status == 0
-        let executable = (info["CFBundleExecutable"] as? String).map {
-            app.url.appendingPathComponent("Contents/MacOS/\($0)").path
-        }
-        let architectures = executable.map { path in
-            command("/usr/bin/lipo", ["-archs", path]).output
-                .split(whereSeparator: \.isWhitespace).map(String.init)
-        } ?? []
+        let architectures = AppArchitectureInspector.architectures(at: app.url, info: info)
         let authority = lines(in: codesignDetails.output, prefix: "Authority=").first
             ?? lines(in: assessment.output, prefix: "origin=").first
         let team = lines(in: codesignDetails.output, prefix: "TeamIdentifier=").first

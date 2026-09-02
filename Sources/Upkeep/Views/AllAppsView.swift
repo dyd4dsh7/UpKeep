@@ -28,7 +28,8 @@ struct AllAppsView: View {
                             detail: sourceSummary(for: app),
                             isRunning: store.isRunning(app),
                             prereleaseChannel: update?.prereleaseChannel ?? app.prereleaseChannel,
-                            prereleaseIsInstalled: update?.prereleaseIsInstalled ?? (app.prereleaseChannel != nil)
+                            prereleaseIsInstalled: update?.prereleaseIsInstalled ?? (app.prereleaseChannel != nil),
+                            showsIntelWarning: app.needsAppleSiliconMigration
                         )
                     } accessories: {
                         if store.isRefreshing(app) {
@@ -355,6 +356,9 @@ struct AppDetailView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
+                    if app.needsAppleSiliconMigration {
+                        AppleSiliconMigrationWarning { detailState.showsAppleSiliconMigration = true }
+                    }
                     updateStatus
                     if settings.sidebarViewMode == .advanced {
                         updateSources
@@ -371,6 +375,9 @@ struct AppDetailView: View {
             }
         }
         .frame(minHeight: 500)
+        .sheet(isPresented: $detailState.showsAppleSiliconMigration) {
+            AppleSiliconMigrationView(app: app).environmentObject(store)
+        }
         .task(id: detailState.showsTechnicalDetails ? app.id : nil) {
             guard detailState.showsTechnicalDetails else { return }
             await inspection.load(app)
@@ -673,6 +680,7 @@ struct AppDetailView: View {
                 GridRow { detailLabel("Bundle ID"); Text(app.bundleIdentifier ?? "Not declared").textSelection(.enabled) }
                 GridRow { detailLabel("Location"); Text(app.url.path).lineLimit(2).textSelection(.enabled) }
                 GridRow { detailLabel("Installed version"); Text(app.installedVersion).monospacedDigit() }
+                GridRow { detailLabel("App architecture"); Text(app.architecture.rawValue) }
                 if let build = app.buildVersion { GridRow { detailLabel("Build"); Text(build).monospacedDigit() } }
                 if let size = inspection.report?.fileSize { GridRow { detailLabel("Size on disk"); Text(ByteCountFormatter.string(fromByteCount: size, countStyle: .file)) } }
                 if let minimum = inspection.report?.minimumSystemVersion { GridRow { detailLabel("Minimum macOS"); Text(minimum).monospacedDigit() } }
@@ -928,6 +936,7 @@ struct AppDetailView: View {
 
 @MainActor
 private final class AppDetailState: ObservableObject {
+    @Published var showsAppleSiliconMigration = false
     @Published var showsTechnicalDetails = false
     @Published var githubRepositoryEntry = ""
     @Published var isSavingGitHubRepository = false

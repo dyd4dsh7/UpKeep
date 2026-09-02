@@ -415,6 +415,25 @@ final class UpkeepStore: ObservableObject {
         if didStart { scheduleNextRefresh() }
     }
 
+    /// Local verification also detects a same-version Intel-to-ARM replacement.
+    func verifyAppleSiliconMigration(_ app: InstalledApp) async -> AppleSiliconVerification {
+        let installed = await dependencies.applicationDiscovery.discover(at: app.url)
+        let result = AppleSiliconVerification.result(original: app, installed: installed)
+        guard let installed, result != .differentApp else { return result }
+        if let index = apps.firstIndex(where: { $0.id == app.id }) { apps[index] = installed }
+        if selectedApp?.id == app.id { selectedApp = installed }
+        if let index = updates.firstIndex(where: { $0.app.id == app.id }) {
+            let candidates = updates[index].candidates.filter { $0.isNewer(than: installed) }
+            if candidates.isEmpty { updates.remove(at: index) }
+            else { updates[index] = AvailableUpdate(app: installed, candidates: candidates) }
+        }
+        adoptableApps = adoptableApps.map { item in
+            guard item.app.id == app.id else { return item }
+            return AdoptableApp(app: installed, caskToken: item.caskToken, caskVersion: item.caskVersion)
+        }
+        return result
+    }
+
     func refresh(_ app: InstalledApp) async {
         let operationID = OperationID.applicationRefresh(app.id)
         guard !isWorking(operationID) else { return }
