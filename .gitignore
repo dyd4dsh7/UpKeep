@@ -5,3 +5,12 @@ work/
 *.xcuserstate
 DerivedData/
 dist/
+.env
+.env.*
+!.env.example
+*.p12
+*.pfx
+*.key
+*.mobileprovision
+*.keychain-db
+ci-artifact/

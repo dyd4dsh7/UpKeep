@@ -5,19 +5,39 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test-and-package:
-    runs-on: macos-15
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
-      - uses: actions/checkout@v6
-      - name: Lint and test
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Verify toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+          xcrun --sdk macosx --show-sdk-version
+      - name: Test with warnings as errors
         run: swift test -Xswiftc -warnings-as-errors
       - name: Package debug app
         run: ./scripts/package-app.sh debug
       - name: Extract debug app
         run: ditto -x -k outputs/Upkeep.zip ci-artifact
-      - name: Verify debug signature
-        run: codesign --verify --deep --strict ci-artifact/Upkeep.app
+      - name: Verify debug signature and notices
+        run: |
+          codesign --verify --deep --strict ci-artifact/Upkeep.app
+          test -s ci-artifact/Upkeep.app/Contents/Resources/LICENSE
+          test -s ci-artifact/Upkeep.app/Contents/Resources/THIRD_PARTY_NOTICES.md
       - name: Ensure release validation rejects debug artifacts
         run: |
           if ./scripts/validate-release.sh ci-artifact/Upkeep.app; then
@@ -27,6 +47,29 @@ jobs:
       - name: Launch smoke test
         run: |
           open -n ci-artifact/Upkeep.app
-          sleep 2
+          sleep 3
           pgrep -x Upkeep
           pkill -x Upkeep
+      - name: Retain debug package for verification
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: Upkeep-debug
+          path: outputs/Upkeep.zip
+          retention-days: 7
+          if-no-files-found: error
+  secret-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install checksum-pinned Gitleaks
+        run: |
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/gitleaks.tar.gz" \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  $RUNNER_TEMP/gitleaks.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$RUNNER_TEMP" gitleaks
+      - name: Scan reachable history
+        run: '"$RUNNER_TEMP/gitleaks" git --redact --log-opts="--all" .'

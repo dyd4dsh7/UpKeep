@@ -2,6 +2,14 @@
 
 All notable changes to Upkeep are documented here.
 
+## Unreleased
+
+- Prepared the project for open-source contribution with an MIT licence, privacy and security guidance, contribution instructions, and issue templates.
+- Added dependency notices to app packages and replaced bundled third-party logos with native system symbols.
+- Fixed main-actor isolation of app icon images and optional signature-status matching.
+- Selected Xcode 26.3 for CI, added secret scanning, and prepared protected, signed draft GitHub Releases with checksums.
+- Kept the previous packaged archive intact when a new packaging or notarization attempt fails.
+
 ## 0.24.0 — 2026-09-02
 
 - Added Intel-only app warnings on Apple Silicon Macs and a migration guide that preserves the existing update manager, Homebrew cask, or developer release source without assuming a native edition is available.

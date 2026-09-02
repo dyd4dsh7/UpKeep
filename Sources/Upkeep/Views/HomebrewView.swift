@@ -183,7 +183,7 @@ private struct PackageRow: View, Equatable {
 
     var body: some View {
         StandardItemRow(isSelected: isSelected) {
-            BundledPackageIcon(name: "homebrew", size: 36)
+            PackageSourceIcon(name: "homebrew", size: 36)
         } content: {
             ItemIdentityView(
                 title: package.displayName,

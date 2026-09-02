@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 
+@MainActor
 enum AppBrand {
     @MainActor private static let dockTileView = UpkeepDockTileView()
     @MainActor private static var appliedDockTheme: String?

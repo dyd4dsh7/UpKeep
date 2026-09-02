@@ -112,7 +112,7 @@ struct GlobalSearchView: View {
 
     private func homebrewRow(_ package: HomebrewPackage) -> some View {
         StandardItemRow(isSelected: selection == .homebrew(package.id)) {
-            BundledPackageIcon(name: "homebrew", size: 36)
+            PackageSourceIcon(name: "homebrew", size: 36)
         } content: {
             ItemIdentityView(
                 title: package.displayName,

@@ -1,0 +1,35 @@
+name: Bug report
+description: Report a reproducible problem in Upkeep.
+body:
+  - type: markdown
+    attributes:
+      value: "For vulnerabilities, use the Security tab to report privately. Review logs for secrets and personal data before attaching them."
+  - type: input
+    id: version
+    attributes:
+      label: Upkeep version or commit
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version and Mac architecture
+      placeholder: "For example: macOS 26.3, Apple Silicon"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Screenshots or redacted diagnostics

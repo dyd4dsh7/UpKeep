@@ -7,29 +7,6 @@ enum UpkeepLayout {
     static let inspectorMaximumWidth: CGFloat = 500
 }
 
-@MainActor
-final class BundledImageCache {
-    static let shared = BundledImageCache()
-
-    private var images: [String: NSImage] = [:]
-    private var missingImageNames = Set<String>()
-
-    func image(named name: String, extensions: [String] = ["png", "svg"]) -> NSImage? {
-        let cacheKey = "\(name).\(extensions.joined(separator: ","))"
-        if let image = images[cacheKey] { return image }
-        guard !missingImageNames.contains(cacheKey),
-              let url = extensions.lazy.compactMap({
-                  Bundle.module.url(forResource: name, withExtension: $0)
-              }).first,
-              let image = NSImage(contentsOf: url) else {
-            missingImageNames.insert(cacheKey)
-            return nil
-        }
-        images[cacheKey] = image
-        return image
-    }
-}
-
 struct StandardItemRow<Icon: View, Content: View, Accessories: View>: View {
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.accessibilityReduceMotion) private var reduceMotion

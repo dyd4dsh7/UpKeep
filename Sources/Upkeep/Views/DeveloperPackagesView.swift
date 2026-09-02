@@ -132,31 +132,34 @@ struct PackageManagerIcon: View {
     var size: CGFloat = 36
 
     var body: some View {
-        BundledPackageIcon(name: manager.assetName, size: size)
+        PackageSourceIcon(name: manager.assetName, size: size)
             .accessibilityLabel(manager.rawValue)
     }
 }
 
-struct BundledPackageIcon: View {
+struct PackageSourceIcon: View {
     let name: String
     let size: CGFloat
 
-    var body: some View {
-        Group {
-            if let image = BundledImageCache.shared.image(named: name) {
-                Image(nsImage: image).resizable().scaledToFit()
-            } else {
-                Image(systemName: "shippingbox.fill").resizable().scaledToFit().padding(size * 0.2)
-            }
+    private var systemImage: String {
+        switch name {
+        case "node", "bun", "deno", "npm", "pnpm", "yarn", "volta", "fnm": "curlybraces.square.fill"
+        case "python", "pipx", "uv": "terminal.fill"
+        case "cargo", "rustup": "gearshape.fill"
+        case "vscode": "chevron.left.forwardslash.chevron.right"
+        case "github": "point.3.connected.trianglepath.dotted"
+        case "rubygems": "diamond.fill"
+        default: "shippingbox.fill"
         }
-        .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: size * 0.2))
     }
-}
 
-func bundledPackageAssetURL(named name: String) -> URL? {
-    Bundle.module.url(forResource: name, withExtension: "png")
-        ?? Bundle.module.url(forResource: name, withExtension: "svg")
+    var body: some View {
+        Image(systemName: systemImage)
+            .resizable().scaledToFit().padding(size * 0.2)
+            .foregroundStyle(.secondary)
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
+    }
 }
 
 func openDeveloperPackageFolder(_ package: DeveloperPackage) {
