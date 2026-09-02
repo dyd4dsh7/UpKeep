@@ -32,9 +32,15 @@ import Testing
                 if paired && !sample.isMultiple(of: 2) { referenceTime = measureReference() }
                 if sample > 0 {
                     let ms = Double(duration.components.seconds) * 1_000 + Double(duration.components.attoseconds) / 1e15
-                    print("SEARCH_BENCHMARK size=\(size) query=\(label) sample=\(sample) elapsed_ms=\(ms) results=\(result.apps.count + result.adoptableApps.count + result.homebrewPackages.count + result.developerPackages.count + result.models.count + result.macOSUpdates.count + result.history.count)")
+                    let resultCounts: [Int] = [result.apps.count, result.adoptableApps.count,
+                        result.homebrewPackages.count, result.developerPackages.count,
+                        result.models.count, result.macOSUpdates.count, result.history.count]
+                    print("SEARCH_BENCHMARK size=\(size) query=\(label) sample=\(sample) elapsed_ms=\(ms) results=\(resultCounts.reduce(0, +))")
                     if let referenceTime {
-                        print("SEARCH_REFERENCE size=\(size) query=\(label) sample=\(sample) elapsed_ms=\(referenceTime) results=\(expected.apps.count + expected.adoptableApps.count + expected.homebrewPackages.count + expected.developerPackages.count + expected.models.count + expected.macOSUpdates.count + expected.history.count)")
+                        let referenceCounts: [Int] = [expected.apps.count, expected.adoptableApps.count,
+                            expected.homebrewPackages.count, expected.developerPackages.count,
+                            expected.models.count, expected.macOSUpdates.count, expected.history.count]
+                        print("SEARCH_REFERENCE size=\(size) query=\(label) sample=\(sample) elapsed_ms=\(referenceTime) results=\(referenceCounts.reduce(0, +))")
                     }
                 }
             }
