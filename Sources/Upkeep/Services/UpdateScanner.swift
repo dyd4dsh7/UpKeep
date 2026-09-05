@@ -107,7 +107,7 @@ struct UpdateScanner: Sendable {
         let brewResult = await brewInventory
 
         var warnings: [ScanWarning] = []
-        let packages: [HomebrewPackage]
+        var packages: [HomebrewPackage]
         let homebrewInventoryStatus: ScanStatus
         switch brewResult {
         case .disabled:
@@ -139,6 +139,12 @@ struct UpdateScanner: Sendable {
         warnings.append(contentsOf: applicationResult.warnings)
 
         let normalizedApps = Dictionary(grouping: apps) { normalize($0.name) }
+        packages = packages.map { package in
+            guard package.kind == .cask,
+                  let app = normalizedApps[normalize(package.displayName)]?.first
+                    ?? normalizedApps[normalize(package.token)]?.first else { return package }
+            return package.reconciled(with: app)
+        }
         for package in packages where package.kind == .cask && package.isOutdated {
             let caskName = normalize(package.displayName)
             guard let app = normalizedApps[caskName]?.first ?? normalizedApps[normalize(package.token)]?.first,
@@ -181,7 +187,7 @@ struct UpdateScanner: Sendable {
                 warnings.append(scanWarning(.homebrew, error: error, prefix: "Cask catalog: "))
             }
         }
-        for item in adoptable where caskIsNewer(item.caskVersion, than: item.app) {
+        for item in adoptable where Self.caskIsNewer(item.caskVersion, than: item.app) {
             updates.append(AvailableUpdate(
                 app: item.app,
                 availableVersion: item.caskVersion,
@@ -437,9 +443,9 @@ struct UpdateScanner: Sendable {
         app.updateManagement == .direct
     }
 
-    private func caskIsNewer(_ candidate: String, than app: InstalledApp) -> Bool {
+    static func caskIsNewer(_ candidate: String, than app: InstalledApp) -> Bool {
         let parts = candidate.split(separator: ",", maxSplits: 1).map(String.init)
-        let rawBase = parts[0]
+        guard let rawBase = parts.first else { return false }
         let hyphenParts = rawBase.split(separator: "-", maxSplits: 1).map(String.init)
         let baseVersion: String
         if hyphenParts.count == 2, hyphenParts[1].contains(where: \.isLetter) {

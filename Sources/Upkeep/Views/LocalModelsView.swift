@@ -134,7 +134,7 @@ struct LocalModelDetail: View {
                 VStack(alignment: .leading, spacing: 22) {
                     LocalModelRuntimeIcon(runtime: model.runtime, size: 64)
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(model.name).font(.largeTitle.bold()).textSelection(.enabled)
+                        Text(model.name).font(.title2.weight(.semibold)).textSelection(.enabled)
                         if let variant = model.variant { Text(variant).font(.title3).foregroundStyle(.secondary).textSelection(.enabled) }
                     }
                     if model.isOutdated {
@@ -142,7 +142,7 @@ struct LocalModelDetail: View {
                     } else {
                         Label("Model is current", systemImage: "checkmark.seal.fill").foregroundStyle(.green)
                     }
-                    Grid(alignment: .leading, horizontalSpacing: 30, verticalSpacing: 12) {
+                    Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
                         GridRow { label("Runtime"); Text(model.runtime.rawValue) }
                         GridRow { label("Installed"); Text(model.installedRevision).monospacedDigit() }
                         GridRow { label("Latest"); Text(model.latestRevision).monospacedDigit() }
@@ -150,14 +150,13 @@ struct LocalModelDetail: View {
                         if let modified = model.modifiedAt { GridRow { label("Downloaded"); Text(modified.formatted(date: .abbreviated, time: .shortened)) } }
                         if let homepage = model.homepage { GridRow { label("Source"); Link(homepage.host() ?? "Open model page", destination: homepage) } }
                     }
-                    .padding(18)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 14))
+                .upkeepOutlinedInspectorCard()
                     Text(model.runtime == .ollama
                          ? "Upkeep compares the installed manifest digest with Ollama’s registry, then uses ollama pull to update."
                          : "Upkeep compares the local model file with its Hugging Face repository, then uses LM Studio’s lms get command to refresh it.")
                         .font(.callout).foregroundStyle(.secondary)
-                }.padding(26).frame(maxWidth: .infinity, alignment: .leading)
+                }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
             }
         } else {
             ContentUnavailableView("Select a model", systemImage: "brain.head.profile")

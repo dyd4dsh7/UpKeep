@@ -51,7 +51,9 @@ struct ContentView: View {
                 .inspector(isPresented: inspectorPresented) {
                     inspectorContent
                         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
-                        .inspectorColumnWidth(UpkeepLayout.inspectorIdealWidth)
+                        .inspectorColumnWidth(min: UpkeepLayout.inspectorMinimumWidth,
+                                              ideal: UpkeepLayout.inspectorIdealWidth,
+                                              max: UpkeepLayout.inspectorMaximumWidth)
                 }
         }
         .navigationTitle(navigationTitle)

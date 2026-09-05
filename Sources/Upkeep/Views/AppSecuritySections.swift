@@ -29,7 +29,7 @@ struct AppPermissionsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Permissions").font(.title2.weight(.semibold))
+            Text("Permissions").font(.headline)
             if let report {
                 if report.permissions.isEmpty {
                     Text("No macOS privacy usage descriptions or sandbox privacy capabilities were declared by this app.")
@@ -58,7 +58,7 @@ struct AppSecuritySection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Security").font(.title2.weight(.semibold))
+            Text("Security").font(.headline)
             if let report {
                 Grid(alignment: .leading, horizontalSpacing: 28, verticalSpacing: 13) {
                     GridRow { value("App Sandbox", boolean: report.sandboxed); value("Hardened Runtime", boolean: report.hardenedRuntime) }
@@ -101,12 +101,12 @@ struct PackageSecurityExplanation: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 7) {
-                Text("Permissions").font(.title2.weight(.semibold))
+                Text("Permissions").font(.headline)
                 Text("Command-line packages do not declare macOS app privacy usage descriptions. Any access is governed by the host application that runs the package.")
                     .font(.callout).foregroundStyle(.secondary)
             }
             VStack(alignment: .leading, spacing: 7) {
-                Text("Security & Provenance").font(.title2.weight(.semibold))
+                Text("Security & Provenance").font(.headline)
                 Label("Installed and updated through \(manager)", systemImage: "checkmark.shield")
                     .font(.callout.weight(.medium))
                     .padding(16).frame(maxWidth: .infinity, alignment: .leading)

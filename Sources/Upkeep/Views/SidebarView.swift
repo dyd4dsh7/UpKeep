@@ -55,26 +55,8 @@ struct UpkeepSidebarView: View {
 
     private func item(_ destination: SidebarDestination) -> some View {
         let count = store.count(for: destination)
-        return Label {
-            HStack {
-                Text(destination.rawValue)
-                Spacer()
-                if count > 0 {
-                    Text("\(count)")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                        .contentTransition(.numericText())
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1)
-                        .background(.quaternary, in: Capsule())
-                }
-            }
-        } icon: {
-            Image(systemName: destination.systemImage)
-                .symbolRenderingMode(.hierarchical)
-                .frame(width: 18)
-        }
+        return Label(destination.rawValue, systemImage: destination.systemImage)
+        .badge(count)
         .tag(destination)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(destination.rawValue)

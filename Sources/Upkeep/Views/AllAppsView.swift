@@ -470,7 +470,7 @@ struct AppDetailView: View {
     private var updateSources: some View {
         if let update, update.candidates.count > 1 {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Update Sources").font(.title2.weight(.semibold))
+                Text("Update Sources").font(.headline)
                 Text("Upkeep prefers the first source below, but every source that reported a newer version remains available.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -526,7 +526,7 @@ struct AppDetailView: View {
     private var githubSourceManagement: some View {
         if app.bundleIdentifier != nil {
             VStack(alignment: .leading, spacing: 10) {
-                Text("GitHub Source").font(.title2.weight(.semibold))
+                Text("GitHub Source").font(.headline)
                 Text("Attach a publisher repository when Upkeep cannot discover one from the app. The repository must have published releases.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -623,7 +623,7 @@ struct AppDetailView: View {
         if let update {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text("What’s New").font(.title2.weight(.semibold))
+                    Text("What’s New").font(.headline)
                     Spacer()
                     Text("Version \(update.displayAvailableVersion)")
                         .font(.caption.monospacedDigit())
@@ -653,7 +653,7 @@ struct AppDetailView: View {
     private var homebrewManagement: some View {
         if let adoptableItem, !adoptionHandledByUpdate, !homebrewAdoptionIgnored {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Homebrew").font(.title2.weight(.semibold))
+                Text("Homebrew").font(.headline)
                 HStack(spacing: 16) {
                     Image(systemName: "shippingbox.fill")
                         .font(.title2)
@@ -675,7 +675,7 @@ struct AppDetailView: View {
 
     private var technicalDetails: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Information").font(.title2.weight(.semibold))
+            Text("Information").font(.headline)
             Grid(alignment: .leading, horizontalSpacing: 30, verticalSpacing: 12) {
                 GridRow { detailLabel("Bundle ID"); Text(app.bundleIdentifier ?? "Not declared").textSelection(.enabled) }
                 GridRow { detailLabel("Location"); Text(app.url.path).lineLimit(2).textSelection(.enabled) }

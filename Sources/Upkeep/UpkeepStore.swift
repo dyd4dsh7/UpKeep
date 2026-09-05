@@ -69,12 +69,16 @@ final class UpkeepStore: ObservableObject {
     var diagnostics = UpkeepDiagnosticsState()
 
     private var periodicTask: Task<Void, Never>?
+    private var scanRequested = false
+    private var scanWaiters: [CheckedContinuation<Void, Never>] = []
+    private var developerVersionRequestID: UUID?
     private var runningApplicationObservers = Set<AnyCancellable>()
     private var featureStateObservers = Set<AnyCancellable>()
     private var isRootChangeScheduled = false
     private var didStart = false
     private let startedAt = Date()
     private var versionCache: [String: [String]] = [:]
+    private var versionCacheRequests: [String: UUID] = [:]
     private var externalVerificationTasks: [String: Task<Void, Never>] = [:]
 
     init(
@@ -359,8 +363,24 @@ final class UpkeepStore: ObservableObject {
     }
 
     func scan() async {
-        guard !isScanning else { return }
+        if isScanning {
+            scanRequested = true
+            await withCheckedContinuation { scanWaiters.append($0) }
+            return
+        }
         isScanning = true
+        repeat {
+            scanRequested = false
+            await scanOnce()
+        } while scanRequested
+        isScanning = false
+        let waiters = scanWaiters
+        scanWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
+        if didStart { scheduleNextRefresh() }
+    }
+
+    private func scanOnce() async {
         errorMessage = nil
         let previousCount = totalUpdateCount
         let report = await dependencies.scanner.scan(settings: settings.scanSettings)
@@ -409,10 +429,8 @@ final class UpkeepStore: ObservableObject {
         if selectedLocalModelID == nil || !localModels.contains(where: { $0.id == selectedLocalModelID }) {
             selectedLocalModelID = localModels.first?.id
         }
-        isScanning = false
         refreshDiagnostics()
         notifyIfNeeded(previousCount: previousCount)
-        if didStart { scheduleNextRefresh() }
     }
 
     /// Local verification also detects a same-version Intel-to-ARM replacement.
@@ -465,7 +483,7 @@ final class UpkeepStore: ObservableObject {
                 ) {
                     replaceHomebrewPackage(refreshedPackage)
                     candidates.removeAll { $0.source == .homebrew && !$0.requiresHomebrewAdoption }
-                    if refreshedPackage.isOutdated {
+                    if refreshedPackage.reconciled(with: refreshedApp).isOutdated {
                         candidates.append(UpdateCandidate(
                             availableVersion: refreshedPackage.currentVersion,
                             source: .homebrew,
@@ -552,8 +570,11 @@ final class UpkeepStore: ObservableObject {
         if let index = developerPackages.firstIndex(where: { $0.id == package.id }) {
             developerPackages[index] = refreshed
         }
-        availableDeveloperVersions = versions
-        selectedDeveloperVersion = latest
+        versionCache[developerVersionCacheKey(for: refreshed)] = versions
+        if selectedDeveloperPackageID == package.id {
+            availableDeveloperVersions = versions
+            selectedDeveloperVersion = latest
+        }
         lastChecked = Date()
         settings.lastCompletedScanDate = lastChecked
         settings.recordCheck(for: exclusionKey(for: refreshed), at: lastChecked ?? Date())
@@ -626,6 +647,14 @@ final class UpkeepStore: ObservableObject {
     }
 
     func loadAvailableVersions(for package: DeveloperPackage, force: Bool = false) async {
+        guard selectedDeveloperPackageID == package.id else { return }
+        let requestID = UUID()
+        developerVersionRequestID = requestID
+        defer {
+            if developerVersionRequestID == requestID {
+                isLoadingDeveloperVersions = false
+            }
+        }
         if selectedDeveloperVersion != package.latestVersion {
             selectedDeveloperVersion = package.latestVersion
         }
@@ -634,7 +663,7 @@ final class UpkeepStore: ObservableObject {
             availableDeveloperVersions = [package.latestVersion]
         }
         let versions = await developerVersions(for: package, force: force)
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, developerVersionRequestID == requestID else { return }
         if selectedDeveloperPackageID == package.id {
             availableDeveloperVersions = versions
             selectedDeveloperVersion = versions.contains(package.latestVersion)
@@ -649,10 +678,15 @@ final class UpkeepStore: ObservableObject {
         if !force, let cached = versionCache[cacheKey] {
             return cached
         }
+        let requestID = UUID()
+        versionCacheRequests[cacheKey] = requestID
         let versions = await dependencies.developerPackages.availableVersions(
             for: package, includePrereleases: settings.includePrereleaseUpdates
         )
-        versionCache[cacheKey] = versions
+        if versionCacheRequests[cacheKey] == requestID {
+            versionCache[cacheKey] = versions
+            versionCacheRequests[cacheKey] = nil
+        }
         return versions
     }
 
@@ -872,7 +906,10 @@ final class UpkeepStore: ObservableObject {
         let attempted = homebrewPackages.filter { $0.isOutdated && !isExcluded($0) }
         for package in attempted {
             let record = await recoveryRecord(for: package)
-            if package.kind == .cask, matchingApp(for: package) != nil, record == nil { break }
+            if package.kind == .cask, matchingApp(for: package) != nil, record == nil {
+                failureMessage = errorMessage ?? "Could not create a rollback backup for \(package.displayName)."
+                break
+            }
             do {
                 try await dependencies.homebrew.upgrade(package)
             } catch {
@@ -1229,7 +1266,7 @@ final class UpkeepStore: ObservableObject {
         updateExecutionState.activeOperations.insert(identifier)
         defer { updateExecutionState.activeOperations.remove(identifier) }
         let report = await dependencies.localModels.scan()
-        var merged = Dictionary(uniqueKeysWithValues: report.models.map { ($0.id, $0) })
+        var merged = Dictionary(report.models.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for previous in localModels where report.failedModelIDs.contains(previous.id) || report.failedRuntimes.contains(previous.runtime) {
             merged[previous.id] = previous
         }
@@ -2004,6 +2041,7 @@ final class UpkeepStore: ObservableObject {
     }
 
     private func replaceHomebrewPackage(_ package: HomebrewPackage) {
+        let package = homebrewPackageApp(for: package).map { package.reconciled(with: $0) } ?? package
         if let index = homebrewPackages.firstIndex(where: { $0.id == package.id }) {
             homebrewPackages[index] = package
         } else {
@@ -2114,7 +2152,7 @@ final class UpkeepStore: ObservableObject {
 
     private func mergedLocalModels(from report: ScanReport) -> [LocalLLMModel] {
         guard report.localModelsStatus != .disabled else { return [] }
-        var merged = Dictionary(uniqueKeysWithValues: report.localModels.map { ($0.id, $0) })
+        var merged = Dictionary(report.localModels.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for previous in localModels where report.failedLocalModelIDs.contains(previous.id)
             || report.failedLocalModelRuntimes.contains(previous.runtime) {
             merged[previous.id] = previous

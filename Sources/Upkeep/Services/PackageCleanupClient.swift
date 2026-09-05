@@ -234,7 +234,9 @@ func cleanupReportedBytes(in output: String) -> Int64? {
             case "tib": 1_099_511_627_776
             default: 1
             }
-            return Int64(number * multiplier)
+            let bytes = number * multiplier
+            guard bytes.isFinite, bytes >= 0, bytes < Double(Int64.max) else { return nil }
+            return Int64(bytes)
         }
     }
     return values.max()

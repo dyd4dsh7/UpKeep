@@ -95,38 +95,25 @@ struct SettingsView: View {
     private var general: some View {
         Form {
             Section {
-                VStack(alignment: .leading, spacing: 14) {
-                    appearanceHeading("Navigation")
-                    HStack(spacing: 10) {
-                        ForEach(SidebarViewMode.allCases) { mode in
-                            AppearanceOptionButton(
-                                title: mode.title,
-                                detail: mode.detail,
-                                systemImage: mode.systemImage,
-                                isSelected: settings.sidebarViewMode == mode
-                            ) {
-                                settings.sidebarViewMode = mode
-                            }
-                        }
-                    }
-
-                    Divider()
-
-                    appearanceHeading("List Density")
-                    HStack(spacing: 10) {
-                        ForEach(ListDensity.allCases) { density in
-                            AppearanceOptionButton(
-                                title: density.title,
-                                detail: density.detail,
-                                systemImage: density.systemImage,
-                                isSelected: settings.listDensity == density
-                            ) {
-                                settings.listDensity = density
-                            }
-                        }
+                Picker("Navigation", selection: $settings.sidebarViewMode) {
+                    ForEach(SidebarViewMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
                     }
                 }
-                .padding(.vertical, 4)
+                .pickerStyle(.segmented)
+                Text(settings.sidebarViewMode.detail)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                Picker("List density", selection: $settings.listDensity) {
+                    ForEach(ListDensity.allCases) { density in
+                        Text(density.title).tag(density)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Text(settings.listDensity.detail)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             } header: {
                 Text("Appearance")
             }
@@ -611,10 +598,7 @@ struct SettingsView: View {
         }
     }
 
-    private func appearanceHeading(_ title: String) -> some View {
-        Text(title)
-            .font(.headline)
-    }
+
 }
 
 private struct SettingsOptionRow<Control: View>: View {
@@ -677,61 +661,6 @@ private struct DeveloperManagerSettingsRow: View {
                 .labelsHidden()
         }
         .padding(.vertical, 4)
-    }
-}
-
-private struct AppearanceOptionButton: View {
-    @State private var isHovering = false
-    let title: String
-    let detail: String
-    let systemImage: String
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Image(systemName: systemImage)
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
-                    Spacer()
-                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
-                }
-                Text(title)
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.leading)
-                    .lineLimit(2)
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, minHeight: 108, alignment: .topLeading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .background(
-            isSelected
-                ? Color.accentColor.opacity(isHovering ? 0.14 : 0.10)
-                : Color.secondary.opacity(isHovering ? 0.10 : 0.06),
-            in: RoundedRectangle(cornerRadius: 11)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 11)
-                .stroke(
-                    isSelected ? Color.accentColor.opacity(0.75) : Color.secondary.opacity(0.16),
-                    lineWidth: isSelected ? 1.5 : 1
-                )
-        }
-        .scaleEffect(isHovering ? 1.008 : 1)
-        .onHover { isHovering = $0 }
-        .upkeepAnimated(for: isHovering, animation: UpkeepMotion.quick)
-        .upkeepAnimated(for: isSelected, animation: UpkeepMotion.quick)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 
