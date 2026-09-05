@@ -16,7 +16,8 @@ struct ScanStatusNotice: View {
                 HStack {
                     Label(state == .checking ? "Checking sources again…" : "Update checks need attention",
                           systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(.primary)
+                        .symbolRenderingMode(.multicolor)
                     Spacer()
                     Button("Retry") { Task { await store.scan() } }
                         .disabled(store.isScanning)
@@ -33,7 +34,7 @@ struct ScanStatusNotice: View {
                                             Text(warning.title).fontWeight(.medium)
                                             Text(warning.detail).foregroundStyle(.secondary)
                                         }
-                                        .font(.caption).textSelection(.enabled)
+                                        .font(.callout).textSelection(.enabled)
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                     }
                                 }
@@ -46,7 +47,7 @@ struct ScanStatusNotice: View {
                 }
             }
             .padding(12)
-            .background(.orange.opacity(0.06))
+            .background(Color(nsColor: .controlBackgroundColor))
             Divider()
         }
     }

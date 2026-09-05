@@ -342,13 +342,15 @@ private struct ReviewModels: LocalModelManaging {
 }
 private actor ReviewHistory: UpdateHistoryManaging {
     let fail: Bool
+    let failBackup: Bool
     var saved: [UpdateRecord] = []
     var discarded = false
     var restores = 0
-    init(fail: Bool = false) { self.fail = fail }
+    init(fail: Bool = false, failBackup: Bool = false) { self.fail = fail; self.failBackup = failBackup }
     func records() async -> [UpdateRecord] { saved }
     func prepareAppBackup(app: InstalledApp, toVersion: String, kind: UpdateRecordKind) async throws -> UpdateRecord {
-        .init(id: UUID(), date: Date(), name: app.name, fromVersion: app.installedVersion, toVersion: toVersion,
+        if failBackup { throw ReviewError.historyWrite }
+        return .init(id: UUID(), date: Date(), name: app.name, fromVersion: app.installedVersion, toVersion: toVersion,
               kind: kind, originalAppPath: app.url.path, backupPath: "/fixture/backup.app", recoveryNote: nil)
     }
     func add(_ record: UpdateRecord) async throws { if fail { throw ReviewError.historyWrite }; saved.append(record) }
@@ -396,13 +398,13 @@ private actor ReviewInstaller: DirectAppInstalling {
     let store: UpkeepStore
     init(history: ReviewHistory = ReviewHistory(), installer: ReviewInstaller = ReviewInstaller(),
          discoveredApp: InstalledApp = reviewApp(), developerReport: DeveloperPackageClient.Report = .empty,
-         scanner: ReviewScanner = ReviewScanner(), progressInstaller: (any DirectAppInstalling)? = nil) {
+         scanner: ReviewScanner = ReviewScanner(), developer: (any DeveloperPackageManaging)? = nil, models: (any LocalModelManaging)? = nil, progressInstaller: (any DirectAppInstalling)? = nil) {
         defaults = UserDefaults(suiteName: suite)!
         settings = AppSettings(defaults: defaults)
         self.history = history; self.installer = installer
         store = UpkeepStore(settings: settings, dependencies: UpkeepDependencies(
             scanner: scanner, applicationDiscovery: ReviewDiscovery(app: discoveredApp), homebrew: ReviewBrew(),
-            developerPackages: ReviewDeveloper(report: developerReport), localModels: ReviewModels(), history: history,
+            developerPackages: developer ?? ReviewDeveloper(report: developerReport), localModels: models ?? ReviewModels(), history: history,
             externalOpener: opener, directAppInstaller: progressInstaller ?? installer, applicationLifecycle: lifecycle,
             externalVerificationInterval: .milliseconds(1)
         ))
@@ -471,4 +473,155 @@ private struct ReviewProgressInstaller: DirectAppInstalling {
         }
         if fails { throw ReviewError.historyWrite }
     }
+}
+
+@MainActor
+@Test func concurrentScanRequestsWaitForAFreshFollowup() async {
+    let gate = ReviewScanGate()
+    let f = ReviewFixture(scanner: ReviewScanner(onScan: { await gate.scan() }))
+    defer { f.cleanUp() }
+    let first = Task { await f.store.scan() }
+    #expect(await eventually { await gate.calls == 1 })
+    var completed = false
+    let second = Task { await f.store.scan(); completed = true }
+    await Task.yield()
+    #expect(!completed)
+    await gate.resume()
+    await first.value
+    await second.value
+    #expect(await gate.calls == 2)
+    #expect(completed)
+    #expect(!f.store.isScanning)
+}
+
+private actor ReviewScanGate {
+    var calls = 0
+    var continuation: CheckedContinuation<Void, Never>?
+    func scan() async {
+        calls += 1
+        if calls == 1 { await withCheckedContinuation { continuation = $0 } }
+    }
+    func resume() { continuation?.resume(); continuation = nil }
+}
+
+@MainActor
+@Test func refreshingAnotherPackageDoesNotReplaceSelectedVersions() async {
+    let f = ReviewFixture()
+    defer { f.cleanUp() }
+    let first = reviewPackage("first", executable: "/fixture/npm")
+    let second = reviewPackage("second", executable: "/fixture/npm")
+    f.store.developerPackages = [first, second]
+    f.store.selectedDeveloperPackageID = second.id
+    f.store.availableDeveloperVersions = ["9.0"]
+    f.store.selectedDeveloperVersion = "9.0"
+    await f.store.refresh(first)
+    #expect(f.store.availableDeveloperVersions == ["9.0"])
+    #expect(f.store.selectedDeveloperVersion == "9.0")
+}
+
+@MainActor
+@Test func supersededVersionRequestCannotOverwriteNewerResults() async {
+    let developer = ReviewVersionGate()
+    let f = ReviewFixture(developer: developer)
+    defer { f.cleanUp() }
+    let package = reviewPackage("first", executable: "/fixture/npm")
+    f.store.developerPackages = [package]
+    f.store.selectedDeveloperPackageID = package.id
+    let first = Task { await f.store.loadAvailableVersions(for: package, force: true) }
+    #expect(await eventually { await developer.calls == 1 })
+    await f.store.loadAvailableVersions(for: package, force: true)
+    await developer.resume()
+    await first.value
+    #expect(f.store.availableDeveloperVersions == ["3.0"])
+    #expect(!f.store.isLoadingDeveloperVersions)
+}
+
+@MainActor
+@Test func cancelledVersionRequestClearsLoadingState() async {
+    let developer = ReviewVersionGate()
+    let f = ReviewFixture(developer: developer)
+    defer { f.cleanUp() }
+    let package = reviewPackage("first", executable: "/fixture/npm")
+    f.store.selectedDeveloperPackageID = package.id
+    let request = Task { await f.store.loadAvailableVersions(for: package, force: true) }
+    #expect(await eventually { await developer.calls == 1 })
+    request.cancel()
+    await developer.resume()
+    await request.value
+    #expect(!f.store.isLoadingDeveloperVersions)
+}
+
+private actor ReviewVersionGate: DeveloperPackageManaging {
+    var calls = 0
+    var continuation: CheckedContinuation<Void, Never>?
+    func scan(enabledManagers: Set<DeveloperPackageManager>, includePrereleases: Bool) async -> DeveloperPackageClient.Report { .empty }
+    func availableVersions(for package: DeveloperPackage, includePrereleases: Bool) async -> [String] {
+        calls += 1
+        if calls == 1 {
+            await withCheckedContinuation { continuation = $0 }
+            return ["2.0"]
+        }
+        return ["3.0"]
+    }
+    func resume() { continuation?.resume(); continuation = nil }
+    func install(_ package: DeveloperPackage, version: String) async throws {}
+}
+
+@MainActor
+@Test func homebrewBatchPreservesBackupFailureAcrossRescan() async throws {
+    let f = ReviewFixture(history: ReviewHistory(failBackup: true))
+    defer { f.cleanUp() }
+    let app = reviewApp()
+    f.store.apps = [app]
+    f.store.homebrewPackages = [HomebrewPackage(
+        token: "review-fixture", displayName: app.name, description: nil, homepage: nil, license: nil,
+        installedVersion: "1.0", currentVersion: "1.1", kind: .cask, isOutdated: true,
+        isDependency: false, dependencies: []
+    )]
+    await f.store.updateAllPackages()
+    await f.store.confirmHomebrewAuthorization(try #require(f.store.pendingHomebrewAuthorizationConfirmation))
+    #expect(f.store.errorMessage?.contains("backup") == true)
+}
+
+@MainActor
+@Test func duplicateModelInventoryDoesNotCrashTargetedRefresh() async {
+    let f = ReviewFixture(models: ReviewDuplicateModels())
+    defer { f.cleanUp() }
+    await f.store.scanLocalModels()
+    #expect(f.store.localModels.count == 1)
+}
+
+private struct ReviewDuplicateModels: LocalModelManaging {
+    func scan() async -> LocalModelClient.Report {
+        .init(models: [reviewModel(), reviewModel()], warnings: [], failedModelIDs: [], failedRuntimes: [])
+    }
+    func update(_ model: LocalLLMModel) async throws {}
+}
+
+@Test func publisherDeclaredPrereleasesAreNeverRecommendedByDefault() {
+    let update = AvailableUpdate(
+        app: reviewApp(), availableVersion: "1.1", source: .sparkle, releaseNotes: nil,
+        actionURL: URL(string: "https://example.invalid/app.zip"), homebrewToken: nil,
+        sourcePrereleaseChannel: .beta
+    )
+    #expect(BatchUpdateItem.application(update).riskGroup == .prerelease)
+    #expect(!BatchUpdateItem.application(update).isRecommendedByDefault)
+}
+
+@Test func emptyHomebrewCatalogVersionCannotCrashScan() {
+    #expect(!UpdateScanner.caskIsNewer("", than: reviewApp()))
+    #expect(!UpdateScanner.caskIsNewer(",", than: reviewApp()))
+    #expect(UpdateScanner.caskIsNewer("1.1", than: reviewApp()))
+}
+
+@Test func newerInstalledAppSuppressesStaleHomebrewDowngrade() {
+    let package = HomebrewPackage(
+        token: "fixture", displayName: "Fixture", description: nil, homepage: nil, license: nil,
+        installedVersion: "0.56.1", currentVersion: "0.56.2,100", kind: .cask, isOutdated: true,
+        isDependency: false, dependencies: []
+    )
+    let reconciled = package.reconciled(with: reviewApp(version: "0.56.3"))
+    #expect(!reconciled.isOutdated)
+    #expect(reconciled.installedVersion == "0.56.3")
+    #expect(package.reconciled(with: reviewApp(version: "0.56.1")).isOutdated)
 }

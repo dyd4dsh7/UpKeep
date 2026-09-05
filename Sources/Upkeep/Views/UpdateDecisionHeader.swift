@@ -21,7 +21,7 @@ struct UpdateDecisionHeader: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
-        .background(.bar)
+        .background(Color(nsColor: .windowBackgroundColor))
         .accessibilityElement(children: .contain)
         .upkeepAnimated(for: recommendedCount)
         .upkeepAnimated(for: attentionCount)
@@ -40,61 +40,31 @@ struct UpdateDecisionHeader: View {
 
     private var actions: some View {
         HStack(spacing: 12) {
-            UpdateDecisionMetric(value: recommendedCount, label: "Recommended",
-                                 systemImage: "checkmark.shield.fill", color: .green)
-            UpdateDecisionMetric(value: attentionCount, label: "Review",
-                                 systemImage: "hand.raised.fill", color: .orange)
             Button(buttonTitle, action: review)
                 .buttonStyle(.borderedProminent)
-                .controlSize(.large)
+                .controlSize(.regular)
                 .fixedSize()
                 .disabled(isWorking)
-                .keyboardShortcut(.defaultAction)
         }
     }
 
     private var title: String {
         if recommendedCount > 0 {
-            return recommendedCount == 1 ? "1 Update Is Ready" : "\(recommendedCount) Updates Are Ready"
+            return recommendedCount == 1 ? "1 update ready" : "\(recommendedCount) updates ready"
         }
-        return "Updates Need Your Attention"
+        return "Review available updates"
     }
 
     private var detail: String {
         if recommendedCount > 0 {
-            return "Stable updates Upkeep can complete directly are selected by default."
+            return attentionCount > 0
+                ? "Across all sources: \(attentionCount) additional items need review."
+                : "Review the selected updates before installing."
         }
         return "These updates open another app, change a major version, or affect developer tools."
     }
 
     private var buttonTitle: String {
         recommendedCount > 0 ? "Review Recommended" : "Review Updates"
-    }
-}
-
-private struct UpdateDecisionMetric: View {
-    let value: Int
-    let label: String
-    let systemImage: String
-    let color: Color
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: systemImage)
-                .foregroundStyle(color)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("\(value)")
-                    .font(.headline.monospacedDigit())
-                    .contentTransition(.numericText())
-                Text(label)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(color.opacity(0.09), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(value) \(label.lowercased()) updates")
     }
 }

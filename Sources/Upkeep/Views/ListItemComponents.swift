@@ -65,7 +65,7 @@ struct StandardItemRow<Icon: View, Content: View, Accessories: View>: View {
 
     private var rowIcon: some View {
         icon
-            .scaleEffect(settings.listDensity == .compact ? 0.82 : 1.08)
+            .scaleEffect(settings.listDensity == .compact ? 0.82 : 1)
             .frame(width: settings.listDensity == .compact ? 32 : 42,
                    height: settings.listDensity == .compact ? 32 : 42)
     }
@@ -92,7 +92,7 @@ struct ItemIdentityView: View {
         VStack(alignment: .leading, spacing: settings.listDensity == .compact ? 1 : 4) {
             HStack(spacing: 7) {
                 Text(title)
-                    .font(settings.listDensity == .compact ? .body.weight(.semibold) : .title3.weight(.semibold))
+                    .font(.body.weight(.semibold))
                     .lineLimit(1)
                 if isRunning { RunningIndicator() }
                 if showsIntelWarning { IntelAppBadge() }
@@ -207,10 +207,10 @@ struct ListControlLabel: View {
 
     var body: some View {
         Image(systemName: systemImage)
-            .font(.system(size: 15, weight: .medium))
+            .font(.body.weight(.medium))
             .symbolRenderingMode(.hierarchical)
             .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
-            .frame(width: 30, height: 28)
+            .frame(minWidth: 20, minHeight: 20)
             .contentShape(Rectangle())
     }
 }
@@ -435,12 +435,12 @@ struct InspectorUpdateStatusCard<Actions: View, Options: View>: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 14) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 28, weight: .medium))
+                    .font(.system(size: 24, weight: .medium))
                     .foregroundStyle(color)
                     .symbolRenderingMode(.hierarchical)
                     .frame(width: 38)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(title).font(.title3.weight(.semibold))
+                    Text(title).font(.headline)
                     Text(subtitle).font(.callout).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
@@ -461,13 +461,11 @@ struct InspectorUpdateStatusCard<Actions: View, Options: View>: View {
 
 private struct OutlinedInspectorCardStyle: ViewModifier {
     func body(content: Content) -> some View {
-        content
-            .padding(16)
-            .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 14))
-            .overlay {
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(.separator.opacity(0.55), lineWidth: 0.5)
-            }
+        GroupBox {
+            content
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8)
+        }
     }
 }
 

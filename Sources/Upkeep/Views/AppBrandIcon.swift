@@ -1,13 +1,31 @@
 import AppKit
+import Combine
 import SwiftUI
 
 @MainActor
 enum AppBrand {
-    @MainActor private static let dockTileView = UpkeepDockTileView()
-    @MainActor private static var appliedDockTheme: String?
     @MainActor private static var appliedUpdateCount: Int?
+    private(set) static var appliedDarkAppearance: Bool?
+    private static var appearanceObserver: AnyCancellable?
     private static let lightImage = loadImage(named: "AppIcon")
     private static let darkImage = loadImage(named: "AppIconDark")
+    private static let lightDockImage = makeDockImage(from: lightImage)
+    private static let darkDockImage = makeDockImage(from: darkImage)
+
+    static func dockImage(for colorScheme: ColorScheme) -> NSImage {
+        colorScheme == .dark ? darkDockImage : lightDockImage
+    }
+
+    private static func makeDockImage(from artwork: NSImage) -> NSImage {
+        // The source plate occupies about 976 of 1024 pixels. Drawing its
+        // canvas at 864 pixels gives the plate an approximately 824px footprint.
+        // Runtime applicationIconImage replacements need this transparent margin.
+        NSImage(size: NSSize(width: 1024, height: 1024), flipped: false) { _ in
+            artwork.draw(in: NSRect(x: 80, y: 80, width: 864, height: 864),
+                         from: .zero, operation: .sourceOver, fraction: 1)
+            return true
+        }
+    }
 
     private static func loadImage(named name: String) -> NSImage {
         // Native SwiftPM's generated Bundle.module accessor checks beside the
@@ -25,16 +43,6 @@ enum AppBrand {
         colorScheme == .dark ? darkImage : lightImage
     }
 
-    static var currentIconAppearanceTheme: String {
-        UserDefaults.standard.string(forKey: "AppleIconAppearanceTheme") ?? "Default"
-    }
-
-    private static var dockImage: NSImage {
-        currentIconAppearanceTheme.localizedCaseInsensitiveContains("dark")
-            ? darkImage
-            : lightImage
-    }
-
     @MainActor static func applyDockPresentation(updateCount: Int) {
         applyDockPresentation(updateCount: updateCount, force: true)
     }
@@ -46,93 +54,26 @@ enum AppBrand {
     @MainActor private static func applyDockPresentation(updateCount: Int, force: Bool) {
         let application = NSApplication.shared
         application.setActivationPolicy(.regular)
-        let theme = currentIconAppearanceTheme
-        guard force || appliedDockTheme != theme || appliedUpdateCount != updateCount else { return }
+        if appearanceObserver == nil {
+            appearanceObserver = application.publisher(for: \.effectiveAppearance).sink { _ in
+                Task { @MainActor in
+                    refreshDockPresentationIfNeeded(updateCount: appliedUpdateCount ?? 0)
+                }
+            }
+        }
+        let isDark = application.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        guard force || appliedUpdateCount != updateCount || appliedDarkAppearance != isDark else { return }
 
-        // This SwiftPM bundle cannot run Xcode's Icon Composer build phase, so
-        // keep its Dock presentation synchronized with macOS at runtime.
-        let icon = dockImage
-        application.applicationIconImage = icon
-        dockTileView.icon = icon
-        dockTileView.updateCount = updateCount
-        application.dockTile.badgeLabel = nil
-        application.dockTile.contentView = dockTileView
+        // AppKit sizes the image and draws the badge. Only choose the artwork;
+        // never replace the Dock tile with a custom drawing view.
+        application.dockTile.contentView = nil
+        application.applicationIconImage = dockImage(for: isDark ? .dark : .light)
+        application.dockTile.badgeLabel = updateCount > 0
+            ? (updateCount > 999 ? "999+" : String(updateCount))
+            : nil
         application.dockTile.display()
-        appliedDockTheme = theme
         appliedUpdateCount = updateCount
-    }
-}
-
-private final class UpkeepDockTileView: NSView {
-    var icon = NSImage() {
-        didSet { needsDisplay = true }
-    }
-
-    var updateCount = 0 {
-        didSet { needsDisplay = true }
-    }
-
-    init() {
-        super.init(frame: NSRect(x: 0, y: 0, width: 128, height: 128))
-        autoresizingMask = [.width, .height]
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-
-        icon.draw(
-            in: bounds.insetBy(dx: bounds.width * 0.025, dy: bounds.height * 0.025),
-            from: .zero,
-            operation: .sourceOver,
-            fraction: 1,
-            respectFlipped: true,
-            hints: [.interpolation: NSImageInterpolation.high]
-        )
-
-        guard updateCount > 0 else { return }
-
-        let label = updateCount > 999 ? "999+" : String(updateCount)
-        let badgeHeight = bounds.height * 0.39
-        let font = NSFont.systemFont(ofSize: badgeHeight * 0.52, weight: .semibold)
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: NSColor.white
-        ]
-        let textSize = label.size(withAttributes: attributes)
-        let badgeWidth = max(badgeHeight, textSize.width + badgeHeight * 0.42)
-        let badgeRect = NSRect(
-            x: bounds.maxX - badgeWidth,
-            y: bounds.maxY - badgeHeight,
-            width: badgeWidth,
-            height: badgeHeight
-        )
-
-        NSGraphicsContext.saveGraphicsState()
-        let shadow = NSShadow()
-        shadow.shadowColor = NSColor.black.withAlphaComponent(0.32)
-        shadow.shadowBlurRadius = bounds.height * 0.025
-        shadow.shadowOffset = NSSize(width: 0, height: -bounds.height * 0.012)
-        shadow.set()
-        NSColor.systemRed.setFill()
-        NSBezierPath(
-            roundedRect: badgeRect,
-            xRadius: badgeHeight / 2,
-            yRadius: badgeHeight / 2
-        ).fill()
-        NSGraphicsContext.restoreGraphicsState()
-
-        let textRect = NSRect(
-            x: badgeRect.midX - textSize.width / 2,
-            y: badgeRect.midY - textSize.height / 2,
-            width: textSize.width,
-            height: textSize.height
-        )
-        label.draw(in: textRect, withAttributes: attributes)
+        appliedDarkAppearance = isDark
     }
 }
 

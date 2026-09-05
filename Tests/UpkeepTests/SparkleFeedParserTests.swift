@@ -214,3 +214,24 @@ import Testing
 
     #expect(parser.parse() == nil)
 }
+
+@Test func malformedFeedAfterValidEntryIsNotACompleteCheck() {
+    let data = Data("<rss><channel><item><enclosure version='2.0'/></item><broken></channel></rss>".utf8)
+    let parser = SparkleFeedParser(data: data, baseURL: URL(string: "https://example.com/feed")!)
+    #expect(parser.parse() == nil)
+    #expect(!parser.hasParsedItems)
+}
+
+@Test func sparkleDeltaEnclosuresDoNotReplaceFullDownloadMetadata() throws {
+    let feed = Data("""
+    <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"><channel><item>
+    <enclosure url="https://example.com/full.zip" sparkle:shortVersionString="2.0" sparkle:version="200" sparkle:edSignature="full"/>
+    <sparkle:deltas><enclosure url="https://example.com/delta.zip" sparkle:version="200" sparkle:deltaFrom="100" /></sparkle:deltas>
+    </item></channel></rss>
+    """.utf8)
+    let parser = SparkleFeedParser(data: feed, baseURL: URL(string: "https://example.com/feed")!)
+    let item = try #require(parser.parse())
+    #expect(item.downloadURL?.lastPathComponent == "full.zip")
+    #expect(item.hasEdSignature)
+    #expect(item.version == "2.0")
+}

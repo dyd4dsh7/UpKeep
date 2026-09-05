@@ -60,3 +60,10 @@ import Testing
     #expect(query["service"] == "registry.example.com")
     #expect(query["scope"] == "repository:library/gemma4:pull")
 }
+
+@Test func modelByteCountsRejectUnrepresentableValues() {
+    for value in ["nan", "inf", "-1", "1e100", "9223372036854775808"] {
+        #expect(byteCount(value, unit: "GB") == nil)
+    }
+    #expect(byteCount("1.5", unit: "GB") == 1_500_000_000)
+}

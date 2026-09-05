@@ -11,6 +11,12 @@ In Icon Composer:
 5. For Mono, map the loop to the primary tone and the down arrow to a lighter secondary tone.
 6. Save over `Support/AppIcon.icon` after making any visual refinements.
 
-The packaging script includes both `AppIcon.icon` for Liquid Glass appearances and the existing
-`AppIcon.icns` fallback for older macOS releases. The application no longer swaps flattened icons
-at runtime, so macOS remains responsible for rendering and appearance treatment.
+The SwiftPM packaging script copies the editable `AppIcon.icon` source and the
+`AppIcon.icns` fallback. It does not compile an adaptive Icon Composer asset catalog.
+While running, `AppBrand` observes AppKit's effective appearance and selects the
+existing light or dark PNG through `NSApplication.applicationIconImage`. AppKit
+retains control of Dock sizing and the native update badge; no custom Dock view is used.
+Both runtime variants are rendered into the same padded canvas (864px artwork canvas
+centered in 1024px), keeping the visible plate near 824px rather than the source
+artwork's nearly edge-to-edge size. In-app branding keeps the original artwork.
+The stopped application's Finder/Dock icon uses the bundled ICNS fallback.

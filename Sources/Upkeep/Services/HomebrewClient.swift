@@ -82,7 +82,6 @@ struct HomebrewClient: Sendable {
             cacheCaskCatalog(data)
             return catalog
         } catch {
-            if let stale = cachedCaskCatalog(maximumAge: .infinity) { return stale }
             throw UpdateSourceError(error)
         }
     }

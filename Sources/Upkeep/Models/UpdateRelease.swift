@@ -1,5 +1,20 @@
 import Foundation
 
+extension HomebrewPackage {
+    /// An app's built-in updater can advance it beyond Homebrew's installation receipt.
+    func reconciled(with app: InstalledApp) -> HomebrewPackage {
+        guard kind == .cask,
+              let catalogVersion = currentVersion.split(separator: ",").first,
+              VersionComparator.isNewer(app.installedVersion, than: String(catalogVersion))
+        else { return self }
+        return HomebrewPackage(
+            token: token, displayName: displayName, description: description, homepage: homepage,
+            license: license, installedVersion: app.installedVersion, currentVersion: currentVersion,
+            kind: kind, isOutdated: false, isDependency: isDependency, dependencies: dependencies
+        )
+    }
+}
+
 extension InstalledApp {
     static let upkeepBundleIdentifier = "nz.haydenthorn.Upkeep"
     var isUpkeep: Bool { bundleIdentifier == Self.upkeepBundleIdentifier }

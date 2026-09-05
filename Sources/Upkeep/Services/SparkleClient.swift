@@ -69,6 +69,7 @@ final class SparkleFeedParser: XMLTextParser {
     private let baseURL: URL
     private var items: [SparkleFeedItem] = []
     private var inItem = false
+    private var deltaDepth = 0
     private var currentElement = ""
     private var currentText = ""
     private var version: String?
@@ -91,7 +92,10 @@ final class SparkleFeedParser: XMLTextParser {
         hasParsedItems = false
         let parser = XMLParser(data: data)
         parser.delegate = self
-        guard parser.parse() else { return nil }
+        guard parser.parse() else {
+            hasParsedItems = false
+            return nil
+        }
         return items
             .filter { includePrereleases || $0.prereleaseChannel == nil }
             .max { left, right in
@@ -111,6 +115,10 @@ final class SparkleFeedParser: XMLTextParser {
         qualifiedName qName: String?,
         attributes attributeDict: [String: String] = [:]
     ) {
+        if elementName == "sparkle:deltas" || elementName == "deltas" || deltaDepth > 0 {
+            deltaDepth += 1
+            return
+        }
         currentElement = qName ?? elementName
         currentText = ""
         if elementName == "item" {
@@ -159,6 +167,10 @@ final class SparkleFeedParser: XMLTextParser {
         namespaceURI: String?,
         qualifiedName qName: String?
     ) {
+        if deltaDepth > 0 {
+            deltaDepth -= 1
+            return
+        }
         guard inItem else { return }
         let qualified = qName ?? elementName
         let text = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -201,7 +213,7 @@ final class SparkleFeedParser: XMLTextParser {
     }
 
     override func appendXMLText(_ string: String, parser: XMLParser) {
-        guard inItem else { return }
+        guard inItem, deltaDepth == 0 else { return }
         guard string.count <= Self.maximumFieldCharacters,
               currentText.count <= Self.maximumFieldCharacters - string.count else {
             parser.abortParsing()

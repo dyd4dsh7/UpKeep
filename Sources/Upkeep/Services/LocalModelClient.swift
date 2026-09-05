@@ -90,11 +90,16 @@ struct LocalModelClient: Sendable {
         ])
         let keys: [URLResourceKey] = [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]
         let roots = lmStudioModelRoots()
+        var seenRelativePaths = Set<String>()
         let files = roots.flatMap { root -> [(root: URL, file: URL)] in
             guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: keys) else { return [] }
             return enumerator.compactMap { $0 as? URL }.filter {
                 let ext = $0.pathExtension.lowercased()
                 return ["gguf", "safetensors", "bin"].contains(ext) && !$0.lastPathComponent.hasPrefix(".")
+            }.filter {
+                // Configured storage takes precedence over legacy folders. Model IDs
+                // describe the repository/file, so do not emit that ID twice.
+                seenRelativePaths.insert(String($0.path.dropFirst(root.path.count + 1))).inserted
             }.map { (root, $0) }
         }
         let results = await withTaskGroup(of: (LocalLLMModel, Bool)?.self) { group in
@@ -329,7 +334,7 @@ private func shortDigest(_ value: String) -> String {
     String(value.replacingOccurrences(of: "sha256:", with: "").prefix(12))
 }
 
-private func byteCount(_ value: String, unit: String) -> Int64? {
+func byteCount(_ value: String, unit: String) -> Int64? {
     guard let number = Double(value) else { return nil }
     let multiplier: Double = switch unit.uppercased() {
     case "KB": 1_000
@@ -338,7 +343,9 @@ private func byteCount(_ value: String, unit: String) -> Int64? {
     case "TB": 1_000_000_000_000
     default: 1
     }
-    return Int64(number * multiplier)
+    let bytes = number * multiplier
+    guard bytes.isFinite, bytes >= 0, bytes < Double(Int64.max) else { return nil }
+    return Int64(bytes)
 }
 
 private func huggingFaceFileModifiedAt(_ repository: String, filename: String) async -> Date? {

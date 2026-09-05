@@ -46,6 +46,10 @@ enum UpdateRiskGroup: Int, CaseIterable, Hashable, Identifiable, Sendable {
 
 extension BatchUpdateItem {
     var riskGroup: UpdateRiskGroup {
+        if case let .application(update) = self, update.availablePrereleaseChannel != nil {
+            return .prerelease
+        }
+        if case let .model(model) = self, model.prereleaseChannel != nil { return .prerelease }
         if VersionComparator.isPrerelease(availableVersion) { return .prerelease }
         if case .developer = self { return .developer }
         if case let .homebrew(package) = self, package.isDependency { return .dependency }

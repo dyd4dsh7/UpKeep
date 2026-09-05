@@ -264,7 +264,7 @@ struct PackageDetail: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(package.displayName).font(.largeTitle.bold())
+                        Text(package.displayName).font(.title2.weight(.semibold))
                         Text(package.isOutdated ? "\(package.installedVersion) → \(package.currentVersion)" : package.installedVersion)
                             .font(.title3.monospacedDigit()).foregroundStyle(package.isOutdated ? .blue : .secondary)
                         if let description = package.description { Text(description).foregroundStyle(.secondary) }
@@ -280,7 +280,7 @@ struct PackageDetail: View {
                     }
                     if settings.sidebarViewMode == .advanced, !package.dependencies.isEmpty {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text("Dependencies").font(.title2.bold())
+                            Text("Dependencies").font(.headline)
                             FlowLayout(spacing: 7) {
                                 ForEach(package.dependencies, id: \.self) { Text($0).font(.caption).padding(7).background(.quaternary, in: RoundedRectangle(cornerRadius: 6)) }
                             }
@@ -292,7 +292,7 @@ struct PackageDetail: View {
                     } else {
                         PackageSecurityExplanation(manager: "Homebrew")
                     }
-                }.padding(26).frame(maxWidth: .infinity, alignment: .leading)
+                }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
             }
             .task(id: package.id) {
                 if let app = store.homebrewPackageApp(for: package) {
@@ -347,7 +347,7 @@ struct PackageDetail: View {
     }
 
     private func detailCard(_ package: HomebrewPackage) -> some View {
-        Grid(alignment: .leading, horizontalSpacing: 35, verticalSpacing: 12) {
+        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
             GridRow { label("Token"); Text(package.token).textSelection(.enabled) }
             GridRow { label("Install Type"); Text(package.isDependency ? "\(package.kind.rawValue) · Dependency" : package.kind.rawValue) }
             GridRow { label("Installed"); Text(package.installedVersion).monospacedDigit() }
@@ -356,9 +356,8 @@ struct PackageDetail: View {
             if let license = package.license { GridRow { label("License"); Text(license) } }
             if let homepage = package.homepage { GridRow { label("Homepage"); Link(homepage.host() ?? homepage.absoluteString, destination: homepage) } }
         }
-        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 14))
+                .upkeepOutlinedInspectorCard()
     }
 
     private func versionSupport(_ package: HomebrewPackage) -> some View {

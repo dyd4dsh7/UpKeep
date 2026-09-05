@@ -276,7 +276,7 @@ private struct DeveloperPackageDetailContent: View {
                 HStack(spacing: 16) {
                     PackageManagerIcon(manager: package.manager, size: 58)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(package.name).font(.largeTitle.bold())
+                        Text(package.name).font(.title2.weight(.semibold))
                         Text(package.manager.packageLabel).foregroundStyle(.secondary)
                         ItemCheckStatus(
                             isRefreshing: store.isRefreshing(package),
@@ -288,7 +288,7 @@ private struct DeveloperPackageDetailContent: View {
 
                 if package.isOutdated { updateCard }
 
-                Grid(alignment: .leading, horizontalSpacing: 30, verticalSpacing: 12) {
+                Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
                     GridRow { label("Installed"); Text(package.currentVersion).monospacedDigit() }
                     GridRow { label("Latest"); Text(package.latestVersion).monospacedDigit().foregroundStyle(package.isOutdated ? .blue : .primary) }
                     GridRow { label("Manager"); Text(package.manager.rawValue) }
@@ -296,14 +296,13 @@ private struct DeveloperPackageDetailContent: View {
                     GridRow { label("Executable"); Text(package.executablePath).lineLimit(2).textSelection(.enabled) }
                     if let homepage = package.manager.homepage { GridRow { label("Registry"); Link(homepage.host() ?? homepage.absoluteString, destination: packageURL ?? homepage) } }
                 }
-                .padding(18)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 14))
+                .upkeepOutlinedInspectorCard()
 
                 actionGrid
 
                 if package.canUpdateAutomatically { VStack(alignment: .leading, spacing: 10) {
-                    Text("Install a Version").font(.title2.bold())
+                    Text("Install a Version").font(.headline)
                     Text("The newest version is ready to install. Load published versions to choose an older release.")
                         .font(.callout).foregroundStyle(.secondary)
                     HStack {
@@ -337,6 +336,8 @@ private struct DeveloperPackageDetailContent: View {
                             .help("Load all published versions")
                             .accessibilityLabel("Load published versions")
                         }
+                    }
+                    HStack {
                         Button {
                             Task { await store.installDeveloperPackage(package, version: detailState.versionState.selectedVersion) }
                         } label: {
@@ -352,7 +353,7 @@ private struct DeveloperPackageDetailContent: View {
                     }
                 } }
                 PackageSecurityExplanation(manager: package.manager.rawValue)
-            }.padding(26).frame(maxWidth: .infinity, alignment: .leading)
+            }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
         }
         .confirmationDialog(
             "Uninstall \(package.name)?",

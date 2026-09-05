@@ -1,9 +1,16 @@
+import CryptoKit
 import Foundation
 
 actor PublisherResponseCache {
     static let shared = PublisherResponseCache()
 
     private var inFlight: [String: Task<Data, Error>] = [:]
+    private let directory: URL?
+
+    init(directory: URL? = nil) {
+        self.directory = directory ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("Upkeep/PublisherResponses", isDirectory: true)
+    }
 
     func data(
         for key: String,
@@ -17,16 +24,10 @@ actor PublisherResponseCache {
             return try await task.value
         }
 
-        let stale = cachedData(for: key, maximumAge: .infinity)
         let task = Task<Data, Error> {
-            do {
-                let data = try await fetch()
-                self.store(data, for: key)
-                return data
-            } catch {
-                if let stale { return stale }
-                throw error
-            }
+            let data = try await fetch()
+            self.store(data, for: key)
+            return data
         }
         inFlight[key] = task
         defer { inFlight[key] = nil }
@@ -54,19 +55,13 @@ actor PublisherResponseCache {
             )
             try data.write(to: url, options: .atomic)
         } catch {
-            // Cached publisher data is an optimization and stale-data fallback.
+            // Cache writes are an optimization; request failures still reach the scanner.
         }
     }
 
     private func cacheURL(for key: String) -> URL? {
-        let safeKey = key.map { character in
-            character.isLetter || character.isNumber || "-._".contains(character)
-                ? character
-                : "_"
-        }
-        let filename = String(safeKey.prefix(180)) + ".json"
-        return FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
-            .appendingPathComponent("Upkeep/PublisherResponses", isDirectory: true)
-            .appendingPathComponent(filename)
+        let filename = SHA256.hash(data: Data(key.utf8))
+            .map { String(format: "%02x", $0) }.joined() + ".json"
+        return directory?.appendingPathComponent(filename)
     }
 }

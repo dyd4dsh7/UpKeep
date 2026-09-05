@@ -101,3 +101,8 @@ private actor RecordingCleanupManager: PackageCleanupManaging {
         return PackageCleanupResult(target: target, bytesFreed: 4_096)
     }
 }
+
+@Test func cleanupEstimateRejectsOverflowingByteCounts() {
+    #expect(cleanupReportedBytes(in: "Would free 999999999999999999999999999999 TB") == nil)
+    #expect(cleanupReportedBytes(in: "Freed 1.5 GB") == 1_500_000_000)
+}
