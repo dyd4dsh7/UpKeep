@@ -25,7 +25,7 @@ struct AllAppsView: View {
                     } content: {
                         ItemIdentityView(
                             title: app.name,
-                            detail: sourceSummary(for: app),
+                            detail: sourceSummary(for: app) + (store.apps.contains { $0.id != app.id && $0.bundleIdentifier != nil && $0.bundleIdentifier == app.bundleIdentifier } ? " · " + app.url.deletingLastPathComponent().path : ""),
                             isRunning: store.isRunning(app),
                             prereleaseChannel: update?.prereleaseChannel ?? app.prereleaseChannel,
                             prereleaseIsInstalled: update?.prereleaseIsInstalled ?? (app.prereleaseChannel != nil),
@@ -87,7 +87,7 @@ struct AllAppsView: View {
                     }
                     }
                 }
-                .listStyle(.inset)
+                .upkeepContentList()
                 .upkeepStateTransition()
             }
         }
@@ -335,6 +335,7 @@ struct AppDetailView: View {
     @EnvironmentObject private var settings: AppSettings
     @StateObject private var inspection = AppSecurityInspectionModel()
     @StateObject private var detailState = AppDetailState()
+    @State private var showsFullReleaseNotes = false
     let app: InstalledApp
 
     private var update: AvailableUpdate? { store.update(for: app) }
@@ -350,31 +351,30 @@ struct AppDetailView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        InfoPanel {
             header
-            Divider()
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
+        } content: {
                     if app.needsAppleSiliconMigration {
                         AppleSiliconMigrationWarning { detailState.showsAppleSiliconMigration = true }
                     }
                     updateStatus
-                    if settings.sidebarViewMode == .advanced {
-                        updateSources
-                        githubSourceManagement
-                    }
+                    RelatedInstallations(app: app)
                     releaseNotes
+                    if settings.sidebarViewMode == .advanced {
+                        DisclosureGroup("Update sources") {
+                            updateSources.padding(.top, 10)
+                        }
+                        DisclosureGroup("Manage GitHub repository") {
+                            githubSourceManagement.padding(.top, 10)
+                        }
+                    }
                     homebrewManagement
                     if settings.sidebarViewMode == .advanced {
                         technicalDisclosure
                     }
-                }
-                .padding(20)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
         }
-        .frame(minHeight: 500)
+        .frame(minHeight: 0)
+        .onChange(of: app.id) { _, _ in showsFullReleaseNotes = false }
         .sheet(isPresented: $detailState.showsAppleSiliconMigration) {
             AppleSiliconMigrationView(app: app).environmentObject(store)
         }
@@ -390,13 +390,10 @@ struct AppDetailView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .top, spacing: 16) {
-            AppIcon(url: app.url, size: 58)
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 9) {
-                    Text(app.name).font(.title.weight(.semibold)).lineLimit(2)
-                    if store.isRunning(app) { RunningBadge() }
-                }
+        InfoPanelHeader(title: app.name) {
+            AppIcon(url: app.url, size: 44)
+        } detail: {
+                if store.isRunning(app) { RunningBadge() }
                 if let update {
                     VersionTransitionView(
                         current: app.installedVersion,
@@ -430,19 +427,6 @@ struct AppDetailView: View {
                     lastChecked: store.lastChecked(for: app)
                 )
             }
-            Spacer()
-            Button { store.selectedApp = nil } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.title2)
-                    .symbolRenderingMode(.hierarchical)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .help("Close app details")
-            .accessibilityLabel("Close app details")
-            .keyboardShortcut(.cancelAction)
-        }
-        .padding(16)
     }
 
     private var technicalDisclosure: some View {
@@ -572,14 +556,14 @@ struct AppDetailView: View {
 
     private var updateStatus: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 16) {
+            HStack(spacing: 14) {
                 Image(systemName: statusIcon)
-                    .font(.system(size: 30, weight: .medium))
+                    .font(.system(size: 24, weight: .medium))
                     .foregroundStyle(statusColor)
                     .symbolRenderingMode(.hierarchical)
-                    .frame(width: 42)
+                    .frame(width: 38)
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(statusTitle).font(.title3.weight(.semibold))
+                    Text(statusTitle).font(.headline)
                     if let update {
                         Text(update.requiresInAppInstallation
                              ? "Open \(app.name) to complete this Sparkle installer update."
@@ -632,11 +616,18 @@ struct AppDetailView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     let notes = update.releaseNotes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                     Text(notes.isEmpty ? "No release notes available" : notes)
+                        .lineLimit(showsFullReleaseNotes ? nil : 10)
                         .font(.callout)
                         .lineSpacing(3)
                         .foregroundStyle(notes.isEmpty ? .secondary : .primary)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                    if !notes.isEmpty {
+                        Button(showsFullReleaseNotes ? "Show Less" : "Read All Release Notes") {
+                            showsFullReleaseNotes.toggle()
+                        }
+                        .buttonStyle(.link)
+                    }
                     if notes.isEmpty {
                         Text("The developer did not provide release notes for this update source.")
                             .font(.caption)

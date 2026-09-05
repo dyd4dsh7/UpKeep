@@ -106,3 +106,42 @@ private actor RecordingCleanupManager: PackageCleanupManaging {
     #expect(cleanupReportedBytes(in: "Would free 999999999999999999999999999999 TB") == nil)
     #expect(cleanupReportedBytes(in: "Freed 1.5 GB") == 1_500_000_000)
 }
+
+@MainActor
+@Test func cleanupSheetReceivesErrorsWithoutPresentingGlobalAlert() async {
+    let suiteName = "PackageCleanupErrors.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let store = UpkeepStore(
+        settings: AppSettings(defaults: defaults),
+        dependencies: UpkeepDependencies(
+            scanner: CleanupEmptyScanner(), homebrew: HomebrewClient(),
+            developerPackages: DeveloperPackageClient(), packageCleanup: FailingCleanupManager(),
+            localModels: LocalModelClient(), history: TestUpdateHistory()
+        )
+    )
+    let target = PackageCleanupTarget(kind: .npm, executablePath: "/usr/local/bin/npm")
+    var message: String?
+    let estimate = await store.scanCleanup(target, onError: { message = $0 })
+    #expect(estimate == nil)
+    #expect(message == "Test cleanup failure")
+    #expect(store.errorMessage == nil)
+    #expect(!store.isWorking(.packageCleanup(target.id)))
+    message = nil
+    let result = await store.cleanUp(target, onError: { message = $0 })
+    #expect(result == nil)
+    #expect(message == "Test cleanup failure")
+    #expect(store.errorMessage == nil)
+    #expect(!store.isWorking(.packageCleanup(target.id)))
+    _ = await store.scanCleanup(target)
+    #expect(store.errorMessage == "Test cleanup failure")
+}
+
+private struct FailingCleanupManager: PackageCleanupManaging {
+    func scan(_ target: PackageCleanupTarget) async throws -> PackageCleanupEstimate {
+        throw PackageCleanupClient.CleanupError.failed("Test cleanup failure")
+    }
+    func cleanup(_ target: PackageCleanupTarget) async throws -> PackageCleanupResult {
+        throw PackageCleanupClient.CleanupError.failed("Test cleanup failure")
+    }
+}

@@ -37,7 +37,7 @@ struct ContentView: View {
     private var workspace: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             UpkeepSidebarView()
-                .navigationSplitViewColumnWidth(min: 215, ideal: 235, max: 300)
+                .navigationSplitViewColumnWidth(min: 225, ideal: 245, max: 320)
                 // Keep independent alerts on separate branches. Chaining multiple
                 // alert modifiers on the split-view root causes the last alert to
                 // suppress Homebrew's authorization prompt on macOS.

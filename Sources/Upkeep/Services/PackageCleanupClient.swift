@@ -67,7 +67,7 @@ struct PackageCleanupResult: Identifiable, Equatable, Sendable {
 
     var title: String { "\(target.title) Cleanup Complete" }
     var message: String {
-        guard bytesFreed > 0 else { return "No reclaimable files were found." }
+        guard bytesFreed > 0 else { return "Cleanup finished. No recovered disk space was measured." }
         return "Freed \(ByteCountFormatter.string(fromByteCount: bytesFreed, countStyle: .file)) of disk space."
     }
 }

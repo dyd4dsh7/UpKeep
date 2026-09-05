@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 
 enum UpkeepLayout {
+    static let listActionWidth: CGFloat = 108
     static let inspectorMinimumWidth: CGFloat = 320
     static let inspectorIdealWidth: CGFloat = 380
     static let inspectorMaximumWidth: CGFloat = 500
@@ -10,7 +11,6 @@ enum UpkeepLayout {
 struct StandardItemRow<Icon: View, Content: View, Accessories: View>: View {
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isHovering = false
     private let isSelected: Bool
     private let icon: Icon
     private let content: Content
@@ -48,15 +48,9 @@ struct StandardItemRow<Icon: View, Content: View, Accessories: View>: View {
         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, settings.listDensity == .compact ? 2 : 6)
         .padding(.vertical, settings.listDensity == .compact ? 5 : 10)
-        .background {
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(.primary.opacity(isHovering && !isSelected ? 0.03 : 0))
-        }
         .contentShape(Rectangle())
-        .onHover { isHovering = $0 }
-        .listRowSeparator(.hidden)
+        .listRowSeparator(.visible)
         .animation(reduceMotion ? nil : UpkeepMotion.quick, value: settings.listDensity)
-        .upkeepAnimated(for: isHovering, animation: UpkeepMotion.quick)
         .upkeepAnimated(for: isSelected, animation: UpkeepMotion.quick)
         .upkeepRowTransition()
     }
@@ -371,7 +365,7 @@ struct ListRowPrimaryAction: ViewModifier {
             .buttonBorderShape(.capsule)
             .controlSize(.small)
             .fixedSize(horizontal: true, vertical: false)
-            .frame(minWidth: 108, alignment: .trailing)
+            .frame(minWidth: UpkeepLayout.listActionWidth, alignment: .trailing)
     }
 }
 
@@ -508,5 +502,22 @@ struct RunningIndicator: View {
             .frame(width: 7, height: 7)
             .help("This app is currently running")
             .accessibilityLabel("Running")
+    }
+}
+
+/// Shared chrome for item lists; the navigation sidebar retains its native sidebar style.
+private struct ContentListStyle: ViewModifier {
+    @EnvironmentObject private var settings: AppSettings
+
+    func body(content: Content) -> some View {
+        content
+            .listStyle(.inset)
+            .environment(\.defaultMinListRowHeight, settings.listDensity == .compact ? 36 : 52)
+    }
+}
+
+extension View {
+    func upkeepContentList() -> some View {
+        modifier(ContentListStyle())
     }
 }

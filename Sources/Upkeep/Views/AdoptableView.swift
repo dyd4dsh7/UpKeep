@@ -49,7 +49,7 @@ struct AdoptableView: View {
                         Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([item.app.url]) }
                     }
                     }
-                }.listStyle(.inset)
+                }.upkeepContentList()
                     .upkeepStateTransition()
             }
         }

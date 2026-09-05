@@ -59,7 +59,7 @@ struct MacOSUpdatesView: View {
                         }
                     }
                 }
-                .listStyle(.inset)
+                .upkeepContentList()
                 .upkeepStateTransition()
             }
         }
@@ -94,9 +94,7 @@ struct MacOSUpdatesView: View {
                 prereleaseChannel: update.prereleaseChannel
             )
         } accessories: {
-            Text(update.version)
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
+            InstalledVersionView(version: update.version)
             Button {
                 Task { await store.prepareMacOSUpdate(update) }
             } label: {
@@ -106,9 +104,7 @@ struct MacOSUpdatesView: View {
                     workingTitle: "Opening…"
                 )
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .frame(width: 150)
+            .listRowPrimaryAction()
             .disabled(store.isWorking(.macOSUpdate(update.id)))
         }
     }

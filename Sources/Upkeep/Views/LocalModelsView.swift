@@ -42,7 +42,7 @@ struct LocalModelsView: View {
             .equatable()
             .tag(model.id)
         }
-        .listStyle(.inset)
+        .upkeepContentList()
         .onAppear { ensureModelSelection(in: models) }
         .onChange(of: models.map(\.id)) { _, _ in ensureModelSelection(in: models) }
     }
@@ -94,11 +94,10 @@ private struct LocalModelRow: View, Equatable {
                         phase: store.updatePhase(for: .localModel(model.id))
                     )
                 }
-                    .buttonStyle(.bordered).controlSize(.small)
+                    .listRowPrimaryAction()
                     .disabled(isWorking)
-                    .frame(width: 120)
             } else {
-                Color.clear.frame(width: 120, height: 1).accessibilityHidden(true)
+                Color.clear.frame(width: UpkeepLayout.listActionWidth, height: 1).accessibilityHidden(true)
             }
         }
         .contextMenu {
@@ -130,13 +129,14 @@ struct LocalModelDetail: View {
 
     var body: some View {
         if let model {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    LocalModelRuntimeIcon(runtime: model.runtime, size: 64)
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(model.name).font(.title2.weight(.semibold)).textSelection(.enabled)
+            InfoPanel {
+                    InfoPanelHeader(title: model.name) {
+                        LocalModelRuntimeIcon(runtime: model.runtime, size: 44)
+                    } detail: {
                         if let variant = model.variant { Text(variant).font(.title3).foregroundStyle(.secondary).textSelection(.enabled) }
+
                     }
+                } content: {
                     if model.isOutdated {
                         updateCard(model)
                     } else {
@@ -152,12 +152,14 @@ struct LocalModelDetail: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 .upkeepOutlinedInspectorCard()
+                    DisclosureGroup("How updates work") {
                     Text(model.runtime == .ollama
                          ? "Upkeep compares the installed manifest digest with Ollama’s registry, then uses ollama pull to update."
                          : "Upkeep compares the local model file with its Hugging Face repository, then uses LM Studio’s lms get command to refresh it.")
                         .font(.callout).foregroundStyle(.secondary)
-                }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
-            }
+                        .padding(.top, 8)
+                    }
+                }
         } else {
             ContentUnavailableView("Select a model", systemImage: "brain.head.profile")
         }

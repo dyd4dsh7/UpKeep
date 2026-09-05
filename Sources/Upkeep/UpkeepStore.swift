@@ -170,7 +170,7 @@ final class UpkeepStore: ObservableObject {
         )
     }
 
-    func scanCleanup(_ target: PackageCleanupTarget) async -> PackageCleanupEstimate? {
+    func scanCleanup(_ target: PackageCleanupTarget, onError: ((String) -> Void)? = nil) async -> PackageCleanupEstimate? {
         let operationID = OperationID.packageCleanup(target.id)
         guard !isWorking(operationID) else { return nil }
         updateExecutionState.activeOperations.insert(operationID)
@@ -188,7 +188,8 @@ final class UpkeepStore: ObservableObject {
             refreshDiagnostics()
             return estimate
         } catch {
-            errorMessage = error.localizedDescription
+            if let onError { onError(error.localizedDescription) }
+            else { errorMessage = error.localizedDescription }
             DiagnosticsStore.shared.record(.error, category: .command, "Package cleanup scan failed", metadata: [
                 "Manager": target.title,
                 "Duration": formattedDiagnosticDuration(since: startedAt),
@@ -199,7 +200,7 @@ final class UpkeepStore: ObservableObject {
         }
     }
 
-    func cleanUp(_ target: PackageCleanupTarget) async -> PackageCleanupResult? {
+    func cleanUp(_ target: PackageCleanupTarget, onError: ((String) -> Void)? = nil) async -> PackageCleanupResult? {
         let operationID = OperationID.packageCleanup(target.id)
         guard !isWorking(operationID) else { return nil }
         updateExecutionState.activeOperations.insert(operationID)
@@ -218,7 +219,8 @@ final class UpkeepStore: ObservableObject {
             refreshDiagnostics()
             return result
         } catch {
-            errorMessage = error.localizedDescription
+            if let onError { onError(error.localizedDescription) }
+            else { errorMessage = error.localizedDescription }
             DiagnosticsStore.shared.record(.error, category: .command, "Package cleanup failed", metadata: [
                 "Manager": target.title,
                 "Command": target.commandDescription,
