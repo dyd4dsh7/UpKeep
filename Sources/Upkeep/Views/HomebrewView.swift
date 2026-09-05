@@ -110,7 +110,7 @@ struct HomebrewView: View {
             .equatable()
             .tag(package.id)
         }
-        .listStyle(.inset)
+        .upkeepContentList()
         .onAppear { normalizeBasicFilter(); ensurePackageSelection(in: packages) }
         .onChange(of: packages.map(\.id)) { _, _ in ensurePackageSelection(in: packages) }
         .onChange(of: settings.sidebarViewMode) { _, _ in
@@ -218,7 +218,7 @@ private struct PackageRow: View, Equatable {
                     .listRowPrimaryAction()
                     .disabled(isWorking)
             } else {
-                Color.clear.frame(width: 108, height: 1).accessibilityHidden(true)
+                Color.clear.frame(width: UpkeepLayout.listActionWidth, height: 1).accessibilityHidden(true)
             }
         }
         .contextMenu {
@@ -261,10 +261,10 @@ struct PackageDetail: View {
 
     var body: some View {
         if let package {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(package.displayName).font(.title2.weight(.semibold))
+            InfoPanel {
+                    InfoPanelHeader(title: package.displayName) {
+                        Image(systemName: "shippingbox.fill").font(.system(size: 32)).foregroundStyle(.secondary)
+                    } detail: {
                         Text(package.isOutdated ? "\(package.installedVersion) → \(package.currentVersion)" : package.installedVersion)
                             .font(.title3.monospacedDigit()).foregroundStyle(package.isOutdated ? .blue : .secondary)
                         if let description = package.description { Text(description).foregroundStyle(.secondary) }
@@ -272,15 +272,18 @@ struct PackageDetail: View {
                             isRefreshing: store.isRefreshing(package),
                             lastChecked: store.lastChecked(for: package)
                         )
+
                     }
+                } content: {
                     if package.isOutdated { updateCard(package) }
                     detailCard(package)
                     if settings.sidebarViewMode == .advanced {
-                        versionSupport(package)
+                        DisclosureGroup("Version options") {
+                            versionSupport(package).padding(.top, 8)
+                        }
                     }
                     if settings.sidebarViewMode == .advanced, !package.dependencies.isEmpty {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("Dependencies").font(.headline)
+                        DisclosureGroup("Dependencies (\(package.dependencies.count))") {
                             FlowLayout(spacing: 7) {
                                 ForEach(package.dependencies, id: \.self) { Text($0).font(.caption).padding(7).background(.quaternary, in: RoundedRectangle(cornerRadius: 6)) }
                             }
@@ -292,8 +295,7 @@ struct PackageDetail: View {
                     } else {
                         PackageSecurityExplanation(manager: "Homebrew")
                     }
-                }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
-            }
+                }
             .task(id: package.id) {
                 if let app = store.homebrewPackageApp(for: package) {
                     await inspection.load(app)
@@ -352,7 +354,7 @@ struct PackageDetail: View {
             GridRow { label("Install Type"); Text(package.isDependency ? "\(package.kind.rawValue) · Dependency" : package.kind.rawValue) }
             GridRow { label("Installed"); Text(package.installedVersion).monospacedDigit() }
             GridRow { label("Latest"); Text(package.currentVersion).monospacedDigit() }
-            GridRow { label("Update status"); Text(package.isOutdated ? "Update available" : "Current") }
+
             if let license = package.license { GridRow { label("License"); Text(license) } }
             if let homepage = package.homepage { GridRow { label("Homepage"); Link(homepage.host() ?? homepage.absoluteString, destination: homepage) } }
         }

@@ -72,7 +72,7 @@ struct UpdatesView: View {
                             }
                         }
                     }
-                    .listStyle(.inset)
+                    .upkeepContentList()
                 }
                 .upkeepStateTransition()
             }
@@ -441,7 +441,7 @@ private struct BatchUpdateSheet: View {
                     }
                 }
             }
-            .listStyle(.inset)
+            .upkeepContentList()
 
         }
     }
@@ -470,7 +470,7 @@ private struct BatchUpdateSheet: View {
             }
             .padding(.vertical, 6)
         }
-        .listStyle(.inset)
+        .upkeepContentList()
     }
 
     private var footer: some View {
@@ -754,8 +754,7 @@ private struct MacOSUpdateCard: View {
                     workingTitle: "Opening…"
                 )
             }
-                .buttonStyle(.bordered).controlSize(.small)
-                .frame(width: 120)
+                .listRowPrimaryAction()
                 .disabled(store.isWorking(.macOSUpdate(update.id)))
         }
     }

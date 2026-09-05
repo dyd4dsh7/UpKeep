@@ -99,21 +99,17 @@ struct PackageSecurityExplanation: View {
     let manager: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 7) {
-                Text("Permissions").font(.headline)
-                Text("Command-line packages do not declare macOS app privacy usage descriptions. Any access is governed by the host application that runs the package.")
-                    .font(.callout).foregroundStyle(.secondary)
-            }
-            VStack(alignment: .leading, spacing: 7) {
-                Text("Security & Provenance").font(.headline)
-                Label("Installed and updated through \(manager)", systemImage: "checkmark.shield")
+        DisclosureGroup("Permissions and security") {
+            VStack(alignment: .leading, spacing: 12) {
+                Label("Managed by \(manager)", systemImage: "shippingbox")
                     .font(.callout.weight(.medium))
-                    .padding(16).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 14))
-                Text("Package-manager provenance is not the same as macOS code-signing or notarization. Review the package registry and publisher before installing updates.")
-                    .font(.caption).foregroundStyle(.secondary)
+                Text("Command-line packages run with the access of their host application. They do not declare macOS app privacy permissions.")
+                Text("Package-manager provenance does not establish macOS code signing or notarization. Review the registry and publisher before installing updates.")
             }
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.top, 10)
         }
     }
 }

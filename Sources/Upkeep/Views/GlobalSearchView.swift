@@ -59,7 +59,7 @@ struct GlobalSearchView: View {
                         }
                     }
                 }
-                .listStyle(.inset)
+                .upkeepContentList()
                 .onChange(of: selection) { _, newSelection in
                     guard let newSelection else { return }
                     activate(newSelection)
@@ -168,7 +168,7 @@ struct GlobalSearchView: View {
                     workingTitle: "Opening…"
                 )
             }
-                .buttonStyle(.bordered).controlSize(.small)
+                .listRowPrimaryAction()
                 .disabled(store.isWorking(.macOSUpdate(update.id)))
         }
         .tag(SearchResultSelection.macOS(update.id))

@@ -48,7 +48,7 @@ struct UpdateHistoryView: View {
                             }
                         }
                     }
-                }.listStyle(.inset)
+                }.upkeepContentList()
                     .upkeepStateTransition()
             }
         }
@@ -121,17 +121,13 @@ struct UpdateHistoryView: View {
                     workingTitle: "Restoring…"
                 )
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .frame(width: 128, alignment: .trailing)
+            .listRowPrimaryAction()
             .disabled(store.isWorking(.historyRestore(record.id)))
         } else if record.backupPath != nil {
             ItemStatusView(title: "Backup expired", systemImage: "clock.badge.exclamationmark")
         } else if record.kind == .macOS {
             Button("Recovery Options") { store.openMacOSRecoveryHelp() }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .frame(width: 128, alignment: .trailing)
+                .listRowPrimaryAction()
         } else {
             ItemStatusView(title: "Manual", systemImage: "wrench.and.screwdriver")
         }

@@ -92,7 +92,7 @@ struct DeveloperPackagesView: View {
             .equatable()
             .tag(package.id)
         }
-        .listStyle(.inset)
+        .upkeepContentList()
         .onAppear { ensurePackageSelection(in: packages) }
         .onChange(of: packages.map(\.id)) { _, _ in ensurePackageSelection(in: packages) }
     }
@@ -216,7 +216,7 @@ private struct DeveloperPackageRow: View, Equatable {
                     .listRowPrimaryAction()
                     .disabled(isWorking)
             } else {
-                Color.clear.frame(width: 108, height: 1).accessibilityHidden(true)
+                Color.clear.frame(width: UpkeepLayout.listActionWidth, height: 1).accessibilityHidden(true)
             }
         }
         .contentShape(Rectangle())
@@ -245,7 +245,7 @@ private struct DeveloperPackageRow: View, Equatable {
     }
 
     private var rowDetail: String {
-        [package.manager.rawValue, package.installationContext]
+        [package.manager.rawValue, package.installationContext ?? URL(fileURLWithPath: package.executablePath).deletingLastPathComponent().path]
             .compactMap { $0 }
             .joined(separator: " · ")
     }
@@ -271,21 +271,18 @@ private struct DeveloperPackageDetailContent: View {
     let package: DeveloperPackage
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                HStack(spacing: 16) {
-                    PackageManagerIcon(manager: package.manager, size: 58)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(package.name).font(.title2.weight(.semibold))
+        InfoPanel {
+                    InfoPanelHeader(title: package.name) {
+                        PackageManagerIcon(manager: package.manager, size: 44)
+                    } detail: {
                         Text(package.manager.packageLabel).foregroundStyle(.secondary)
                         ItemCheckStatus(
                             isRefreshing: store.isRefreshing(package),
                             lastChecked: store.lastChecked(for: package)
                         )
-                    }
-                    Spacer()
-                }
 
+                    }
+                } content: {
                 if package.isOutdated { updateCard }
 
                 Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
@@ -299,62 +296,64 @@ private struct DeveloperPackageDetailContent: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .upkeepOutlinedInspectorCard()
 
+                RelatedInstallations(package: package)
                 actionGrid
 
-                if package.canUpdateAutomatically { VStack(alignment: .leading, spacing: 10) {
-                    Text("Install a Version").font(.headline)
-                    Text("The newest version is ready to install. Load published versions to choose an older release.")
-                        .font(.callout).foregroundStyle(.secondary)
-                    HStack {
-                        Picker("Version", selection: Binding(
-                            get: { detailState.versionState.selectedVersion },
-                            set: { detailState.selectVersion($0) }
-                        )) {
-                            ForEach(detailState.versionState.availableVersions, id: \.self) { version in
-                                Text(versionMenuLabel(version, package: package)).tag(version)
-                            }
-                        }
-                        .frame(maxWidth: 260)
-                        .disabled(detailState.versionState.isLoading)
-                        if detailState.versionState.isLoading {
-                            ProgressView()
-                                .controlSize(.small)
-                                .frame(width: 24)
-                                .accessibilityLabel("Loading published versions")
-                        } else {
-                            Button {
-                                Task {
-                                    detailState.beginLoadingVersions()
-                                    let versions = await store.developerVersions(for: package)
-                                    guard detailState.packageID == package.id else { return }
-                                    detailState.finishLoadingVersions(versions, for: package)
+                if package.canUpdateAutomatically {
+                    DisclosureGroup("Install a specific version") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Choose a release to install for this package.")
+                                .font(.callout).foregroundStyle(.secondary)
+                            Picker("Version", selection: Binding(
+                                get: { detailState.versionState.selectedVersion },
+                                set: { detailState.selectVersion($0) }
+                            )) {
+                                ForEach(detailState.versionState.availableVersions, id: \.self) { version in
+                                    Text(versionMenuLabel(version, package: package)).tag(version)
                                 }
-                            } label: {
-                                Image(systemName: "arrow.clockwise")
                             }
-                            .buttonStyle(.borderless)
-                            .help("Load all published versions")
-                            .accessibilityLabel("Load published versions")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .disabled(detailState.versionState.isLoading || store.isWorking(.developerPackage(package.id)))
+
+                            if detailState.versionState.isLoading {
+                                ProgressView("Loading published versions…")
+                                    .controlSize(.small)
+                            } else {
+                                Button("Load Versions", systemImage: "arrow.clockwise") {
+                                    Task {
+                                        detailState.beginLoadingVersions()
+                                        let versions = await store.developerVersions(for: package)
+                                        guard detailState.packageID == package.id else { return }
+                                        detailState.finishLoadingVersions(versions, for: package)
+                                    }
+                                }
+                                .buttonStyle(.link)
+                                .disabled(store.isWorking(.developerPackage(package.id)))
+                                .help("Load all published releases for this package")
+                            }
+                            Divider()
+                            HStack {
+                                Spacer(minLength: 0)
+                                Button {
+                                    Task { await store.installDeveloperPackage(package, version: detailState.versionState.selectedVersion) }
+                                } label: {
+                                    WorkingActionLabel(
+                                        isWorking: store.isWorking(.developerPackage(package.id)),
+                                        idleTitle: "Install Version",
+                                        workingTitle: "Installing…",
+                                        phase: store.updatePhase(for: .developerPackage(package.id))
+                                    )
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(detailState.versionState.isLoading || detailState.versionState.selectedVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.isWorking(.developerPackage(package.id)))
+                            }
                         }
+                        .upkeepOutlinedInspectorCard()
+                        .padding(.top, 10)
                     }
-                    HStack {
-                        Button {
-                            Task { await store.installDeveloperPackage(package, version: detailState.versionState.selectedVersion) }
-                        } label: {
-                            WorkingActionLabel(
-                                isWorking: store.isWorking(.developerPackage(package.id)),
-                                idleTitle: "Install Version",
-                                workingTitle: "Installing…",
-                                phase: store.updatePhase(for: .developerPackage(package.id))
-                            )
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(detailState.versionState.selectedVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.isWorking(.developerPackage(package.id)))
-                    }
-                } }
+                }
                 PackageSecurityExplanation(manager: package.manager.rawValue)
-            }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
-        }
+            }
         .confirmationDialog(
             "Uninstall \(package.name)?",
             isPresented: $detailState.isConfirmingUninstall,
