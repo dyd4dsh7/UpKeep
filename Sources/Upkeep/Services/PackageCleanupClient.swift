@@ -64,17 +64,26 @@ struct PackageCleanupResult: Identifiable, Equatable, Sendable {
     let id = UUID()
     let target: PackageCleanupTarget
     let bytesFreed: Int64
+    var measurement: CleanupMeasurement = .reported
 
     var title: String { "\(target.title) Cleanup Complete" }
     var message: String {
-        guard bytesFreed > 0 else { return "Cleanup finished. No recovered disk space was measured." }
-        return "Freed \(ByteCountFormatter.string(fromByteCount: bytesFreed, countStyle: .file)) of disk space."
+        switch measurement {
+        case .unknown: return "Cleanup finished. Recovered disk space could not be measured."
+        case .reported:
+            return "The manager reported \(ByteCountFormatter.string(fromByteCount: bytesFreed, countStyle: .file)) reclaimed."
+        case .cacheEstimate:
+            return "The cache footprint decreased by approximately \(ByteCountFormatter.string(fromByteCount: bytesFreed, countStyle: .file)). Other cache activity may affect this estimate."
+        }
     }
 }
+
+enum CleanupMeasurement: Equatable, Sendable { case reported, cacheEstimate, unknown }
 
 enum PackageCleanupEstimateBasis: Equatable, Sendable {
     case reclaimable
     case cacheFootprintOnly
+    case unavailable
 }
 
 struct PackageCleanupEstimate: Identifiable, Equatable, Sendable {
@@ -84,7 +93,7 @@ struct PackageCleanupEstimate: Identifiable, Equatable, Sendable {
     let basis: PackageCleanupEstimateBasis
 
     var shouldOfferCleanup: Bool {
-        basis == .cacheFootprintOnly || bytes > 0
+        basis != .reclaimable || bytes > 0
     }
 
     var dialogTitle: String {
@@ -94,6 +103,8 @@ struct PackageCleanupEstimate: Identifiable, Equatable, Sendable {
     var confirmationMessage: String {
         let size = ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
         switch basis {
+        case .unavailable:
+            return "The cleanup check completed, but the amount \(target.kind.cleanupSubject) can remove is unavailable. Review the cleanup action before continuing."
         case .reclaimable:
             if bytes == 0 {
                 return "Homebrew's dry run found no files that can currently be removed."
@@ -102,6 +113,10 @@ struct PackageCleanupEstimate: Identifiable, Equatable, Sendable {
         case .cacheFootprintOnly:
             return "Cleanup estimate unavailable. \(target.kind.cleanupSubject) currently uses \(size), but that is its total footprint—not the amount cleanup will remove."
         }
+    }
+
+    var cleanupConfirmationMessage: String {
+        "\(confirmationMessage) The files identified by the package manager will be removed. This cannot be undone in Upkeep."
     }
 }
 
@@ -128,11 +143,7 @@ struct PackageCleanupClient: Sendable {
             )
             guard result.status == 0 else { throw scanError(target, result.data) }
             let output = String(data: result.data, encoding: .utf8) ?? ""
-            return PackageCleanupEstimate(
-                target: target,
-                bytes: cleanupReportedBytes(in: output) ?? 0,
-                basis: .reclaimable
-            )
+            return homebrewCleanupEstimate(target: target, output: output)
         case .npm:
             return try await directoryEstimate(target, arguments: ["config", "get", "cache"])
         case .pnpm:
@@ -144,7 +155,8 @@ struct PackageCleanupClient: Sendable {
 
     func cleanup(_ target: PackageCleanupTarget) async throws -> PackageCleanupResult {
         let executable = URL(fileURLWithPath: target.executablePath)
-        let before = availableCapacity(for: executable)
+        let cache = await cacheDirectory(for: target)
+        let before = cache.flatMap { try? directoryAllocatedSize(at: $0) }
         let result = await captureDeveloperCommandAsync(
             executable,
             cleanupArguments(for: target.kind),
@@ -159,9 +171,23 @@ struct PackageCleanupClient: Sendable {
         }
 
         let output = String(data: result.data, encoding: .utf8) ?? ""
-        let measuredBytes = max(0, (availableCapacity(for: executable) ?? 0) - (before ?? 0))
-        let bytesFreed = cleanupReportedBytes(in: output) ?? measuredBytes
-        return PackageCleanupResult(target: target, bytesFreed: bytesFreed)
+        let after = cache.flatMap { try? directoryAllocatedSize(at: $0) }
+        return cleanupMeasurement(target: target, reported: cleanupReportedBytes(in: output), before: before, after: after)
+    }
+
+    private func cacheDirectory(for target: PackageCleanupTarget) async -> URL? {
+        let arguments: [String]
+        switch target.kind {
+        case .homebrew: return nil
+        case .npm: arguments = ["config", "get", "cache"]
+        case .pnpm: arguments = ["store", "path"]
+        case .uv: arguments = ["cache", "dir"]
+        }
+        let result = await captureDeveloperCommandAsync(URL(fileURLWithPath: target.executablePath), arguments)
+        guard result.status == 0,
+              let path = String(data: result.data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              path.hasPrefix("/"), FileManager.default.fileExists(atPath: path) else { return nil }
+        return URL(fileURLWithPath: path, isDirectory: true)
     }
 
     private func directoryEstimate(
@@ -197,6 +223,13 @@ struct PackageCleanupClient: Sendable {
             return nil
         }
     }
+}
+
+func homebrewCleanupEstimate(target: PackageCleanupTarget, output: String) -> PackageCleanupEstimate {
+    if let bytes = cleanupReportedBytes(in: output) {
+        return PackageCleanupEstimate(target: target, bytes: bytes, basis: .reclaimable)
+    }
+    return PackageCleanupEstimate(target: target, bytes: 0, basis: .unavailable)
 }
 
 func cleanupArguments(for kind: PackageCleanupKind) -> [String] {
@@ -243,11 +276,16 @@ func cleanupReportedBytes(in output: String) -> Int64? {
 }
 
 func directoryAllocatedSize(at directory: URL, fileManager: FileManager = .default) throws -> Int64 {
+    guard try directory.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true else {
+        throw PackageCleanupClient.CleanupError.failed("The cache directory could not be measured.")
+    }
+    var traversalError: (any Error)?
     guard let enumerator = fileManager.enumerator(
         at: directory,
         includingPropertiesForKeys: [.isRegularFileKey, .fileAllocatedSizeKey, .totalFileAllocatedSizeKey],
-        options: [.skipsPackageDescendants]
-    ) else { return 0 }
+        options: [.skipsPackageDescendants],
+        errorHandler: { _, error in traversalError = error; return false }
+    ) else { throw PackageCleanupClient.CleanupError.failed("The cache directory could not be measured.") }
 
     var bytes: Int64 = 0
     var visited = 0
@@ -258,14 +296,23 @@ func directoryAllocatedSize(at directory: URL, fileManager: FileManager = .defau
             .isRegularFileKey, .fileAllocatedSizeKey, .totalFileAllocatedSizeKey
         ])
         guard values.isRegularFile == true else { continue }
-        bytes += Int64(values.totalFileAllocatedSize ?? values.fileAllocatedSize ?? 0)
+        guard let allocated = values.totalFileAllocatedSize ?? values.fileAllocatedSize, allocated >= 0 else {
+            throw PackageCleanupClient.CleanupError.failed("Allocated cache size is unavailable.")
+        }
+        let sum = bytes.addingReportingOverflow(Int64(allocated))
+        guard !sum.overflow else { throw PackageCleanupClient.CleanupError.failed("The cache size exceeds the measurement limit.") }
+        bytes = sum.partialValue
     }
+    if let traversalError { throw traversalError }
     return bytes
 }
 
-private func availableCapacity(for executable: URL) -> Int64? {
-    try? executable.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-        .volumeAvailableCapacityForImportantUsage
+func cleanupMeasurement(target: PackageCleanupTarget, reported: Int64?, before: Int64?, after: Int64?) -> PackageCleanupResult {
+    if let reported, reported >= 0 { return PackageCleanupResult(target: target, bytesFreed: reported) }
+    guard let before, let after, before >= 0, after >= 0 else {
+        return PackageCleanupResult(target: target, bytesFreed: 0, measurement: .unknown)
+    }
+    return PackageCleanupResult(target: target, bytesFreed: max(0, before - after), measurement: .cacheEstimate)
 }
 
 private func detectedCleanupExecutable(for manager: DeveloperPackageManager) -> String? {

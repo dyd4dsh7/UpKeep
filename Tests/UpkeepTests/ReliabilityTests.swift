@@ -17,6 +17,47 @@ import Testing
     #expect(permissions.map(\.title) == ["Camera", "Photos", "User Selected Files"])
 }
 
+@Test func securityInspectionDistinguishesCommandFailureFromRejectedStatus() async {
+    let missing = await AppSecurityInspector.securityCommand("/fixture/missing-security-tool", [])
+    #expect(missing.status == nil)
+    let rejected = await AppSecurityInspector.securityCommand("/usr/bin/false", [])
+    #expect(rejected.status == 1)
+    let stalled = await AppSecurityInspector.securityCommand("/bin/sleep", ["30"], timeout: 0.05)
+    #expect(stalled.status == nil)
+    #expect(stalled.output.contains("time limit"))
+}
+
+@Test func securityInspectionHonoursWorkerCancellation() async {
+    let cancellation = CommandRunner.Cancellation()
+    cancellation.cancel()
+    let result = await AppSecurityInspector.securityCommand("/usr/bin/true", [], cancellation: cancellation)
+    #expect(result.status == nil)
+    #expect(result.output.contains("cancelled"))
+}
+
+@Test func securityInspectionCancelsAnAlreadyRunningCommand() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("SecurityCancellation-\(UUID())")
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let ready = root.appendingPathComponent("ready")
+    let task = Task {
+        await AppSecurityInspector.securityCommand("/bin/sh",
+            ["-c", "touch \"$1\"; exec /bin/sleep 30", "fixture", ready.path], timeout: 15)
+    }
+    defer { task.cancel() }
+    let deadline = ContinuousClock.now.advanced(by: .seconds(12))
+    while !FileManager.default.fileExists(atPath: ready.path), ContinuousClock.now < deadline {
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(FileManager.default.fileExists(atPath: ready.path))
+    let cancelledAt = ContinuousClock.now
+    task.cancel()
+    let result = await task.value
+    #expect(result.status == nil)
+    #expect(result.output.contains("cancelled"))
+    #expect(cancelledAt.duration(to: .now) < .seconds(3))
+}
+
 @MainActor
 @Test func perItemLastCheckedDatesPersistAcrossSettingsInstances() {
     let suiteName = "UpkeepTests.ItemLastChecked.\(UUID().uuidString)"

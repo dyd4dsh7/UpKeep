@@ -1,10 +1,11 @@
 import SwiftUI
 
 struct ContentView: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     @EnvironmentObject private var settings: AppSettings
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var sidebarCollapsedForInspector = false
+    @State private var showingOperations = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -12,7 +13,7 @@ struct ContentView: View {
                 .onChange(of: inspectorPresented.wrappedValue) { _, _ in
                     adaptSidebar(to: geometry.size.width)
                 }
-                .onChange(of: geometry.size.width) { _, width in
+                .onChange(of: geometry.size.width, initial: true) { _, width in
                     adaptSidebar(to: width)
                 }
                 .onChange(of: columnVisibility) { _, visibility in
@@ -57,6 +58,15 @@ struct ContentView: View {
                 }
         }
         .navigationTitle(navigationTitle)
+        .toolbar {
+            Button { showingOperations = true } label: {
+                Label("Operations", systemImage: "list.bullet.rectangle")
+            }
+            .help("Show update operations")
+        }
+        .sheet(isPresented: $showingOperations) {
+            OperationCentreView(execution: store.updateExecutionState).environment(\.upkeepStoreReference, store)
+        }
         .navigationSubtitle(navigationSubtitle)
         .searchable(text: $store.navigation.searchText, placement: .toolbar, prompt: "Search Upkeep")
         .sheet(isPresented: Binding(
@@ -81,6 +91,8 @@ struct ContentView: View {
             refreshDockBadge()
             refreshMenuBar()
         }
+        .onChange(of: store.updateCheckState) { _, _ in refreshMenuBar() }
+        .onChange(of: store.lastChecked) { _, _ in refreshMenuBar() }
         .onChange(of: settings.showMenuBarItem) { _, _ in
             refreshMenuBar()
         }
@@ -123,7 +135,9 @@ struct ContentView: View {
         MenuBarController.shared.refresh(
             updateCount: store.totalUpdateCount,
             showCount: settings.showMenuBarCount,
-            isVisible: settings.showMenuBarItem
+            isVisible: settings.showMenuBarItem,
+            state: store.updateCheckState,
+            lastChecked: store.lastChecked
         )
     }
 

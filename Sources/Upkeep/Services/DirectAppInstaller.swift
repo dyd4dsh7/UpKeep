@@ -13,6 +13,8 @@ extension DirectAppInstalling {
 }
 
 struct DirectAppInstaller: DirectAppInstalling, Sendable {
+    private var cancellation: CommandRunner.Cancellation?
+    init() {}
     func install(update: AvailableUpdate) async throws {
         try await install(update: update, progress: { _ in })
     }
@@ -21,13 +23,26 @@ struct DirectAppInstaller: DirectAppInstalling, Sendable {
         guard let downloadURL = update.directInstallURL else {
             throw InstallError.unsupportedDownload
         }
-        try await Task.detached(priority: .userInitiated) {
-            try await installSynchronouslyDownloaded(
+        let cancellation = CommandRunner.Cancellation()
+        var worker = self
+        worker.cancellation = cancellation
+        let installer = worker
+        let commandLog = OperationCommandLogContext.current
+        let task = Task.detached(priority: .userInitiated) {
+            try await OperationCommandLogContext.$current.withValue(commandLog) {
+                try await installer.installSynchronouslyDownloaded(
                 update: update,
                 downloadURL: downloadURL,
                 progress: progress
-            )
-        }.value
+                )
+            }
+        }
+        try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            cancellation.cancel()
+            task.cancel()
+        }
     }
 
     private func installSynchronouslyDownloaded(
@@ -56,37 +71,50 @@ struct DirectAppInstaller: DirectAppInstalling, Sendable {
 
         var mountedRoot: URL?
         var mountedDiskImage = false
-        defer {
-            if mountedDiskImage, let mountedRoot {
-                try? run("/usr/bin/hdiutil", ["detach", mountedRoot.path, "-force"])
+        do {
+            await progress(.preparing)
+            let extractedRoot: URL
+            switch downloadURL.pathExtension.lowercased() {
+            case "zip":
+                try ZIPArchiveInspector.validate(archive)
+                extractedRoot = workspace.appendingPathComponent("Expanded", isDirectory: true)
+                try fileManager.createDirectory(at: extractedRoot, withIntermediateDirectories: true)
+                try await run("/usr/bin/ditto", ["-x", "-k", archive.path, extractedRoot.path], purpose: .mutation)
+            case "dmg":
+                extractedRoot = workspace.appendingPathComponent("Mounted", isDirectory: true)
+                mountedRoot = extractedRoot
+                try fileManager.createDirectory(at: extractedRoot, withIntermediateDirectories: true)
+                mountedDiskImage = true
+                try await run("/usr/bin/hdiutil", [
+                    "attach", archive.path, "-nobrowse", "-readonly", "-mountpoint", extractedRoot.path
+                ], purpose: .mutation)
+            default:
+                throw InstallError.unsupportedDownload
             }
-        }
-        await progress(.preparing)
-        let extractedRoot: URL
-        switch downloadURL.pathExtension.lowercased() {
-        case "zip":
-            try ZIPArchiveInspector.validate(archive)
-            extractedRoot = workspace.appendingPathComponent("Expanded", isDirectory: true)
-            try fileManager.createDirectory(at: extractedRoot, withIntermediateDirectories: true)
-            try run("/usr/bin/ditto", ["-x", "-k", archive.path, extractedRoot.path])
-        case "dmg":
-            extractedRoot = workspace.appendingPathComponent("Mounted", isDirectory: true)
-            mountedRoot = extractedRoot
-            try fileManager.createDirectory(at: extractedRoot, withIntermediateDirectories: true)
-            try run("/usr/bin/hdiutil", [
-                "attach", archive.path, "-nobrowse", "-readonly", "-mountpoint", extractedRoot.path
-            ])
-            mountedDiskImage = true
-        default:
-            throw InstallError.unsupportedDownload
-        }
 
-        let replacement = try matchingApplication(
-            under: extractedRoot,
-            bundleIdentifier: update.app.bundleIdentifier
-        )
-        await progress(.installing)
-        try replace(update.app.url, with: replacement, for: update)
+            let replacement = try matchingApplication(
+                under: extractedRoot,
+                bundleIdentifier: update.app.bundleIdentifier
+            )
+            await progress(.installing)
+            try cancellation?.check()
+            try await replace(update.app.url, with: replacement, for: update)
+        } catch {
+            if mountedDiskImage, let mountedRoot { await detach(mountedRoot) }
+            throw error
+        }
+        if mountedDiskImage, let mountedRoot { await detach(mountedRoot) }
+    }
+
+    private func detach(_ mountedRoot: URL) async {
+        // Cleanup must finish even when the installation task was cancelled.
+        let log = OperationCommandLogContext.current
+        await Task.detached(priority: .utility) {
+            await OperationCommandLogContext.$current.withValue(log) {
+                _ = try? await CommandRunner.run(URL(fileURLWithPath: "/usr/bin/hdiutil"),
+                    ["detach", mountedRoot.path, "-force"], timeout: 30)
+            }
+        }.value
     }
 
     private func matchingApplication(
@@ -118,7 +146,7 @@ struct DirectAppInstaller: DirectAppInstalling, Sendable {
         return match
     }
 
-    private func validate(_ replacement: URL, for update: AvailableUpdate) throws {
+    private func validate(_ replacement: URL, for update: AvailableUpdate) async throws {
         guard let bundle = Bundle(url: replacement),
               bundle.bundleIdentifier == update.app.bundleIdentifier
         else { throw InstallError.bundleIdentifierMismatch }
@@ -126,9 +154,12 @@ struct DirectAppInstaller: DirectAppInstalling, Sendable {
             ?? bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String
         let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String
         try Self.validateVersion(version: version, build: build, update: update)
-        try run("/usr/bin/codesign", ["--verify", "--strict", replacement.path])
-        try run("/usr/bin/codesign", ["--verify", "--strict", update.app.url.path])
-        guard try signingIdentity(for: replacement) == signingIdentity(for: update.app.url) else {
+        try AppCompatibility.current.validateBundle(at: replacement)
+        try await run("/usr/bin/codesign", ["--verify", "--strict", replacement.path])
+        try await run("/usr/bin/codesign", ["--verify", "--strict", update.app.url.path])
+        let replacementIdentity = try await signingIdentity(for: replacement)
+        let installedIdentity = try await signingIdentity(for: update.app.url)
+        guard replacementIdentity == installedIdentity else {
             throw InstallError.signingIdentityMismatch
         }
     }
@@ -140,19 +171,22 @@ struct DirectAppInstaller: DirectAppInstalling, Sendable {
         else { throw InstallError.versionMismatch }
     }
 
-    private func replace(_ installed: URL, with replacement: URL, for update: AvailableUpdate) throws {
+    private func replace(_ installed: URL, with replacement: URL, for update: AvailableUpdate) async throws {
         let fileManager = FileManager.default
         let staged = installed.deletingLastPathComponent()
             .appendingPathComponent(".Upkeep-\(UUID().uuidString)-\(installed.lastPathComponent)")
         defer { try? fileManager.removeItem(at: staged) }
         do {
-            try StagedReplacementTransaction.perform(
+            try await StagedReplacementTransaction.performAsync(
                 replacement: replacement,
                 staged: staged,
                 installed: installed,
                 copy: { try fileManager.copyItem(at: $0, to: $1) },
-                validate: { try validate($0, for: update) },
-                replace: { _ = try fileManager.replaceItemAt($0, withItemAt: $1) }
+                validate: { try await validate($0, for: update) },
+                replace: {
+                    try cancellation?.check()
+                    _ = try fileManager.replaceItemAt($0, withItemAt: $1)
+                }
             )
         } catch let error as InstallError {
             throw error
@@ -161,31 +195,27 @@ struct DirectAppInstaller: DirectAppInstalling, Sendable {
         }
     }
 
-    private func run(_ executable: String, _ arguments: [String]) throws {
-        _ = try command(executable, arguments)
+    private func run(_ executable: String, _ arguments: [String], purpose: CommandRunner.Purpose = .inventory) async throws {
+        _ = try await command(executable, arguments, purpose: purpose)
     }
 
-    private func command(_ executable: String, _ arguments: [String]) throws -> String {
-        let process = Process()
-        let output = Pipe()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = arguments
-        process.standardOutput = output
-        process.standardError = output
-        do { try process.run() }
-        catch { throw InstallError.commandFailed(error.localizedDescription) }
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            let message = String(data: data, encoding: .utf8)?
+    private func command(_ executable: String, _ arguments: [String], purpose: CommandRunner.Purpose = .inventory) async throws -> String {
+        let result: CommandRunner.Result
+        do {
+            result = try await CommandRunner.run(URL(fileURLWithPath: executable), arguments,
+                timeout: CommandRunner.deadline(for: arguments, purpose: purpose),
+                maximumOutputBytes: 16 * 1_024 * 1_024)
+        } catch { throw InstallError.commandFailed(error.localizedDescription) }
+        guard result.status == 0 else {
+            let message = String(data: result.output, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             throw InstallError.commandFailed(message ?? executable)
         }
-        return String(data: data, encoding: .utf8) ?? ""
+        return String(data: result.output, encoding: .utf8) ?? ""
     }
 
-    private func signingIdentity(for application: URL) throws -> String {
-        let output = try command("/usr/bin/codesign", [
+    private func signingIdentity(for application: URL) async throws -> String {
+        let output = try await command("/usr/bin/codesign", [
             "-d", "--verbose=4", application.path
         ])
         let lines = output.split(whereSeparator: \.isNewline).map(String.init)
@@ -242,6 +272,19 @@ struct DirectAppInstaller: DirectAppInstalling, Sendable {
 }
 
 enum StagedReplacementTransaction {
+    static func performAsync(
+        replacement: URL, staged: URL, installed: URL,
+        copy: (URL, URL) throws -> Void,
+        validate: (URL) async throws -> Void,
+        replace: (URL, URL) throws -> Void
+    ) async throws {
+        try Task.checkCancellation()
+        try copy(replacement, staged)
+        try await validate(staged)
+        try Task.checkCancellation()
+        try replace(installed, staged)
+    }
+
     static func perform(
         replacement: URL,
         staged: URL,

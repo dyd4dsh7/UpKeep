@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The single inspector layout for applications, packages, and models.
 struct InfoPanel<Header: View, Content: View>: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     @ViewBuilder let header: Header
     @ViewBuilder let content: Content
 

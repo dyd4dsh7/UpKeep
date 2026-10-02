@@ -50,7 +50,7 @@ private struct DiagnosticSnapshot {
 
 struct SettingsView: View {
     @EnvironmentObject private var settings: AppSettings
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
 
     var body: some View {
         TabView(selection: $settings.selectedSection) {
@@ -257,6 +257,7 @@ struct SettingsView: View {
                     Text("Prerelease Updates")
                 }
             }
+            SourceHealthView(settings: settings)
             if settings.checkHomebrew {
                 Section {
                     SettingsOptionRow(

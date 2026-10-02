@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct LocalModelsView: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
 
     var body: some View {
         let models = sortedModels
@@ -24,7 +24,7 @@ struct LocalModelsView: View {
                     title: "Check local models",
                     systemImage: "arrow.clockwise",
                     isWorking: store.isWorking(.localModelScan),
-                    action: store.scanLocalModels
+                    action: { _ = await store.scanLocalModels() }
                 )
             }
         }
@@ -124,7 +124,7 @@ private struct LocalModelRow: View, Equatable {
 }
 
 struct LocalModelDetail: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     let model: LocalLLMModel?
 
     var body: some View {

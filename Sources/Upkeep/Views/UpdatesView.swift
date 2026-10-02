@@ -24,7 +24,7 @@ private struct UpdateListSnapshot {
 }
 
 struct UpdatesView: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     @EnvironmentObject private var viewState: UpdateViewState
 
     var body: some View {
@@ -81,7 +81,7 @@ struct UpdatesView: View {
         .upkeepAnimated(for: snapshot.identity)
         .sheet(isPresented: $store.navigation.isShowingBatchReview) {
             BatchUpdateSheet(items: store.availableBatchUpdateItems)
-                .environmentObject(store)
+                .environment(\.upkeepStoreReference, store)
         }
         .toolbar { listToolbar }
     }
@@ -323,7 +323,7 @@ struct UpdatesView: View {
 
 private struct BatchUpdateSheet: View {
     @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     @EnvironmentObject private var settings: AppSettings
     let items: [BatchUpdateItem]
 
@@ -624,7 +624,7 @@ private struct BatchGroupHeader: View {
 }
 
 private struct BatchReviewRow: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     let item: BatchUpdateItem
     @Binding var isSelected: Bool
 
@@ -685,7 +685,7 @@ private struct BatchReviewRow: View {
 }
 
 private struct DeveloperUpdateCard: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     let package: DeveloperPackage
     var body: some View {
         StandardItemRow(isSelected: store.updateInspectorSelection == .developer(package.id)) {
@@ -732,7 +732,7 @@ private struct DeveloperUpdateCard: View {
 }
 
 private struct MacOSUpdateCard: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     let update: MacOSUpdate
     var body: some View {
         StandardItemRow {
@@ -761,7 +761,7 @@ private struct MacOSUpdateCard: View {
 }
 
 struct UpdateCard: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     let update: AvailableUpdate
 
     var body: some View {
@@ -830,7 +830,7 @@ struct UpdateCard: View {
 }
 
 private struct HomebrewUpdateCard: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     let package: HomebrewPackage
 
     var body: some View {
@@ -840,6 +840,7 @@ private struct HomebrewUpdateCard: View {
             ItemIdentityView(
                 title: package.displayName,
                 detail: package.kind.rawValue
+                    + (package.isRevisionUpdate ? " · Rebuild update" : "")
                     + (package.isDependency ? " · Dependency" : "")
                     + (package.kind == .cask ? " · May require password" : ""),
                 prereleaseChannel: package.prereleaseChannel,
@@ -879,7 +880,7 @@ private struct HomebrewUpdateCard: View {
 }
 
 private struct LocalModelUpdateCard: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     let model: LocalLLMModel
 
     var body: some View {

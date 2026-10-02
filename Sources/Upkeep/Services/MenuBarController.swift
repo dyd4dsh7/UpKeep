@@ -13,11 +13,13 @@ final class MenuBarController: NSObject {
         refresh(
             updateCount: store.totalUpdateCount,
             showCount: settings.showMenuBarCount,
-            isVisible: settings.showMenuBarItem
+            isVisible: settings.showMenuBarItem,
+            state: store.updateCheckState,
+            lastChecked: store.lastChecked
         )
     }
 
-    func refresh(updateCount: Int, showCount: Bool, isVisible: Bool) {
+    func refresh(updateCount: Int, showCount: Bool, isVisible: Bool, state: UpdateCheckState, lastChecked: Date?) {
         guard isVisible else {
             if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
             statusItem = nil
@@ -28,21 +30,18 @@ final class MenuBarController: NSObject {
         if statusItem == nil { createStatusItem() }
         guard let item = statusItem, let button = item.button else { return }
 
+        let health = MenuBarHealth(count: updateCount, state: state, lastChecked: lastChecked)
         let icon = NSImage(
-            systemSymbolName: updateCount == 0 ? "checkmark.circle.fill" : "arrow.down.circle.fill",
+            systemSymbolName: health.symbol,
             accessibilityDescription: "Upkeep"
         )
         icon?.isTemplate = true
         button.image = icon
         button.imagePosition = .imageLeading
         button.title = showCount ? " \(updateCount)" : ""
-        button.toolTip = updateCount == 0
-            ? "Upkeep — no updates available"
-            : "Upkeep — \(updateCount) updates available"
+        button.toolTip = health.tooltip
         button.setAccessibilityLabel(button.toolTip)
-        countItem?.title = updateCount == 0
-            ? "Everything is current"
-            : "\(updateCount) update\(updateCount == 1 ? "" : "s") available"
+        countItem?.title = health.summary
         item.length = NSStatusItem.variableLength
     }
 

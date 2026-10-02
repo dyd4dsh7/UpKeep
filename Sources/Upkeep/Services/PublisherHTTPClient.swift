@@ -218,12 +218,10 @@ enum PublisherCurlTransport {
     }
 
     static func load(_ request: URLRequest, maximumBytes: Int64) async throws -> Result {
-        try await Task.detached(priority: .utility) {
-            try loadSynchronously(request, maximumBytes: maximumBytes)
-        }.value
+        try await loadRedirects(request, maximumBytes: maximumBytes)
     }
 
-    private static func loadSynchronously(_ initialRequest: URLRequest, maximumBytes: Int64) throws -> Result {
+    private static func loadRedirects(_ initialRequest: URLRequest, maximumBytes: Int64) async throws -> Result {
         let fileManager = FileManager.default
         let workspace = fileManager.temporaryDirectory
             .appendingPathComponent("Upkeep-Publisher-Curl-\(UUID().uuidString)", isDirectory: true)
@@ -233,14 +231,22 @@ enum PublisherCurlTransport {
 
         var request = initialRequest
         for redirectCount in 0...maximumRedirects {
+            try Task.checkCancellation()
             guard let url = request.url else { throw PublisherHTTPClient.HTTPError.invalidDestination }
-            let addresses = try PublisherURLPolicy.validatedAddresses(for: url)
-            let hop = try execute(
-                request,
-                addresses: addresses,
-                maximumBytes: maximumBytes,
-                workspace: workspace
-            )
+            let hopRequest = request
+            let hop = try await SourceRequestGate.shared.withPermit(host: url.host ?? "") {
+                let task = Task.detached(priority: .utility) {
+                    try PublisherURLPolicy.validatedAddresses(for: url)
+                }
+                let addresses = try await withTaskCancellationHandler {
+                    try await task.value
+                } onCancel: {
+                    task.cancel()
+                }
+                try Task.checkCancellation()
+                return try await execute(hopRequest, addresses: addresses, maximumBytes: maximumBytes,
+                                         workspace: workspace)
+            }
             if let redirected = try redirectedRequest(from: request, response: hop.response) {
                 guard redirectCount < maximumRedirects else {
                     throw URLError(.httpTooManyRedirects)
@@ -262,12 +268,13 @@ enum PublisherCurlTransport {
         addresses: [String],
         maximumBytes: Int64,
         workspace: URL
-    ) throws -> Result {
+    ) async throws -> Result {
         var lastError: Error = URLError(.cannotConnectToHost)
         let candidates = request.httpMethod == "POST" ? Array(addresses.prefix(1)) : addresses
         for address in candidates {
+            try Task.checkCancellation()
             do {
-                return try execute(
+                return try await execute(
                     request,
                     address: address,
                     maximumBytes: maximumBytes,
@@ -285,7 +292,7 @@ enum PublisherCurlTransport {
         address: String,
         maximumBytes: Int64,
         workspace: URL
-    ) throws -> Result {
+    ) async throws -> Result {
         guard let url = request.url else {
             throw PublisherHTTPClient.HTTPError.invalidDestination
         }
@@ -301,11 +308,7 @@ enum PublisherCurlTransport {
                 .write(to: requestHeadersURL, options: .atomic)
         }
 
-        let process = Process()
-        let output = Pipe()
-        let errors = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
-        process.arguments = try curlArguments(
+        let arguments = try curlArguments(
             for: request,
             resolvedAddress: address,
             headerURL: headerURL,
@@ -314,19 +317,16 @@ enum PublisherCurlTransport {
             requestHeadersURL: requestHeaders.isEmpty ? nil : requestHeadersURL,
             maximumBytes: maximumBytes
         )
-        process.standardOutput = output
-        process.standardError = errors
-        do { try process.run() }
-        catch { throw CurlTransportError(underlyingError: error) }
-        let standardOutput = output.fileHandleForReading.readDataToEndOfFile()
-        let standardError = errors.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            throw CurlTransportError(underlyingError: curlError(
-                status: process.terminationStatus,
-                output: standardError
-            ))
+        let result: CommandRunner.Result
+        do {
+            result = try await CommandRunner.run(URL(fileURLWithPath: "/usr/bin/curl"), arguments,
+                timeout: max(1, request.timeoutInterval) + 10, maximumOutputBytes: 1_024 * 1_024,
+                admissionKey: "network:\(url.host?.lowercased() ?? "")")
+        } catch { throw CurlTransportError(underlyingError: error) }
+        guard result.status == 0 else {
+            throw CurlTransportError(underlyingError: curlError(status: result.status, output: result.stderr))
         }
+        let standardOutput = result.stdout
         guard let statusText = String(data: standardOutput, encoding: .utf8),
               let statusCode = Int(statusText.trimmingCharacters(in: .whitespacesAndNewlines)),
               let response = HTTPURLResponse(

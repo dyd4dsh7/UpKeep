@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 struct DeveloperPackagesView: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     @State private var cleanupResult: PackageCleanupResult?
 
     var body: some View {
@@ -253,7 +253,7 @@ private struct DeveloperPackageRow: View, Equatable {
 }
 
 struct DeveloperPackageDetail: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     let package: DeveloperPackage?
 
     var body: some View {
@@ -266,7 +266,7 @@ struct DeveloperPackageDetail: View {
 }
 
 private struct DeveloperPackageDetailContent: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     @StateObject private var detailState = DeveloperPackageDetailState()
     let package: DeveloperPackage
 

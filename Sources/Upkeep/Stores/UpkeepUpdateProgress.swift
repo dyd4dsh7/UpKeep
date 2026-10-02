@@ -3,15 +3,31 @@ import Foundation
 @MainActor
 extension UpkeepStore {
     func beginUpdateActivity(_ operation: OperationID, targets: Set<MutationTarget>, phase: UpdatePhase) {
-        updateExecutionState.activities[operation] = UpdateActivity(targets: targets, phase: phase)
+        updateExecutionState.begin(operation, targets: targets, phase: phase, label: operationLabel(for: operation))
     }
 
     func setUpdatePhase(_ phase: UpdatePhase, for operation: OperationID) {
-        updateExecutionState.activities[operation]?.phase = phase
+        updateExecutionState.setPhase(phase, for: operation)
     }
 
     func endUpdateActivity(_ operation: OperationID) {
-        updateExecutionState.activities[operation] = nil
+        updateExecutionState.finish(operation)
+    }
+
+    func recordOperationVerification(_ result: OperationResult, for operation: OperationID, commandError: String? = nil,
+                                     verification: OperationVerificationDetail? = nil) {
+        updateExecutionState.recordVerification(result, for: operation, commandError: commandError, verification: verification)
+    }
+
+    private func operationLabel(for operation: OperationID) -> String {
+        switch operation {
+        case let .applicationUpdate(id): updates.first { $0.id == id }?.app.name ?? "Application update"
+        case let .homebrewPackage(id): homebrewPackages.first { $0.id == id }?.displayName ?? "Homebrew update"
+        case let .homebrewAdoption(id): adoptableApps.first { $0.id == id }?.app.name ?? "Homebrew registration"
+        case let .developerPackage(id): developerPackages.first { $0.id == id }?.name ?? "Developer package update"
+        case let .localModel(id): localModels.first { $0.id == id }?.name ?? "Model update"
+        default: "Update operation"
+        }
     }
 
     func updatePhase(for operation: OperationID) -> UpdatePhase? {
@@ -20,8 +36,10 @@ extension UpkeepStore {
         // Application and cask rows can represent the same install. A different
         // developer package sharing a manager is only waiting for that manager.
         let sharedTargets = targets.filter {
-            if case .developerEnvironment = $0 { return false }
-            return true
+            switch $0 {
+            case .developerEnvironment, .packageEnvironment, .modelRuntime: return false
+            default: return true
+            }
         }
         if let activity = updateExecutionState.activities.values.first(where: {
             !$0.targets.isDisjoint(with: sharedTargets)

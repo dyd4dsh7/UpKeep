@@ -49,10 +49,12 @@ struct HomebrewAuthorizationConfirmation: Identifiable {
 
 private enum BatchUpdateError: LocalizedError {
     case couldNotOpen(String)
+    case verification(String)
 
     var errorDescription: String? {
         switch self {
         case let .couldNotOpen(source): "Could not open \(source)."
+        case let .verification(message): message
         }
     }
 }
@@ -61,6 +63,20 @@ private enum BatchUpdateError: LocalizedError {
 final class UpkeepStore: ObservableObject {
     let settings: AppSettings
     private let dependencies: UpkeepDependencies
+
+    func scanHomebrewServices() async {
+        guard !library.isCheckingHomebrewServices else { return }
+        library.isCheckingHomebrewServices = true
+        library.homebrewServicesCheckedAt = Date()
+        defer { library.isCheckingHomebrewServices = false }
+        do {
+            library.homebrewServices = try await dependencies.homebrew.services()
+            library.homebrewServicesSucceededAt = Date()
+            library.homebrewServicesFailure = nil
+        } catch {
+            library.homebrewServicesFailure = error.localizedDescription
+        }
+    }
     let library = UpkeepLibraryState()
     var navigation = UpkeepNavigationState()
     let scanState: UpkeepScanState
@@ -68,18 +84,23 @@ final class UpkeepStore: ObservableObject {
     let mutationCoordinator = MutationCoordinator()
     var diagnostics = UpkeepDiagnosticsState()
 
-    private var periodicTask: Task<Void, Never>?
-    private var scanRequested = false
-    private var scanWaiters: [CheckedContinuation<Void, Never>] = []
+    private let refreshScheduler = RefreshScheduler()
+    private let fullScanCoordinator = FullScanCoordinator()
     private var developerVersionRequestID: UUID?
     private var runningApplicationObservers = Set<AnyCancellable>()
     private var featureStateObservers = Set<AnyCancellable>()
     private var isRootChangeScheduled = false
     private var didStart = false
     private let startedAt = Date()
+    private var appListProjection = ListProjectionCache<InstalledApp, ListProjectionKey<String>>()
+    private var adoptableListProjection = ListProjectionCache<AdoptableApp, ListProjectionKey<String>>()
+    private var developerListProjection = ListProjectionCache<DeveloperPackage, ListProjectionKey<DeveloperListFilterKey>>()
+    private var homebrewListProjection = ListProjectionCache<HomebrewPackage, ListProjectionKey<HomebrewFilter>>()
+    private var primaryCountProjection: (inventory: UInt64, exclusions: UInt64, expiresAt: Date?, value: Int)?
+    private var searchProjection: (generation: UInt64, query: String, results: GlobalSearchResults)?
     private var versionCache: [String: [String]] = [:]
     private var versionCacheRequests: [String: UUID] = [:]
-    private var externalVerificationTasks: [String: Task<Void, Never>] = [:]
+    private let externalUpdateVerifier: ExternalUpdateVerifier
 
     init(
         settings: AppSettings = AppSettings(),
@@ -87,6 +108,8 @@ final class UpkeepStore: ObservableObject {
     ) {
         self.settings = settings
         self.dependencies = dependencies
+        self.externalUpdateVerifier = ExternalUpdateVerifier(discovery: dependencies.applicationDiscovery,
+            interval: dependencies.externalVerificationInterval)
         self.scanState = UpkeepScanState(lastChecked: settings.lastCompletedScanDate)
         bindFeatureState()
     }
@@ -115,7 +138,11 @@ final class UpkeepStore: ObservableObject {
     }
 
     func isWorking(_ operation: OperationID) -> Bool {
-        updateExecutionState.activeOperations.contains(operation)
+        if operation == .localModelScan, updateExecutionState.activeOperations.contains(where: {
+            if case .localModelRuntimeScan = $0 { return true }
+            return false
+        }) { return true }
+        return updateExecutionState.activeOperations.contains(operation)
             || mutationCoordinator.isBusy(mutationTargets(for: operation))
     }
 
@@ -139,27 +166,55 @@ final class UpkeepStore: ObservableObject {
         }
     }
 
+    var globalSearchResults: GlobalSearchResults {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let cached = searchProjection, cached.generation == library.generation, cached.query == query {
+            return cached.results
+        }
+        let results = GlobalSearch(store: self).results
+        searchProjection = (library.generation, query, results)
+        return results
+    }
+
     var visibleUpdates: [AvailableUpdate] { updates.filter { !isExcluded($0) } }
     var filteredUpdates: [AvailableUpdate] { matching(visibleUpdates, name: { $0.app.name }) }
-    var filteredApps: [InstalledApp] { matching(apps, name: \InstalledApp.name) }
-    var filteredAdoptableApps: [AdoptableApp] { matching(adoptableApps, name: { $0.app.name }) }
+    var filteredApps: [InstalledApp] {
+        appListProjection.values(for: ListProjectionKey(generation: library.appGeneration, query: searchText, filter: "")) {
+            matching(apps, name: \InstalledApp.name)
+        }
+    }
+    var filteredAdoptableApps: [AdoptableApp] {
+        adoptableListProjection.values(for: ListProjectionKey(generation: library.adoptableGeneration, query: searchText, filter: "")) {
+            matching(adoptableApps, name: { $0.app.name })
+        }
+    }
     var outdatedPackageCount: Int { homebrewPackages.count { $0.isOutdated && !isExcluded($0) } }
     var outdatedDeveloperPackageCount: Int { developerPackages.count { $0.isOutdated && !isExcluded($0) } }
     var outdatedLocalModelCount: Int { localModels.count { $0.isOutdated && !isExcluded($0) } }
     var totalUpdateCount: Int {
-        // Badges do not include developer packages or models. Avoid comparing
-        // their versions and building their batch-plan arrays on every count read.
-        UpdatePlan.primaryUpdateCount(
+        let inventory = library.primaryUpdateGeneration
+        let exclusions = settings.exclusionCacheRevision
+        let now = Date()
+        if let cached = primaryCountProjection, cached.inventory == inventory,
+           cached.exclusions == exclusions, cached.expiresAt.map({ now < $0 }) ?? true {
+            return cached.value
+        }
+        let value = UpdatePlan.primaryUpdateCount(
             applicationUpdates: visibleUpdates,
             homebrewUpdates: visibleHomebrewUpdates,
             macOSUpdates: macOSUpdates
         )
+        primaryCountProjection = (inventory, exclusions, settings.nextExclusionExpiration, value)
+        return value
     }
+
     var filteredDeveloperPackages: [DeveloperPackage] {
-        matching(developerPackages.filter {
-            (settings.showCurrentDeveloperPackages || $0.isOutdated) &&
-            developerManagerFilter.includes($0.manager)
-        }, name: { $0.name })
+        let filter = DeveloperListFilterKey(manager: developerManagerFilter, showCurrent: settings.showCurrentDeveloperPackages)
+        return developerListProjection.values(for: ListProjectionKey(generation: library.developerGeneration, query: searchText, filter: filter)) {
+            matching(developerPackages.filter {
+                (settings.showCurrentDeveloperPackages || $0.isOutdated) && developerManagerFilter.includes($0.manager)
+            }, name: { $0.name })
+        }
     }
 
     var packageCleanupTargets: [PackageCleanupTarget] {
@@ -171,6 +226,17 @@ final class UpkeepStore: ObservableObject {
     }
 
     func scanCleanup(_ target: PackageCleanupTarget, onError: ((String) -> Void)? = nil) async -> PackageCleanupEstimate? {
+        guard !mutationCoordinator.isBusy(mutationTargets(for: target)) else {
+            let message = "Cleanup review must wait until this package environment finishes changing."
+            if let onError { onError(message) } else { errorMessage = message }
+            return nil
+        }
+        return await mutationCoordinator.withAccess(to: mutationTargets(for: target), otherwise: nil) {
+            await scanCleanupUnlocked(target, onError: onError)
+        }
+    }
+
+    private func scanCleanupUnlocked(_ target: PackageCleanupTarget, onError: ((String) -> Void)?) async -> PackageCleanupEstimate? {
         let operationID = OperationID.packageCleanup(target.id)
         guard !isWorking(operationID) else { return nil }
         updateExecutionState.activeOperations.insert(operationID)
@@ -201,6 +267,17 @@ final class UpkeepStore: ObservableObject {
     }
 
     func cleanUp(_ target: PackageCleanupTarget, onError: ((String) -> Void)? = nil) async -> PackageCleanupResult? {
+        guard !mutationCoordinator.isBusy(mutationTargets(for: target)) else {
+            let message = "Cleanup must wait until this package environment finishes changing."
+            if let onError { onError(message) } else { errorMessage = message }
+            return nil
+        }
+        return await mutationCoordinator.withAccess(to: mutationTargets(for: target), otherwise: nil) {
+            await cleanUpUnlocked(target, onError: onError)
+        }
+    }
+
+    private func cleanUpUnlocked(_ target: PackageCleanupTarget, onError: ((String) -> Void)?) async -> PackageCleanupResult? {
         let operationID = OperationID.packageCleanup(target.id)
         guard !isWorking(operationID) else { return nil }
         updateExecutionState.activeOperations.insert(operationID)
@@ -213,7 +290,7 @@ final class UpkeepStore: ObservableObject {
             DiagnosticsStore.shared.record(.info, category: .command, "Package cleanup completed", metadata: [
                 "Manager": target.title,
                 "Command": target.commandDescription,
-                "Freed": ByteCountFormatter.string(fromByteCount: result.bytesFreed, countStyle: .file),
+                "Measurement": result.message,
                 "Duration": formattedDiagnosticDuration(since: startedAt)
             ])
             refreshDiagnostics()
@@ -257,17 +334,24 @@ final class UpkeepStore: ObservableObject {
     }
 
     var filteredHomebrewPackages: [HomebrewPackage] {
-        let scoped = homebrewPackages.filter { package in
-            switch homebrewFilter {
-            case .all: true
-            case .updates: package.isOutdated && !isExcluded(package)
-            case .requested: !package.isDependency
-            case .dependencies: package.isDependency
-            case .casks: package.kind == .cask
-            case .unmapped: package.kind == .cask && matchingApp(for: package) == nil
+        let key = ListProjectionKey(generation: library.homebrewGeneration,
+            relatedGeneration: homebrewFilter == .unmapped ? library.appGeneration : 0,
+            exclusions: homebrewFilter == .updates ? settings.exclusionCacheRevision : 0,
+            query: searchText, filter: homebrewFilter)
+        return homebrewListProjection.values(for: key,
+            expiresAt: homebrewFilter == .updates ? settings.nextExclusionExpiration : nil) {
+            let scoped = homebrewPackages.filter { package in
+                switch homebrewFilter {
+                case .all: true
+                case .updates: package.isOutdated && !isExcluded(package)
+                case .requested: !package.isDependency
+                case .dependencies: package.isDependency
+                case .casks: package.kind == .cask
+                case .unmapped: package.kind == .cask && matchingApp(for: package) == nil
+                }
             }
+            return matching(scoped, name: { $0.displayName })
         }
-        return matching(scoped, name: { $0.displayName })
     }
 
     func app(forID id: String) -> InstalledApp? {
@@ -365,28 +449,104 @@ final class UpkeepStore: ObservableObject {
     }
 
     func scan() async {
-        if isScanning {
-            scanRequested = true
-            await withCheckedContinuation { scanWaiters.append($0) }
-            return
-        }
-        isScanning = true
-        repeat {
-            scanRequested = false
+        let ownedRun = await fullScanCoordinator.run {
             await scanOnce()
-        } while scanRequested
-        isScanning = false
-        let waiters = scanWaiters
-        scanWaiters.removeAll()
-        for waiter in waiters { waiter.resume() }
-        if didStart { scheduleNextRefresh() }
+        } runningChanged: { isScanning = $0 }
+        if ownedRun && didStart { scheduleNextRefresh() }
+    }
+
+    private func publishScanProgress(_ event: ScanProgressEvent, generation: UUID, revision: UInt64, started: Date) {
+        guard scanState.generation == generation else { return }
+        switch event {
+        case let .localModels(report, runtimes):
+            if scanState.firstResultSeconds == nil { scanState.firstResultSeconds = Date().timeIntervalSince(started) }
+            let owned = Set(LocalModelRuntime.allCases.filter { scanState.sourceRevisions["model.runtime|\($0.rawValue)", default: 0] > revision })
+            var merged = Dictionary(report.models.filter { runtimes.contains($0.runtime) && !owned.contains($0.runtime) }.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            for previous in localModels where report.failedModelIDs.contains(previous.id)
+                || report.failedRuntimes.contains(previous.runtime) || owned.contains(previous.runtime)
+                || !runtimes.contains(previous.runtime) { merged[previous.id] = previous }
+            localModels = merged.values.sorted(by: ScanResultReconciliation.modelOrder)
+            if selectedLocalModelID == nil || !localModels.contains(where: { $0.id == selectedLocalModelID }) {
+                selectedLocalModelID = localModels.first?.id
+            }
+        case let .developerPackages(report, managers):
+            if scanState.firstResultSeconds == nil { scanState.firstResultSeconds = Date().timeIntervalSince(started) }
+            let checkedManagers = managers.filter { scanState.sourceRevisions["developer|\($0.rawValue)", default: 0] <= revision }
+            let previous = developerPackages.filter { checkedManagers.contains($0.manager) }
+            developerPackages = developerPackages.filter { !checkedManagers.contains($0.manager) }
+                + ScanResultReconciliation.developerPackages(fresh: report.packages.filter { checkedManagers.contains($0.manager) },
+                    previous: previous, failedManagers: report.failedManagers,
+                    failedExecutablePaths: report.failedExecutablePaths)
+            developerPackages.sort(by: ScanResultReconciliation.developerOrder)
+            installedDeveloperManagers = Array(Set(installedDeveloperManagers.filter {
+                !checkedManagers.contains($0) || report.failedManagers.contains($0)
+            }).union(report.installedManagers.filter { checkedManagers.contains($0) })).sorted { $0.rawValue < $1.rawValue }
+        case let .macOS(report, includeInstallers, includePrereleases):
+            if scanState.firstResultSeconds == nil { scanState.firstResultSeconds = Date().timeIntervalSince(started) }
+            let previous = macOSUpdates
+            let updatesPart = report.updatesSucceeded ? report.updates.filter { !$0.isFullInstaller }
+                : previous.filter { !$0.isFullInstaller }
+            let installersPart = !includeInstallers ? [] : report.installersSucceeded
+                ? report.updates.filter(\.isFullInstaller) : previous.filter(\.isFullInstaller)
+            macOSUpdates = (updatesPart + installersPart).filter { includePrereleases || !$0.isBeta }
+            scanState.macOSStatus = report.updatesSucceeded ? .succeeded : .failed
+        case let .homebrewInventory(packages):
+            if scanState.firstResultSeconds == nil { scanState.firstResultSeconds = Date().timeIntervalSince(started) }
+            homebrewPackages = preservingOwnedHomebrewPackages(packages, after: revision)
+        case let .discovered(discovered):
+            let current = Dictionary(apps.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            apps = discovered.map { app in
+                let owned = UpdateSource.allCases.contains {
+                    scanState.sourceRevisions["app|\(app.id)|\($0.rawValue)", default: 0] > revision
+                }
+                return owned ? current[app.id] ?? app : app
+            }
+        case let .appSource(appID, source, update, warning, completed, total):
+            if scanState.firstResultSeconds == nil { scanState.firstResultSeconds = Date().timeIntervalSince(started) }
+            scanState.progress = ScanProgress(completed: completed, total: total, lastSource: source)
+            guard scanState.sourceRevisions["app|\(appID)|\(source.rawValue)", default: 0] <= revision else { return }
+            guard let app = apps.first(where: { $0.id == appID }) else { return }
+            var candidates = updates.first(where: { $0.app.id == appID })?.candidates ?? []
+            if warning == nil {
+                candidates.removeAll { $0.source == source }
+                scanState.failedAppSources[appID]?.remove(source)
+            } else {
+                scanState.failedAppSources[appID, default: []].insert(source)
+            }
+            if let update { candidates.append(contentsOf: update.candidates) }
+            candidates = candidates.filter { $0.isNewer(than: app) }
+            updates.removeAll { $0.app.id == appID }
+            if !candidates.isEmpty { updates.append(AvailableUpdate(app: app, candidates: candidates)) }
+            updates.sort { $0.app.name.localizedStandardCompare($1.app.name) == .orderedAscending }
+        }
     }
 
     private func scanOnce() async {
+        let generation = UUID()
+        scanState.revision &+= 1
+        let revision = scanState.revision
+        scanState.latestFullRevision = revision
+        scanState.sourceRevisions = scanState.sourceRevisions.filter { $0.value > revision }
+        let started = Date()
+        scanState.generation = generation
+        scanState.progress = nil
+        scanState.firstResultSeconds = nil
+        defer { if scanState.generation == generation { scanState.progress = nil; scanState.generation = nil } }
         errorMessage = nil
         let previousCount = totalUpdateCount
-        let report = await dependencies.scanner.scan(settings: settings.scanSettings)
-        scanState.completedCheckState = UpdateCheckState.completed(report: report, settings: settings.scanSettings)
+        let scanSettings = settings.scanSettings
+        let report = await SourceRequestPriority.$current.withValue(.background) {
+            await dependencies.scanner.scan(settings: scanSettings) { event in
+                await self.publishScanProgress(event, generation: generation, revision: revision, started: started)
+            }
+        }
+        let history = await dependencies.history.records()
+        let protectedKeys = Set(scanState.sourceRevisions.filter { $0.value > revision }.keys)
+        let protectedUpdates = updates
+        let protectedApps = Dictionary(apps.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let protectedFailures = scanState.failedAppSources
+        recordScanFreshness(report, settings: scanSettings, protecting: protectedKeys)
+        scanState.completedCheckState = UpdateCheckState.completed(report: report, settings: scanSettings)
         scanState.macOSStatus = report.macOSUpdatesStatus
         scanState.failedAppSources = report.failedAppSources
         apps = report.apps
@@ -394,6 +554,26 @@ final class UpkeepStore: ObservableObject {
             settings.migrateExclusion(from: legacyExclusionKey(for: app), to: exclusionKey(for: app))
         }
         updates = mergedUpdates(from: report)
+        if !protectedKeys.isEmpty {
+            var restored: [AvailableUpdate] = []
+            for app in apps {
+                let sources = Set(UpdateSource.allCases.filter { protectedKeys.contains("app|\(app.id)|\($0.rawValue)") })
+                let installed = sources.isEmpty ? app : protectedApps[app.id] ?? app
+                if !sources.isEmpty, let index = apps.firstIndex(where: { $0.id == app.id }) { apps[index] = installed }
+                var candidates = updates.first { $0.app.id == app.id }?.candidates.filter { !sources.contains($0.source) } ?? []
+                candidates += protectedUpdates.first { $0.app.id == app.id }?.candidates.filter { sources.contains($0.source) } ?? []
+                candidates = candidates.filter { $0.isNewer(than: installed) }
+                if !candidates.isEmpty { restored.append(AvailableUpdate(app: installed, candidates: candidates)) }
+                var failures = scanState.failedAppSources[app.id] ?? []
+                failures.subtract(sources)
+                failures.formUnion((protectedFailures[app.id] ?? []).intersection(sources))
+                scanState.failedAppSources[app.id] = failures.isEmpty ? nil : failures
+            }
+            updates = restored.sorted { $0.app.name.localizedStandardCompare($1.app.name) == .orderedAscending }
+        }
+        let protectedHomebrewPackages = homebrewPackages.filter {
+            protectedKeys.contains("homebrew|\($0.kind.rawValue)|\($0.token)")
+        }
         switch report.homebrewInventoryStatus {
         case .disabled:
             homebrewPackages = []
@@ -405,19 +585,48 @@ final class UpkeepStore: ObservableObject {
             if report.homebrewCatalogStatus == .succeeded { adoptableApps = report.adoptableApps }
             else if report.homebrewCatalogStatus == .disabled { adoptableApps = [] }
         }
-        macOSUpdates = mergedMacOSUpdates(from: report)
-        updateHistory = await dependencies.history.records()
-        developerPackages = mergedDeveloperPackages(from: report)
-        installedDeveloperManagers = report.installedDeveloperManagers
-        localModels = mergedLocalModels(from: report)
+        for package in protectedHomebrewPackages {
+            homebrewPackages.removeAll { $0.id == package.id }
+            homebrewPackages.append(package)
+        }
+        let registeredCasks = Set(homebrewPackages.filter { $0.kind == .cask }.map(\.token))
+        adoptableApps.removeAll { registeredCasks.contains($0.caskToken) }
+        homebrewPackages.sort { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+        macOSUpdates = ScanResultReconciliation.macOS(report, previous: macOSUpdates)
+        updateHistory = history
+        let protectedManagers = Set(DeveloperPackageManager.allCases.filter { protectedKeys.contains("developer|\($0.rawValue)") })
+        let ownedPackages = developerPackages.filter { protectedManagers.contains($0.manager) }
+        developerPackages = (ScanResultReconciliation.developer(report, previous: developerPackages).filter { !protectedManagers.contains($0.manager) } + ownedPackages).sorted(by: ScanResultReconciliation.developerOrder)
+        installedDeveloperManagers = Array(Set(report.installedDeveloperManagers.filter { !protectedManagers.contains($0) })
+            .union(installedDeveloperManagers.filter { protectedManagers.contains($0) })).sorted { $0.rawValue < $1.rawValue }
+        let protectedRuntimes = Set(LocalModelRuntime.allCases.filter { protectedKeys.contains("model.runtime|\($0.rawValue)") })
+        let ownedModels = localModels.filter { protectedRuntimes.contains($0.runtime) }
+        localModels = (ScanResultReconciliation.models(report, previous: localModels).filter { !protectedRuntimes.contains($0.runtime) } + ownedModels).sorted(by: ScanResultReconciliation.modelOrder)
+        let verifiedApps = report.apps.filter { app in
+            guard !UpdateSource.allCases.contains(where: {
+                protectedKeys.contains("app|\(app.id)|\($0.rawValue)")
+            }) else { return false }
+            let sources = enabledAppUpdateSources(for: app, checkAppStore: scanSettings.checkAppStore,
+                checkSparkle: scanSettings.checkSparkle, checkGitHub: scanSettings.checkGitHub)
+            return !sources.isEmpty && (report.failedAppSources[app.id] ?? []).isEmpty
+        }
         settings.recordChecks(
-            for: report.apps.map(exclusionKey(for:))
-                + report.homebrewPackages.map(exclusionKey(for:))
-                + report.developerPackages.map(exclusionKey(for:))
-                + report.localModels.map(exclusionKey(for:)),
+            for: verifiedApps.map(exclusionKey(for:))
+                + (report.homebrewInventoryStatus == .succeeded ? report.homebrewPackages.filter {
+                    !protectedKeys.contains("homebrew|\($0.kind.rawValue)|\($0.token)")
+                }.map(exclusionKey(for:)) : [])
+                + report.developerPackages.filter { !protectedManagers.contains($0.manager) && !report.failedDeveloperManagers.contains($0.manager)
+                    && !report.failedDeveloperExecutablePaths.contains($0.executablePath) }.map(exclusionKey(for:))
+                + report.localModels.filter { !protectedRuntimes.contains($0.runtime) && !report.failedLocalModelIDs.contains($0.id)
+                    && !report.failedLocalModelRuntimes.contains($0.runtime) }.map(exclusionKey(for:)),
             at: report.checkedAt
         )
-        scanWarnings = report.warnings
+        scanWarnings = reconciledScanWarnings(report.warnings, protectedKeys: protectedKeys)
+        if scanState.completedCheckState == .complete,
+           (scanState.failedAppSources.values.contains(where: { !$0.isEmpty })
+            || protectedKeys.contains(where: { settings.sourceCheckFreshness[$0]?.failure != nil })) {
+            scanState.completedCheckState = .partial
+        }
         if !developerManagerFilter.isAvailable(in: installedDeveloperManagers) {
             developerManagerFilter = .all
         }
@@ -454,21 +663,88 @@ final class UpkeepStore: ObservableObject {
         return result
     }
 
-    func refresh(_ app: InstalledApp) async {
+    private func reconciledScanWarnings(_ reported: [ScanWarning], protectedKeys: Set<String>) -> [ScanWarning] {
+        guard !protectedKeys.isEmpty else { return reported }
+        var warnings: [ScanWarning] = []
+        for warning in reported {
+            if warning.itemNamesByID != nil {
+                let protectedIDs = Set(apps.filter { app in
+                    UpdateSource.allCases.contains { source in
+                        source.warningSource == warning.source && protectedKeys.contains("app|\(app.id)|\(source.rawValue)")
+                    }
+                }.map(\.id))
+                if let remaining = warning.removingItems(ids: protectedIDs) { warnings.append(remaining) }
+                continue
+            }
+            var removed = Set(apps.filter { app in
+                UpdateSource.allCases.contains { source in
+                    source.warningSource == warning.source && protectedKeys.contains("app|\(app.id)|\(source.rawValue)")
+                }
+            }.map(\.name)).intersection(warning.itemNames)
+            if warning.source == .developerPackages {
+                removed.formUnion(DeveloperPackageManager.allCases.filter { protectedKeys.contains("developer|\($0.rawValue)") }.map(\.rawValue).filter { warning.itemNames.contains($0) })
+            }
+            if warning.source == .localModels {
+                removed.formUnion(LocalModelRuntime.allCases.filter { protectedKeys.contains("model.runtime|\($0.rawValue)") }.map(\.rawValue).filter { warning.itemNames.contains($0) })
+            }
+            guard !removed.isEmpty else { warnings.append(warning); continue }
+            let count = max(0, warning.affectedItemCount - removed.count)
+            if count > 0 {
+                warnings.append(ScanWarning(source: warning.source, itemNames: warning.itemNames.filter { !removed.contains($0) },
+                    affectedItemCount: count, message: warning.message))
+            }
+        }
+        for app in apps {
+            for source in scanState.failedAppSources[app.id] ?? [] {
+                let key = "app|\(app.id)|\(source.rawValue)"
+                guard protectedKeys.contains(key) else { continue }
+                warnings.append(ScanWarning(source: source.warningSource, itemNames: [app.name], itemNamesByID: [app.id: app.name],
+                    message: settings.sourceCheckFreshness[key]?.failure ?? "This source could not be verified."))
+            }
+        }
+        for manager in DeveloperPackageManager.allCases {
+            let key = "developer|\(manager.rawValue)"
+            if protectedKeys.contains(key), let failure = settings.sourceCheckFreshness[key]?.failure {
+                warnings.append(ScanWarning(source: .developerPackages, itemNames: [manager.rawValue], message: failure))
+            }
+        }
+        for runtime in LocalModelRuntime.allCases {
+            let key = "model.runtime|\(runtime.rawValue)"
+            if protectedKeys.contains(key), let failure = settings.sourceCheckFreshness[key]?.failure {
+                warnings.append(ScanWarning(source: .localModels, itemNames: [runtime.rawValue], message: failure))
+            }
+        }
+        return warnings
+    }
+
+    func refresh(_ app: InstalledApp, sources sourceFilter: Set<UpdateSource>? = nil) async {
         let operationID = OperationID.applicationRefresh(app.id)
         guard !isWorking(operationID) else { return }
         updateExecutionState.activeOperations.insert(operationID)
         defer { updateExecutionState.activeOperations.remove(operationID) }
+        scanState.revision &+= 1
+        let revision = scanState.revision
+        for source in enabledUpdateSources(for: app).filter({ sourceFilter?.contains($0) ?? true }) {
+            scanState.sourceRevisions["app|\(app.id)|\(source.rawValue)"] = scanState.revision
+        }
 
         let refreshedApp = await dependencies.applicationDiscovery.discover(at: app.url) ?? app
+        guard scanState.latestFullRevision <= revision else { return }
         if let index = apps.firstIndex(where: { $0.id == app.id }) { apps[index] = refreshedApp }
         if selectedApp?.id == app.id { selectedApp = refreshedApp }
 
-        let report = await dependencies.scanner.scan(app: refreshedApp, settings: settings.scanSettings)
-        scanState.failedAppSources[app.id] = report.failedSources.isEmpty ? nil : report.failedSources
+        var scanSettings = settings.scanSettings
+        scanSettings.appSourceFilter = sourceFilter
+        let report = await dependencies.scanner.scan(app: refreshedApp, settings: scanSettings)
+        guard scanState.latestFullRevision <= revision else { return }
+        let checkedAt = Date()
+        recordAppSourceChecks(app: refreshedApp, settings: scanSettings, failed: report.failedSources, warnings: report.warnings, at: checkedAt)
+        let enabledSources = enabledUpdateSources(for: refreshedApp).filter { sourceFilter?.contains($0) ?? true }
+        let remainingFailures = sourceFilter == nil ? report.failedSources
+            : (scanState.failedAppSources[app.id] ?? []).subtracting(enabledSources).union(report.failedSources)
+        scanState.failedAppSources[app.id] = remainingFailures.isEmpty ? nil : remainingFailures
         var candidates = (updates.first(where: { $0.app.id == app.id })?.candidates ?? [])
             .filter { $0.isNewer(than: refreshedApp) }
-        let enabledSources = enabledUpdateSources(for: refreshedApp)
         candidates.removeAll { candidate in
             candidate.source != .homebrew
                 && enabledSources.contains(candidate.source)
@@ -476,7 +752,8 @@ final class UpkeepStore: ObservableObject {
         }
         candidates.append(contentsOf: report.updates.flatMap(\.candidates))
 
-        if let existingPackage = homebrewPackage(for: refreshedApp), settings.checkHomebrew {
+        if let existingPackage = homebrewPackage(for: refreshedApp), settings.checkHomebrew,
+           sourceFilter?.contains(.homebrew) ?? true {
             do {
                 if let refreshedPackage = try await dependencies.homebrew.package(
                     token: existingPackage.token,
@@ -520,14 +797,118 @@ final class UpkeepStore: ObservableObject {
             case .homebrew: ScanWarningSource.homebrew.rawValue
             }
         })
-        scanWarnings.removeAll { warning in
-            affectedSources.contains(warning.source.rawValue) && warning.itemNames.contains(app.name)
+        for source in enabledSources.map(\.warningSource) {
+            scanWarnings = reconcileSourceWarnings(existing: scanWarnings,
+                fresh: report.warnings.filter { $0.source == source }, source: source,
+                checkedName: app.name, checkedID: app.id)
         }
-        scanWarnings.append(contentsOf: report.warnings)
-        lastChecked = Date()
-        settings.lastCompletedScanDate = lastChecked
-        settings.recordCheck(for: exclusionKey(for: refreshedApp), at: lastChecked ?? Date())
+        scanWarnings.append(contentsOf: report.warnings.filter { !affectedSources.contains($0.source.rawValue) })
+        if sourceFilter == nil && !enabledSources.isEmpty && report.failedSources.isEmpty {
+            settings.recordCheck(for: exclusionKey(for: refreshedApp), at: checkedAt)
+        }
         refreshDiagnostics()
+    }
+
+    func scanMacOSSource(_ scope: MacOSScanScope) async {
+        guard !isScanning, !isWorking(.macOSSourceScan) else { return }
+        updateExecutionState.activeOperations.insert(.macOSSourceScan)
+        defer { updateExecutionState.activeOperations.remove(.macOSSourceScan) }
+        let key = scope == .updates ? "macos.updates" : "macos.installers"
+        let prefix = scope == .updates ? "Available updates:" : "Full installers:"
+        let fullRevision = scanState.latestFullRevision
+        let attempt = Date()
+        func recordFailure(_ message: String) {
+            settings.recordSourceAttempt(key, at: attempt, failure: message)
+            scanWarnings.removeAll { $0.source == .macOS && $0.message.hasPrefix(prefix) }
+            scanWarnings.append(ScanWarning(source: .macOS, message: "\(prefix) \(message)"))
+            if scope == .updates { scanState.macOSStatus = .failed }
+        }
+        do {
+            let report = try await dependencies.scanner.macOS(scope: scope)
+            guard scanState.latestFullRevision == fullRevision else { return }
+            let succeeded = scope == .updates ? report.updatesSucceeded : report.installersSucceeded
+            guard succeeded else {
+                recordFailure(report.warnings.isEmpty ? "The source check failed." : report.warnings.joined(separator: "\n"))
+                return
+            }
+            let installers = scope == .installers
+            macOSUpdates = macOSUpdates.filter { $0.isFullInstaller != installers }
+                + report.updates.filter { $0.isFullInstaller == installers && (settings.includePrereleaseUpdates || !$0.isBeta) }
+            settings.recordSourceAttempt(key, at: attempt)
+            scanWarnings.removeAll { $0.source == .macOS && $0.message.hasPrefix(prefix) }
+            if scope == .updates { scanState.macOSStatus = .succeeded }
+        } catch {
+            guard scanState.latestFullRevision == fullRevision else { return }
+            recordFailure(error.localizedDescription)
+        }
+    }
+
+    func scanHomebrewCatalog() async {
+        await mutationCoordinator.withAccess(to: [.packageEnvironment("homebrew")], otherwise: ()) {
+            guard !self.isScanning, !self.isWorking(.homebrewCatalogScan) else { return }
+            self.updateExecutionState.activeOperations.insert(.homebrewCatalogScan)
+            defer { self.updateExecutionState.activeOperations.remove(.homebrewCatalogScan) }
+            let fullRevision = self.scanState.latestFullRevision
+            let attempt = Date()
+            do {
+                let catalog = try await self.dependencies.scanner.homebrewCatalog()
+                guard self.scanState.latestFullRevision == fullRevision else { return }
+                self.adoptableApps = HomebrewClient.adoptableApps(from: self.apps, catalog: catalog, excluding: self.homebrewPackages)
+                self.scanWarnings.removeAll { $0.source == .homebrew && $0.message.hasPrefix("Cask catalog:") }
+                self.settings.recordSourceAttempt("homebrew.catalog", at: attempt)
+            } catch {
+                guard self.scanState.latestFullRevision == fullRevision else { return }
+                self.settings.recordSourceAttempt("homebrew.catalog", at: attempt, failure: error.localizedDescription)
+                self.scanWarnings.removeAll { $0.source == .homebrew && $0.message.hasPrefix("Cask catalog:") }
+                self.scanWarnings.append(ScanWarning(source: .homebrew, message: "Cask catalog: \(error.localizedDescription)"))
+                self.errorMessage = "Could not refresh Homebrew catalogue: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    func scanHomebrewInventory() async {
+        await mutationCoordinator.withAccess(to: [.packageEnvironment("homebrew")], otherwise: ()) {
+            guard !self.isScanning, !self.isWorking(.homebrewInventoryScan) else { return }
+            self.updateExecutionState.activeOperations.insert(.homebrewInventoryScan)
+            defer { self.updateExecutionState.activeOperations.remove(.homebrewInventoryScan) }
+            let fullRevision = self.scanState.latestFullRevision
+            let attempt = Date()
+            do {
+                let packages = try await self.dependencies.scanner.homebrewInventory(includePrereleases: self.settings.includePrereleaseUpdates)
+                guard self.scanState.latestFullRevision == fullRevision else { return }
+                self.reconcileHomebrewInventory(packages)
+                self.scanWarnings.removeAll { $0.source == .homebrew && $0.message.hasPrefix("Installed packages:") }
+                self.settings.recordSourceAttempt("homebrew.inventory", at: attempt)
+            } catch {
+                guard self.scanState.latestFullRevision == fullRevision else { return }
+                self.settings.recordSourceAttempt("homebrew.inventory", at: attempt, failure: error.localizedDescription)
+                self.scanWarnings.removeAll { $0.source == .homebrew && $0.message.hasPrefix("Installed packages:") }
+                self.scanWarnings.append(ScanWarning(source: .homebrew, message: "Installed packages: \(error.localizedDescription)"))
+                self.errorMessage = "Could not refresh Homebrew inventory: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func reconcileHomebrewInventory(_ packages: [HomebrewPackage]) {
+        homebrewPackages = packages.map { package in
+            guard package.kind == .cask, let app = matchingApp(for: package) else { return package }
+            return package.reconciled(with: app)
+        }
+        var byApp: [String: AvailableUpdate] = [:]
+        for update in updates {
+            let retained = update.candidates.filter { $0.source != .homebrew }
+            if !retained.isEmpty { byApp[update.app.id] = AvailableUpdate(app: update.app, candidates: retained) }
+        }
+        for package in homebrewPackages where package.kind == .cask && package.isOutdated {
+            guard let app = matchingApp(for: package), UpdateScanner.allowsHomebrewCandidate(for: app) else { continue }
+            let offer = AvailableUpdate(app: app, availableVersion: package.currentVersion, source: .homebrew,
+                releaseNotes: nil, actionURL: nil, homebrewToken: package.token)
+            let candidates = (byApp[app.id]?.candidates ?? []) + offer.candidates
+            byApp[app.id] = AvailableUpdate(app: app, candidates: candidates)
+        }
+        updates = byApp.values.sorted { $0.app.name.localizedStandardCompare($1.app.name) == .orderedAscending }
+        let installedTokens = Set(homebrewPackages.filter { $0.kind == .cask }.map(\.token))
+        adoptableApps.removeAll { installedTokens.contains($0.caskToken) }
     }
 
     func refresh(_ package: HomebrewPackage) async {
@@ -535,6 +916,8 @@ final class UpkeepStore: ObservableObject {
         guard !isWorking(operationID) else { return }
         updateExecutionState.activeOperations.insert(operationID)
         defer { updateExecutionState.activeOperations.remove(operationID) }
+        let key = "homebrew|\(package.kind.rawValue)|\(package.token)"
+        let attemptedAt = Date()
         do {
             guard let refreshed = try await dependencies.homebrew.package(
                 token: package.token,
@@ -542,16 +925,17 @@ final class UpkeepStore: ObservableObject {
                 includePrereleases: settings.includePrereleaseUpdates
             ) else {
                 errorMessage = "Homebrew no longer reports \(package.displayName) as installed."
+                settings.recordSourceAttempt(key, at: attemptedAt, failure: errorMessage)
                 return
             }
+            settings.recordSourceAttempt(key, at: attemptedAt)
             replaceHomebrewPackage(refreshed)
             if let app = homebrewPackageApp(for: refreshed) { await refresh(app) }
-            lastChecked = Date()
-            settings.lastCompletedScanDate = lastChecked
-            settings.recordCheck(for: exclusionKey(for: refreshed), at: lastChecked ?? Date())
+            settings.recordCheck(for: exclusionKey(for: refreshed), at: Date())
             refreshDiagnostics()
         } catch {
             errorMessage = "Could not refresh \(package.displayName): \(error.localizedDescription)"
+            settings.recordSourceAttempt(key, at: attemptedAt, failure: errorMessage)
         }
     }
 
@@ -560,14 +944,18 @@ final class UpkeepStore: ObservableObject {
         guard !isWorking(operationID) else { return }
         updateExecutionState.activeOperations.insert(operationID)
         defer { updateExecutionState.activeOperations.remove(operationID) }
+        let sourceKey = "developer.versions|\(package.id)"
+        let attemptedAt = Date()
         let versions = await dependencies.developerPackages.availableVersions(
             for: package,
             includePrereleases: settings.includePrereleaseUpdates
         )
         guard let latest = versions.first else {
             errorMessage = "No published versions were returned for \(package.name)."
+            settings.recordSourceAttempt(sourceKey, at: attemptedAt, failure: errorMessage)
             return
         }
+        settings.recordSourceAttempt(sourceKey, at: attemptedAt)
         let refreshed = package.replacingLatestVersion(with: latest)
         if let index = developerPackages.firstIndex(where: { $0.id == package.id }) {
             developerPackages[index] = refreshed
@@ -577,15 +965,14 @@ final class UpkeepStore: ObservableObject {
             availableDeveloperVersions = versions
             selectedDeveloperVersion = latest
         }
-        lastChecked = Date()
-        settings.lastCompletedScanDate = lastChecked
-        settings.recordCheck(for: exclusionKey(for: refreshed), at: lastChecked ?? Date())
+        settings.recordCheck(for: exclusionKey(for: refreshed), at: Date())
         refreshDiagnostics()
     }
 
     func start() async {
         guard !didStart else { return }
         didStart = true
+        await dependencies.history.maintainStorage()
         refreshRunningApplications()
         observeRunningApplications()
         if settings.checkOnLaunch { await scan() }
@@ -593,22 +980,13 @@ final class UpkeepStore: ObservableObject {
     }
 
     func scheduleNextRefresh() {
-        periodicTask?.cancel()
         let nextDate = settings.refreshInterval.nextDate(
             after: lastChecked ?? startedAt,
             dailyTimeMinutes: settings.dailyRefreshTimeMinutes
         )
         nextScheduledCheck = nextDate
-        guard let nextDate else {
-            periodicTask = nil
-            return
-        }
-        periodicTask = Task { [weak self] in
-            let delay = max(0, nextDate.timeIntervalSinceNow)
-            do { try await Task.sleep(for: .seconds(delay)) }
-            catch { return }
-            guard !Task.isCancelled, let self else { return }
-            await self.scan()
+        refreshScheduler.schedule(at: nextDate) { [weak self] in
+            await self?.scan()
         }
     }
 
@@ -618,12 +996,22 @@ final class UpkeepStore: ObservableObject {
         updateExecutionState.activeOperations.insert(identifier)
         defer { updateExecutionState.activeOperations.remove(identifier) }
         let managers = manager.map { Set([$0]) } ?? settings.enabledDeveloperManagers
+        scanState.revision &+= 1
+        let revision = scanState.revision
+        for checked in managers { scanState.sourceRevisions["developer|\(checked.rawValue)"] = revision }
         let report = await dependencies.developerPackages.scan(
             enabledManagers: managers,
             includePrereleases: settings.includePrereleaseUpdates
         )
-        let warnings = report.warnings.map { ScanWarning(source: .developerPackages, message: $0) }
-        scanWarnings = (scanWarnings.filter { $0.source != .developerPackages } + warnings)
+        guard scanState.latestFullRevision <= revision else { return }
+        settings.recordSourceAttempts(Dictionary(uniqueKeysWithValues: managers.map { manager in
+            let failed = report.hasFailures(for: manager)
+            return ("developer|\(manager.rawValue)", failed ? "Some packages in this environment could not be verified." : "")
+        }), at: Date())
+        scanWarnings = reconcileSourceWarnings(
+            existing: scanWarnings, fresh: report.scanWarnings, source: .developerPackages,
+            checkedName: manager?.rawValue
+        )
         if let manager {
             guard !report.failedManagers.contains(manager) else { return }
             developerPackages.removeAll {
@@ -635,16 +1023,14 @@ final class UpkeepStore: ObservableObject {
             if !installedDeveloperManagers.contains(manager), report.installedManagers.contains(manager) { installedDeveloperManagers.append(manager) }
             versionCache = versionCache.filter { !$0.key.hasPrefix("\(manager.rawValue):") }
         } else {
-            developerPackages = mergeDeveloperPackageResults(
+            developerPackages = ScanResultReconciliation.developerPackages(
                 fresh: report.packages, previous: developerPackages,
                 failedManagers: report.failedManagers,
                 failedExecutablePaths: report.failedExecutablePaths
-            ).sorted(by: developerPackageOrder)
+            ).sorted(by: ScanResultReconciliation.developerOrder)
             installedDeveloperManagers = report.installedManagers
             versionCache.removeAll()
         }
-        lastChecked = Date()
-        settings.lastCompletedScanDate = lastChecked
         if let package = selectedDeveloperPackage { await loadAvailableVersions(for: package, force: true) }
     }
 
@@ -751,20 +1137,16 @@ final class UpkeepStore: ObservableObject {
                 setUpdatePhase(.updating, for: operationID)
                 let succeeded = await execute(
                     label: update.app.name,
+                    activity: operationID,
                     metadata: updateDiagnosticMetadata(update)
                 ) { try await self.dependencies.homebrew.upgradeCask(token: token) }
-                if succeeded {
-                    var historyError: Error?
-                    do { try await dependencies.history.add(record) }
-                    catch { historyError = error }
-                    setUpdatePhase(.refreshing, for: operationID)
-                    await scan()
-                    if let historyError { recordHistoryFailure(item: update.app.name, error: historyError) }
-                    reconcileHomebrewUpdate(token: token, name: update.app.name)
-                } else {
-                    await dependencies.history.discardBackup(for: record)
-                }
-                return succeeded
+                let package = HomebrewPackage(token: token, displayName: update.app.name,
+                    description: nil, homepage: nil, license: nil,
+                    installedVersion: update.app.installedVersion, currentVersion: update.availableVersion,
+                    kind: .cask, isOutdated: true, isDependency: false, dependencies: [])
+                return await verifyCaskMutation(package, original: update.app, record: record,
+                    commandSucceeded: succeeded, commandError: errorMessage, operationID: operationID)
+
             }
         } else if update.canInstallDirectly {
             let operationID = OperationID.applicationUpdate(update.id)
@@ -786,25 +1168,16 @@ final class UpkeepStore: ObservableObject {
             }
             let succeeded = await execute(
                 label: update.app.name,
+                activity: operationID,
                 metadata: updateDiagnosticMetadata(update)
             ) {
                 try await self.dependencies.directAppInstaller.install(update: update) { phase in
                     await self.setUpdatePhase(phase, for: operationID)
                 }
             }
-            if succeeded {
-                var historyError: Error?
-                do { try await dependencies.history.add(record) }
-                catch { historyError = error }
-                setUpdatePhase(.refreshing, for: operationID)
-                await scan()
-                if let historyError {
-                    recordHistoryFailure(item: update.app.name, error: historyError)
-                }
-            } else {
-                await dependencies.history.discardBackup(for: record)
-            }
-            return succeeded
+            return await verifyDirectInstallation(update, record: record, commandSucceeded: succeeded,
+                commandError: errorMessage, operationID: operationID)
+
         } else if let actionURL = update.externalActionURL {
             let operationID = OperationID.applicationUpdate(update.id)
             beginUpdateActivity(operationID, targets: mutationTargets(for: .application(update)), phase: .opening)
@@ -851,25 +1224,176 @@ final class UpkeepStore: ObservableObject {
         let record = await recoveryRecord(for: package)
         if package.kind == .cask, matchingApp(for: package) != nil, record == nil { return false }
         setUpdatePhase(.updating, for: operationID)
-        let succeeded = await execute(label: package.displayName, metadata: [
+        let succeeded = await execute(label: package.displayName, activity: operationID, metadata: [
             "Source": "Homebrew",
             "From": package.installedVersion,
             "To": package.currentVersion
         ]) { try await self.dependencies.homebrew.upgrade(package) }
-        if succeeded {
-            var historyError: Error?
-            if let record {
-                do { try await dependencies.history.add(record) }
-                catch { historyError = error }
-            }
-            setUpdatePhase(.refreshing, for: operationID)
-            await scan()
-            if let historyError { recordHistoryFailure(item: package.displayName, error: historyError) }
-            reconcileHomebrewUpdate(token: package.token, name: package.displayName)
-        } else if let record {
-            await dependencies.history.discardBackup(for: record)
+        if package.kind == .formula {
+            return await verifyFormulaMutation(package, record: record, commandSucceeded: succeeded,
+                commandError: errorMessage, operationID: operationID)
         }
-        return succeeded
+        guard let original = matchingApp(for: package) else {
+            return await verifyFormulaMutation(package, record: record, commandSucceeded: succeeded,
+                commandError: errorMessage, operationID: operationID)
+        }
+        return await verifyCaskMutation(package, original: original, record: record,
+            commandSucceeded: succeeded, commandError: errorMessage, operationID: operationID)
+    }
+
+    private func claimVerifiedAppState(_ app: InstalledApp) {
+        scanState.revision &+= 1
+        for source in UpdateSource.allCases {
+            scanState.sourceRevisions["app|\(app.id)|\(source.rawValue)"] = scanState.revision
+        }
+    }
+
+    private func verifyDirectInstallation(_ update: AvailableUpdate, record: UpdateRecord,
+                                          commandSucceeded: Bool, commandError: String?,
+                                          operationID: OperationID) async -> Bool {
+        setUpdatePhase(.refreshing, for: operationID)
+        let installed = await dependencies.applicationDiscovery.discover(at: update.app.url)
+        let verification = AppInstallationVerification.evaluate(original: update.app, observed: installed,
+            targetVersion: update.availableVersion, targetBuild: update.primaryCandidate.availableBuildVersion)
+        recordOperationVerification(verification == .unverified ? .unverified : verification == .unchanged ? .unchanged : .verified,
+                                    for: operationID, commandError: commandError,
+                                    verification: verification == .unverified ? nil : installed.map { app in
+                                        OperationVerificationDetail(requested: update.availableVersion + (update.primaryCandidate.availableBuildVersion.map { " (build \($0))" } ?? ""),
+                                            observed: app.installedVersion + (app.buildVersion.map { " (build \($0))" } ?? ""),
+                                            targetReached: AppInstallationVerification.targetReached(observed: app,
+                                                version: update.availableVersion, build: update.primaryCandidate.availableBuildVersion))
+                                    })
+        guard verification != .unverified, let installed else {
+            errorMessage = commandError ?? "The installed bundle for \(update.app.name) could not be verified. Its recovery backup was retained."
+            return false
+        }
+        claimVerifiedAppState(installed)
+        if let index = apps.firstIndex(where: { $0.id == update.app.id }) { apps[index] = installed }
+        guard verification != .unchanged else {
+            await dependencies.history.discardBackup(for: record)
+            errorMessage = commandError ?? "The installer finished, but \(update.app.name) is still installed at \(installed.installedVersion)."
+            return false
+        }
+        let warning = await saveUpdateHistory(UpdateRecord(id: record.id, date: record.date, name: record.name,
+            fromVersion: record.fromVersion, toVersion: installed.installedVersion, kind: record.kind,
+            originalAppPath: record.originalAppPath, backupPath: record.backupPath, recoveryNote: record.recoveryNote,
+            fromBuildVersion: update.app.buildVersion, toBuildVersion: installed.buildVersion))
+        updates = updates.compactMap { candidate in
+            guard candidate.app.id == update.app.id else { return candidate }
+            let remaining = candidate.candidates.filter { $0.isNewer(than: installed) }
+            return remaining.isEmpty ? nil : AvailableUpdate(app: installed, candidates: remaining)
+        }
+        settings.recordCheck(for: exclusionKey(for: installed), at: Date())
+        errorMessage = commandError.map { "Installed \(installed.installedVersion), but the installer reported: \($0)" } ?? warning
+        if verification == .changed(targetReached: false), errorMessage == nil {
+            errorMessage = "Installed \(installed.installedVersion), but the requested version or build for \(update.app.name) was not reached."
+        }
+        return commandSucceeded && verification == .changed(targetReached: true)
+    }
+
+    private func verifyCaskMutation(_ package: HomebrewPackage, original: InstalledApp,
+                                    record: UpdateRecord?, commandSucceeded: Bool,
+                                    commandError: String?, operationID: OperationID) async -> Bool {
+        setUpdatePhase(.refreshing, for: operationID)
+        let key = "homebrew|Cask|\(package.token)"
+        let target = package.currentVersion.split(separator: ",", maxSplits: 1).map(String.init)
+        let installedBundle = await dependencies.applicationDiscovery.discover(at: original.url)
+        let verification = AppInstallationVerification.evaluate(original: original, observed: installedBundle,
+            targetVersion: target.first ?? package.currentVersion, targetBuild: target.count == 2 ? target[1] : nil)
+        recordOperationVerification(verification == .unverified ? .unverified : verification == .unchanged ? .unchanged : .verified,
+                                    for: operationID, commandError: commandError,
+                                    verification: verification == .unverified ? nil : installedBundle.map { app in
+                                        OperationVerificationDetail(requested: package.currentVersion,
+                                            observed: app.installedVersion + (app.buildVersion.map { " (build \($0))" } ?? ""),
+                                            targetReached: AppInstallationVerification.targetReached(observed: app,
+                                                version: target.first ?? package.currentVersion, build: target.count == 2 ? target[1] : nil))
+                                    })
+        guard verification != .unverified, let installed = installedBundle else {
+            let message = "The installed bundle for \(package.displayName) could not be verified. Its recovery backup was retained."
+            settings.recordSourceAttempt(key, at: Date(), failure: message)
+            errorMessage = commandError ?? message
+            return false
+        }
+        claimVerifiedAppState(installed)
+        if let index = apps.firstIndex(where: { $0.id == original.id }) { apps[index] = installed }
+        let versionComparison = VersionComparator.compare(installed.installedVersion, target.first ?? package.currentVersion)
+        let buildPending = versionComparison == .orderedSame && target.count == 2
+            && VersionComparator.isNewer(target[1], than: installed.buildVersion ?? "")
+        let observed = HomebrewPackage(token: package.token, displayName: package.displayName,
+            description: package.description, homepage: package.homepage, license: package.license,
+            installedVersion: installed.installedVersion, currentVersion: package.currentVersion, kind: .cask,
+            isOutdated: versionComparison == .orderedAscending || buildPending,
+            isDependency: package.isDependency, dependencies: package.dependencies)
+        replaceHomebrewPackage(observed)
+        settings.recordSourceAttempt(key, at: Date())
+        settings.recordCheck(for: exclusionKey(for: observed), at: Date())
+        guard verification != .unchanged else {
+            if let record { await dependencies.history.discardBackup(for: record) }
+            errorMessage = commandError ?? "Homebrew finished, but \(package.displayName) is still installed at \(installed.installedVersion)."
+            return false
+        }
+        var historyWarning: String?
+        if let record {
+            historyWarning = await saveUpdateHistory(UpdateRecord(id: record.id, date: record.date, name: record.name,
+                fromVersion: record.fromVersion, toVersion: installed.installedVersion, kind: record.kind,
+                originalAppPath: record.originalAppPath, backupPath: record.backupPath, recoveryNote: record.recoveryNote,
+                fromBuildVersion: original.buildVersion, toBuildVersion: installed.buildVersion))
+        }
+        updates = updates.compactMap { update in
+            guard update.app.id == original.id else { return update }
+            let candidates = update.candidates.filter { $0.isNewer(than: installed) }
+            return candidates.isEmpty ? nil : AvailableUpdate(app: installed, candidates: candidates)
+        }
+        errorMessage = commandError.map { "Installed \(installed.installedVersion), but Homebrew reported: \($0)" } ?? historyWarning
+        if errorMessage == nil && observed.isOutdated {
+            errorMessage = "Installed \(installed.installedVersion), but \(package.currentVersion) is still available for \(package.displayName)."
+        }
+        return commandSucceeded && errorMessage == nil && !observed.isOutdated
+    }
+
+    private func verifyFormulaMutation(
+        _ package: HomebrewPackage, record: UpdateRecord?, commandSucceeded: Bool,
+        commandError: String?, operationID: OperationID
+    ) async -> Bool {
+        setUpdatePhase(.refreshing, for: operationID)
+        recordOperationVerification(.unverified, for: operationID, commandError: commandError)
+        let attempt = Date()
+        let sourceKey = "homebrew|\(package.kind.rawValue)|\(package.token)"
+        do {
+            guard let observed = try await dependencies.homebrew.package(token: package.token,
+                kind: package.kind, includePrereleases: settings.includePrereleaseUpdates) else {
+                settings.recordSourceAttempt(sourceKey, at: attempt, failure: "Package is no longer reported as installed.")
+                errorMessage = "Homebrew finished, but \(package.displayName) is no longer reported as installed. Check Homebrew before retrying."
+                return false
+            }
+            replaceHomebrewPackage(observed)
+            settings.recordSourceAttempt(sourceKey, at: attempt, failure: nil)
+            settings.recordCheck(for: exclusionKey(for: observed), at: attempt)
+            let changed = observed.installedVersion != package.installedVersion
+            recordOperationVerification(changed ? .verified : .unchanged, for: operationID, commandError: commandError,
+                verification: OperationVerificationDetail(requested: package.currentVersion, observed: observed.installedVersion,
+                    targetReached: !observed.isOutdated))
+            if changed, let record {
+                let actual = UpdateRecord(id: record.id, date: record.date, name: record.name,
+                    fromVersion: record.fromVersion, toVersion: observed.installedVersion, kind: record.kind,
+                    originalAppPath: record.originalAppPath, backupPath: record.backupPath,
+                    recoveryNote: record.recoveryNote)
+                let warning = await saveUpdateHistory(actual)
+                if let warning { errorMessage = warning }
+            }
+            updateHistory = await dependencies.history.records()
+            if let commandError, !commandSucceeded { errorMessage = commandError }
+            else if !changed {
+                errorMessage = "Homebrew completed the command, but \(package.displayName) is still installed at \(observed.installedVersion)."
+            } else if observed.isOutdated {
+                errorMessage = "Homebrew changed \(package.displayName) to \(observed.installedVersion), but \(observed.currentVersion) is still available."
+            }
+            return changed && !observed.isOutdated && errorMessage == nil
+        } catch {
+            settings.recordSourceAttempt(sourceKey, at: attempt, failure: error.localizedDescription)
+            errorMessage = commandError ?? "Could not refresh \(package.displayName): \(error.localizedDescription)"
+            return false
+        }
     }
 
     func updateAllPackages() async {
@@ -907,32 +1431,14 @@ final class UpkeepStore: ObservableObject {
         var failureMessage: String?
         let attempted = homebrewPackages.filter { $0.isOutdated && !isExcluded($0) }
         for package in attempted {
-            let record = await recoveryRecord(for: package)
-            if package.kind == .cask, matchingApp(for: package) != nil, record == nil {
-                failureMessage = errorMessage ?? "Could not create a rollback backup for \(package.displayName)."
+            guard await updatePackageUnlocked(package) else {
+                failureMessage = errorMessage ?? "Could not verify \(package.displayName)."
                 break
-            }
-            do {
-                try await dependencies.homebrew.upgrade(package)
-            } catch {
-                if let record { await dependencies.history.discardBackup(for: record) }
-                failureMessage = error.localizedDescription
-                break
-            }
-            if let record {
-                do { try await dependencies.history.add(record) }
-                catch {
-                    failureMessage = "\(package.displayName) was updated, but its rollback history could not be saved: \(error.localizedDescription)"
-                    recordHistoryFailure(item: package.displayName, error: error)
-                    break
-                }
             }
         }
-        await scan()
         if let failureMessage {
             errorMessage = failureMessage
-        } else if scanWarnings.contains(where: { $0.source == .homebrew }) {
-            errorMessage = "Homebrew finished, but Upkeep could not verify the result because Homebrew data did not refresh completely."
+
         } else {
             let remaining = attempted.filter { attemptedPackage in
                 homebrewPackages.contains { $0.token == attemptedPackage.token && $0.kind == attemptedPackage.kind && $0.isOutdated }
@@ -1014,16 +1520,36 @@ final class UpkeepStore: ObservableObject {
         defer { endUpdateActivity(operationID) }
 
         setUpdatePhase(.adopting, for: operationID)
-        let succeeded = await execute(label: item.app.name, metadata: [
+        let succeeded = await execute(label: item.app.name, activity: operationID, metadata: [
             "Source": "Homebrew adoption",
             "Installed": item.app.installedVersion,
             "Catalog": item.caskVersion
         ]) { try await self.dependencies.homebrew.adopt(item) }
-        if succeeded {
-            setUpdatePhase(.refreshing, for: operationID)
-            await scan()
+        let commandError = errorMessage
+        recordOperationVerification(.unverified, for: operationID, commandError: commandError)
+        setUpdatePhase(.refreshing, for: operationID)
+        let key = "homebrew|Cask|\(item.caskToken)"
+        do {
+            guard let observed = try await dependencies.homebrew.package(token: item.caskToken,
+                kind: .cask, includePrereleases: settings.includePrereleaseUpdates) else {
+                let message = "Homebrew adoption could not be verified for \(item.app.name). Check Homebrew before retrying."
+                settings.recordSourceAttempt(key, at: Date(), failure: message)
+                errorMessage = commandError ?? message
+                return false
+            }
+            replaceHomebrewPackage(observed)
+            adoptableApps.removeAll { $0.id == item.id }
+            recordOperationVerification(.registered, for: operationID, commandError: commandError)
+            settings.recordSourceAttempt(key, at: Date())
+            settings.recordCheck(for: exclusionKey(for: observed), at: Date())
+            errorMessage = commandError.map { "Homebrew registered \(item.app.name), but reported: \($0)" }
+            return succeeded
+        } catch {
+            let message = "Homebrew adoption could not be verified for \(item.app.name): \(error.localizedDescription)"
+            settings.recordSourceAttempt(key, at: Date(), failure: message)
+            errorMessage = commandError ?? message
+            return false
         }
-        return succeeded
     }
 
     func updateAdoptableApp(_ item: AdoptableApp) async {
@@ -1063,23 +1589,19 @@ final class UpkeepStore: ObservableObject {
             return false
         }
         setUpdatePhase(.updating, for: operationID)
-        let succeeded = await execute(label: item.app.name, metadata: [
+        let succeeded = await execute(label: item.app.name, activity: operationID, metadata: [
             "Source": "Homebrew adoption",
             "From": item.app.installedVersion,
             "To": item.caskVersion
         ]) { try await self.dependencies.homebrew.installOrReplace(item) }
-        if succeeded {
-            var historyError: Error?
-            do { try await dependencies.history.add(record) }
-            catch { historyError = error }
-            setUpdatePhase(.refreshing, for: operationID)
-            await scan()
-            if let historyError { recordHistoryFailure(item: item.app.name, error: historyError) }
-            reconcileHomebrewUpdate(token: item.caskToken, name: item.app.name)
-        } else {
-            await dependencies.history.discardBackup(for: record)
-        }
-        return succeeded
+        let package = HomebrewPackage(token: item.caskToken, displayName: item.app.name,
+            description: nil, homepage: nil, license: nil,
+            installedVersion: item.app.installedVersion, currentVersion: item.caskVersion,
+            kind: .cask, isOutdated: true, isDependency: false, dependencies: [])
+        let verified = await verifyCaskMutation(package, original: item.app, record: record,
+            commandSucceeded: succeeded, commandError: errorMessage, operationID: operationID)
+        if verified { adoptableApps.removeAll { $0.id == item.id } }
+        return verified
     }
 
     func isRunning(_ app: InstalledApp) -> Bool {
@@ -1192,49 +1714,81 @@ final class UpkeepStore: ObservableObject {
     }
 
     func installDeveloperPackage(_ package: DeveloperPackage, version: String) async {
-        await mutationCoordinator.withAccess(to: mutationTargets(for: .developer(package)), otherwise: ()) {
+        _ = await mutationCoordinator.withAccess(to: mutationTargets(for: .developer(package)), otherwise: false) {
             await installDeveloperPackageUnlocked(package, version: version)
         }
     }
 
-    private func installDeveloperPackageUnlocked(_ package: DeveloperPackage, version: String) async {
+    private func installDeveloperPackageUnlocked(_ package: DeveloperPackage, version: String) async -> Bool {
         guard package.canUpdateAutomatically else {
             if let url = package.manager.homepage { _ = dependencies.externalOpener.open(url) }
             else { errorMessage = "\(package.name) must be updated with \(package.manager.rawValue)." }
-            return
+            return false
         }
         let selectedVersion = version.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !selectedVersion.isEmpty else {
             errorMessage = "Enter a version to install."
-            return
+            return false
         }
         let operationID = OperationID.developerPackage(package.id)
-        guard !isWorking(operationID) else { return }
+        guard !isWorking(operationID) else { return false }
         updateExecutionState.activeOperations.insert(operationID)
         defer { updateExecutionState.activeOperations.remove(operationID) }
         beginUpdateActivity(operationID, targets: mutationTargets(for: .developer(package)), phase: .installing)
         defer { endUpdateActivity(operationID) }
 
         setUpdatePhase(.installing, for: operationID)
-        let succeeded = await execute(label: package.name, metadata: [
+        let succeeded = await execute(label: package.name, activity: operationID, metadata: [
             "Source": package.manager.rawValue,
             "From": package.currentVersion,
             "To": selectedVersion
         ]) {
             try await self.dependencies.developerPackages.install(package, version: selectedVersion)
         }
-        if succeeded {
-            let record = UpdateRecord(
-                id: UUID(), date: Date(), name: package.name,
-                fromVersion: package.currentVersion, toVersion: selectedVersion,
-                kind: .developer, originalAppPath: nil, backupPath: nil,
-                recoveryNote: "Package-manager updates do not have a universal rollback mechanism. Reinstall the previous version with \(package.manager.rawValue) if needed."
-            )
-            let historyWarning = await saveUpdateHistory(record)
-            setUpdatePhase(.refreshing, for: operationID)
-            await scan()
-            if let historyWarning { errorMessage = historyWarning }
+        let commandError = errorMessage
+        recordOperationVerification(.unverified, for: operationID, commandError: commandError)
+        setUpdatePhase(.refreshing, for: operationID)
+        let report = await dependencies.developerPackages.scan(enabledManagers: [package.manager],
+            includePrereleases: settings.includePrereleaseUpdates)
+        scanState.revision &+= 1
+        scanState.sourceRevisions["developer|\(package.manager.rawValue)"] = scanState.revision
+        let targetFailed = report.failedManagers.contains(package.manager)
+            || report.failedExecutablePaths.contains(package.executablePath)
+        settings.recordSourceAttempt("developer|\(package.manager.rawValue)", at: Date(),
+            failure: report.failedManagers.isEmpty && report.failedExecutablePaths.isEmpty ? nil : "Some packages could not be verified.")
+        let previous = developerPackages.filter { $0.manager == package.manager }
+        developerPackages = developerPackages.filter { $0.manager != package.manager }
+            + ScanResultReconciliation.developerPackages(fresh: report.packages, previous: previous,
+                failedManagers: report.failedManagers, failedExecutablePaths: report.failedExecutablePaths)
+        developerPackages.sort(by: ScanResultReconciliation.developerOrder)
+        guard !targetFailed, let observed = report.packages.first(where: { $0.id == package.id }) else {
+            errorMessage = commandError ?? "The command finished, but \(package.name)'s installed version could not be verified. Refresh its manager before retrying."
+            return false
         }
+        recordOperationVerification(observed.currentVersion != package.currentVersion ? .verified : .unchanged,
+                                    for: operationID, commandError: commandError,
+                                    verification: OperationVerificationDetail(requested: selectedVersion, observed: observed.currentVersion,
+                                        targetReached: VersionComparator.compare(observed.currentVersion, selectedVersion) == .orderedSame))
+        if observed.currentVersion != package.currentVersion {
+            let record = UpdateRecord(id: UUID(), date: Date(), name: package.name,
+                fromVersion: package.currentVersion, toVersion: observed.currentVersion,
+                kind: .developer, originalAppPath: nil, backupPath: nil,
+                recoveryNote: "Package-manager updates do not have a universal rollback mechanism. Reinstall the previous version with \(package.manager.rawValue) if needed.")
+            let historyWarning = await saveUpdateHistory(record)
+            errorMessage = commandError ?? historyWarning
+        }
+        if !succeeded {
+            if observed.currentVersion != package.currentVersion, let commandError {
+                errorMessage = "Installed \(observed.currentVersion) for \(package.name), but the command reported: \(commandError)"
+            } else { errorMessage = commandError }
+        }
+        else if observed.currentVersion == package.currentVersion {
+            errorMessage = "The command finished, but \(package.name) is still installed at \(observed.currentVersion)."
+        } else if VersionComparator.compare(observed.currentVersion, selectedVersion) != .orderedSame {
+            errorMessage = "Installed \(observed.currentVersion) for \(package.name); the requested version was \(selectedVersion)."
+        }
+        settings.recordCheck(for: exclusionKey(for: observed), at: Date())
+        return succeeded && errorMessage == nil
     }
 
     func uninstallDeveloperPackage(_ package: DeveloperPackage) async {
@@ -1249,7 +1803,7 @@ final class UpkeepStore: ObservableObject {
         updateExecutionState.activeOperations.insert(operationID)
         defer { updateExecutionState.activeOperations.remove(operationID) }
 
-        let succeeded = await execute(label: package.name, metadata: [
+        let succeeded = await execute(label: package.name, activity: operationID, metadata: [
             "Source": package.manager.rawValue,
             "Version": package.currentVersion,
             "Action": "Uninstall"
@@ -1262,58 +1816,107 @@ final class UpkeepStore: ObservableObject {
         }
     }
 
-    func scanLocalModels() async {
-        let identifier = OperationID.localModelScan
-        guard !isWorking(identifier) else { return }
+    @discardableResult
+    func scanLocalModels(runtime: LocalModelRuntime? = nil) async -> LocalModelClient.Report? {
+        let targets = Set((runtime.map { [$0] } ?? LocalModelRuntime.allCases).map(MutationTarget.modelRuntime))
+        return await mutationCoordinator.withAccess(to: targets, otherwise: nil) {
+            await scanLocalModelsUnlocked(runtime: runtime)
+        }
+    }
+
+    private func scanLocalModelsUnlocked(runtime: LocalModelRuntime?) async -> LocalModelClient.Report? {
+        let identifier = runtime.map(OperationID.localModelRuntimeScan) ?? .localModelScan
+        guard !isWorking(identifier) else { return nil }
         updateExecutionState.activeOperations.insert(identifier)
         defer { updateExecutionState.activeOperations.remove(identifier) }
-        let report = await dependencies.localModels.scan()
+        scanState.revision &+= 1
+        let revision = scanState.revision
+        let checkedRuntimes = runtime.map { [$0] } ?? LocalModelRuntime.allCases
+        for checked in checkedRuntimes { scanState.sourceRevisions["model.runtime|\(checked.rawValue)"] = revision }
+        for model in localModels where checkedRuntimes.contains(model.runtime) { scanState.sourceRevisions["model|\(model.id)"] = revision }
+        let report: LocalModelClient.Report
+        if let runtime { report = await dependencies.localModels.scan(runtime: runtime) }
+        else { report = await dependencies.localModels.scan() }
+        guard scanState.latestFullRevision <= revision else { return nil }
+        for model in report.models { scanState.sourceRevisions["model|\(model.id)"] = revision }
+        var modelAttempts: [String: String] = [:]
+        for model in report.models + localModels.filter({
+            (runtime == nil || $0.runtime == runtime)
+                && (report.failedModelIDs.contains($0.id) || report.failedRuntimes.contains($0.runtime))
+        }) {
+            modelAttempts["model|\(model.id)"] = report.failedModelIDs.contains(model.id) || report.failedRuntimes.contains(model.runtime)
+                ? "The model source could not be verified." : ""
+        }
+        for checked in runtime.map({ [$0] }) ?? LocalModelRuntime.allCases {
+            modelAttempts["model.runtime|\(checked.rawValue)"] = report.failedRuntimes.contains(checked)
+                ? "This runtime could not be checked." : ""
+        }
+        settings.recordSourceAttempts(modelAttempts, at: Date())
         var merged = Dictionary(report.models.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        for previous in localModels where report.failedModelIDs.contains(previous.id) || report.failedRuntimes.contains(previous.runtime) {
+        for previous in localModels where (runtime != nil && previous.runtime != runtime)
+            || report.failedModelIDs.contains(previous.id) || report.failedRuntimes.contains(previous.runtime) {
             merged[previous.id] = previous
         }
-        localModels = merged.values.sorted(by: localModelOrder)
-        scanWarnings = scanWarnings.filter { $0.source != .localModels }
-            + report.warnings.map { ScanWarning(source: .localModels, message: $0) }
+        localModels = merged.values.sorted(by: ScanResultReconciliation.modelOrder)
+        scanWarnings = reconcileSourceWarnings(
+            existing: scanWarnings, fresh: report.scanWarnings, source: .localModels,
+            checkedName: runtime?.rawValue
+        )
         if selectedLocalModelID == nil || !localModels.contains(where: { $0.id == selectedLocalModelID }) {
             selectedLocalModelID = localModels.first?.id
         }
-        lastChecked = Date()
-        settings.lastCompletedScanDate = lastChecked
+        return report
     }
 
     func updateLocalModel(_ model: LocalLLMModel) async {
-        await mutationCoordinator.withAccess(to: mutationTargets(for: .model(model)), otherwise: ()) {
+        _ = await mutationCoordinator.withAccess(to: mutationTargets(for: .model(model)), otherwise: false) {
             await updateLocalModelUnlocked(model)
         }
     }
 
-    private func updateLocalModelUnlocked(_ model: LocalLLMModel) async {
+    private func updateLocalModelUnlocked(_ model: LocalLLMModel) async -> Bool {
         let operationID = OperationID.localModel(model.id)
-        guard !isWorking(operationID) else { return }
+        guard !isWorking(operationID) else { return false }
         updateExecutionState.activeOperations.insert(operationID)
         defer { updateExecutionState.activeOperations.remove(operationID) }
         beginUpdateActivity(operationID, targets: mutationTargets(for: .model(model)), phase: .updating)
         defer { endUpdateActivity(operationID) }
 
         setUpdatePhase(.updating, for: operationID)
-        let succeeded = await execute(label: model.name, metadata: [
+        let succeeded = await execute(label: model.name, activity: operationID, metadata: [
             "Source": model.runtime.rawValue,
             "From": model.installedRevision,
             "To": model.latestRevision
         ]) { try await self.dependencies.localModels.update(model) }
-        if succeeded {
-            let record = UpdateRecord(
-                id: UUID(), date: Date(), name: model.name,
-                fromVersion: model.installedRevision, toVersion: model.latestRevision,
-                kind: .model, originalAppPath: nil, backupPath: nil,
-                recoveryNote: "Model files are managed by \(model.runtime.rawValue). Download the earlier model revision again if rollback is required."
-            )
-            let historyWarning = await saveUpdateHistory(record)
-            setUpdatePhase(.refreshing, for: operationID)
-            await scanLocalModels()
-            if let historyWarning { errorMessage = historyWarning }
+        let commandError = errorMessage
+        recordOperationVerification(.unverified, for: operationID, commandError: commandError)
+        setUpdatePhase(.refreshing, for: operationID)
+        guard let report = await scanLocalModels(runtime: model.runtime),
+              !report.failedRuntimes.contains(model.runtime), !report.failedModelIDs.contains(model.id),
+              let observed = report.models.first(where: { $0.id == model.id }) else {
+            errorMessage = commandError ?? "The command finished, but the installed revision of \(model.name) could not be verified. Refresh its runtime before retrying."
+            return false
         }
+        recordOperationVerification(observed.installedRevision != model.installedRevision ? .verified : .unchanged,
+                                    for: operationID, commandError: commandError,
+                                    verification: OperationVerificationDetail(requested: model.latestRevision, observed: observed.installedRevision,
+                                        targetReached: observed.installedRevision == model.latestRevision))
+        guard observed.installedRevision != model.installedRevision else {
+            errorMessage = commandError ?? "The command finished, but \(model.name) is still installed at \(observed.installedRevision)."
+            return false
+        }
+        let record = UpdateRecord(
+            id: UUID(), date: Date(), name: model.name,
+            fromVersion: model.installedRevision, toVersion: observed.installedRevision,
+            kind: .model, originalAppPath: nil, backupPath: nil,
+            recoveryNote: "Model files are managed by \(model.runtime.rawValue). Download the earlier model revision again if rollback is required."
+        )
+        let historyWarning = await saveUpdateHistory(record)
+        errorMessage = commandError ?? historyWarning
+        if errorMessage == nil && observed.isOutdated {
+            errorMessage = "Installed \(observed.installedRevision), but \(observed.latestRevision) is still available for \(model.name)."
+        }
+        return succeeded && errorMessage == nil && !observed.isOutdated
     }
 
     func performBatchUpdates(_ items: [BatchUpdateItem]) async -> BatchUpdateSummary {
@@ -1377,14 +1980,8 @@ final class UpkeepStore: ObservableObject {
                 ]
             )
         }
-        batchUpdateProgress = BatchUpdateProgress(completed: items.count, total: items.count, itemName: "Refreshing updates")
+        batchUpdateProgress = BatchUpdateProgress(completed: items.count, total: items.count, itemName: "Finishing updates")
 
-        if results.contains(where: { $0.outcome == .updated }) {
-            for result in results where result.outcome == .updated {
-                setUpdatePhase(.refreshing, for: result.item.updateOperationID)
-            }
-            await scan()
-        }
         let updatedItemIDs = Set(results.compactMap { result in
             result.outcome == .updated ? result.item.id : nil
         })
@@ -1411,19 +2008,19 @@ final class UpkeepStore: ObservableObject {
                         let record = try await dependencies.history.prepareAppBackup(
                             app: update.app, toVersion: update.availableVersion, kind: .app
                         )
-                        do {
-                            try await dependencies.directAppInstaller.install(update: update) { phase in
+                        let succeeded = await execute(label: update.app.name, activity: progressID) {
+                            try await self.dependencies.directAppInstaller.install(update: update) { phase in
                                 await self.setUpdatePhase(phase, for: progressID)
                             }
-                        } catch {
-                            await dependencies.history.discardBackup(for: record)
-                            throw error
                         }
-                        let warning = await saveUpdateHistory(record)
-                        return BatchUpdateResult(
-                            item: item, outcome: .updated,
-                            detail: "Updated \(update.app.name) in Upkeep.", warning: warning
-                        )
+                        guard await verifyDirectInstallation(update, record: record, commandSucceeded: succeeded,
+                            commandError: errorMessage, operationID: progressID) else {
+                            throw BatchUpdateError.verification(errorMessage ?? "Could not verify \(update.app.name).")
+                        }
+                        let installedVersion = apps.first { $0.id == update.app.id }?.installedVersion ?? update.availableVersion
+                        return BatchUpdateResult(item: item, outcome: .updated,
+                            detail: "Updated to \(installedVersion).", warning: errorMessage)
+
                     }
                     let target = update.externalActionURL
                     guard let target, dependencies.externalOpener.open(target) else {
@@ -1441,81 +2038,64 @@ final class UpkeepStore: ObservableObject {
                 if let package = homebrewPackages.first(where: { $0.kind == .cask && $0.token == token }) {
                     historyWarning = try await upgradeBatchPackage(package, progressID: progressID)
                 } else if let adoptable = adoptableApps.first(where: { $0.caskToken == token && $0.app.id == update.app.id }) {
-                    let record = try await dependencies.history.prepareAppBackup(
-                        app: adoptable.app, toVersion: adoptable.caskVersion, kind: .homebrew
-                    )
-                    setUpdatePhase(.updating, for: progressID)
-                    do { try await dependencies.homebrew.installOrReplace(adoptable) }
-                    catch {
-                        await dependencies.history.discardBackup(for: record)
-                        throw error
+                    guard await updateAdoptableAppUnlocked(adoptable) else {
+                        throw BatchUpdateError.verification(errorMessage ?? "Could not verify \(update.app.name).")
                     }
-                    historyWarning = await saveUpdateHistory(record)
                 } else {
                     let record = try await dependencies.history.prepareAppBackup(
                         app: update.app, toVersion: update.availableVersion, kind: .homebrew
                     )
                     setUpdatePhase(.updating, for: progressID)
-                    do { try await dependencies.homebrew.upgradeCask(token: token) }
-                    catch {
-                        await dependencies.history.discardBackup(for: record)
-                        throw error
+                    let succeeded = await execute(label: update.app.name, activity: progressID) {
+                        try await self.dependencies.homebrew.upgradeCask(token: token)
                     }
-                    historyWarning = await saveUpdateHistory(record)
+                    let package = HomebrewPackage(token: token, displayName: update.app.name,
+                        description: nil, homepage: nil, license: nil,
+                        installedVersion: update.app.installedVersion, currentVersion: update.availableVersion,
+                        kind: .cask, isOutdated: true, isDependency: false, dependencies: [])
+                    guard await verifyCaskMutation(package, original: update.app, record: record,
+                        commandSucceeded: succeeded, commandError: errorMessage, operationID: progressID) else {
+                        throw BatchUpdateError.verification(errorMessage ?? "Could not verify \(update.app.name).")
+                    }
                 }
+
 
             case let .homebrew(package):
                 historyWarning = try await upgradeBatchPackage(package, progressID: progressID)
 
             case let .developer(package):
-                setUpdatePhase(.installing, for: progressID)
-                try await dependencies.developerPackages.install(package, version: package.latestVersion)
-                let record = UpdateRecord(
-                    id: UUID(), date: Date(), name: package.name,
-                    fromVersion: package.currentVersion, toVersion: package.latestVersion,
-                    kind: .developer, originalAppPath: nil, backupPath: nil,
-                    recoveryNote: "Package-manager updates do not have a universal rollback mechanism. Reinstall the previous version with \(package.manager.rawValue) if needed."
-                )
-                historyWarning = await saveUpdateHistory(record)
+                guard await installDeveloperPackageUnlocked(package, version: package.latestVersion) else {
+                    throw BatchUpdateError.verification(errorMessage ?? "Could not verify \(package.name).")
+                }
 
             case let .model(model):
-                setUpdatePhase(.updating, for: progressID)
-                try await dependencies.localModels.update(model)
-                let record = UpdateRecord(
-                    id: UUID(), date: Date(), name: model.name,
-                    fromVersion: model.installedRevision, toVersion: model.latestRevision,
-                    kind: .model, originalAppPath: nil, backupPath: nil,
-                    recoveryNote: "Model files are managed by \(model.runtime.rawValue). Download the earlier model revision again if rollback is required."
-                )
-                historyWarning = await saveUpdateHistory(record)
+                guard await updateLocalModelUnlocked(model) else {
+                    throw BatchUpdateError.verification(errorMessage ?? "Could not verify \(model.name).")
+                }
+
             }
-            return BatchUpdateResult(item: item, outcome: .updated, detail: "Updated to \(item.availableVersion).", warning: historyWarning)
+            let installedVersion: String
+            if case let .model(model) = item {
+                installedVersion = localModels.first { $0.id == model.id }?.installedRevision ?? item.availableVersion
+            } else if case let .developer(package) = item {
+                installedVersion = developerPackages.first { $0.id == package.id }?.currentVersion ?? item.availableVersion
+            } else if case let .homebrew(package) = item {
+                installedVersion = homebrewPackages.first { $0.token == package.token && $0.kind == package.kind }?.installedVersion ?? item.availableVersion
+            } else if case let .application(update) = item, update.homebrewToken != nil {
+                installedVersion = apps.first { $0.id == update.app.id }?.installedVersion ?? item.availableVersion
+            } else { installedVersion = item.availableVersion }
+            return BatchUpdateResult(item: item, outcome: .updated, detail: "Updated to \(installedVersion).", warning: historyWarning)
         } catch {
             return BatchUpdateResult(item: item, outcome: .failed, detail: error.localizedDescription)
         }
     }
 
     private func upgradeBatchPackage(_ package: HomebrewPackage, progressID: OperationID) async throws -> String? {
-        let record: UpdateRecord
-        if package.kind == .cask, let app = matchingApp(for: package) {
-            record = try await dependencies.history.prepareAppBackup(
-                app: app, toVersion: package.currentVersion, kind: .homebrew
-            )
-        } else {
-            record = UpdateRecord(
-                id: UUID(), date: Date(), name: package.displayName,
-                fromVersion: package.installedVersion, toVersion: package.currentVersion,
-                kind: .homebrew, originalAppPath: nil, backupPath: nil,
-                recoveryNote: "Homebrew formula versions cannot always be rolled back automatically. Restore from Time Machine or install a versioned formula when available."
-            )
-        }
         setUpdatePhase(.updating, for: progressID)
-        do { try await dependencies.homebrew.upgrade(package) }
-        catch {
-            await dependencies.history.discardBackup(for: record)
-            throw error
+        guard await updatePackageUnlocked(package) else {
+            throw BatchUpdateError.verification(errorMessage ?? "Could not verify \(package.displayName).")
         }
-        return await saveUpdateHistory(record)
+        return nil
     }
 
     func runningAppsForBatch(_ items: [BatchUpdateItem]) -> [InstalledApp] {
@@ -1538,7 +2118,7 @@ final class UpkeepStore: ObservableObject {
     }
 
     func isExcluded(_ package: HomebrewPackage) -> Bool {
-        settings.isExcluded(key: exclusionKey(for: package), version: package.currentVersion)
+        settings.isExcluded(key: exclusionKey(for: package), version: package.exclusionVersion)
     }
 
     func isExcluded(_ package: DeveloperPackage) -> Bool {
@@ -1555,7 +2135,7 @@ final class UpkeepStore: ObservableObject {
     }
 
     func exclusion(for package: HomebrewPackage) -> UpdateExclusion? {
-        settings.exclusion(for: exclusionKey(for: package), version: package.currentVersion)
+        settings.exclusion(for: exclusionKey(for: package), version: package.exclusionVersion)
     }
 
     func exclusion(for package: DeveloperPackage) -> UpdateExclusion? {
@@ -1579,7 +2159,7 @@ final class UpkeepStore: ObservableObject {
     }
 
     func skip(_ package: HomebrewPackage, duration: UpdateExclusionDuration? = nil) {
-        exclude(.skipped, key: exclusionKey(for: package), name: package.displayName, category: "Homebrew", version: package.currentVersion, duration: duration)
+        exclude(.skipped, key: exclusionKey(for: package), name: package.displayName, category: "Homebrew", version: package.exclusionVersion, duration: duration)
     }
 
     func ignore(_ package: HomebrewPackage, duration: UpdateExclusionDuration? = nil) {
@@ -1667,7 +2247,7 @@ final class UpkeepStore: ObservableObject {
         updateExecutionState.activeOperations.insert(operationID)
         defer { updateExecutionState.activeOperations.remove(operationID) }
 
-        let succeeded = await execute(label: "Restore \(record.name)", metadata: [
+        let succeeded = await execute(label: "Restore \(record.name)", activity: operationID, metadata: [
             "From": record.toVersion,
             "To": record.fromVersion,
             "Source": "History"
@@ -1724,13 +2304,18 @@ final class UpkeepStore: ObservableObject {
 
     private func execute(
         label: String,
+        activity: OperationID? = nil,
         metadata: [String: String] = [:],
         operation: () async throws -> Void
     ) async -> Bool {
         let startedAt = Date()
+        let commandLog = OperationCommandLog()
+        defer {
+            if let activity { updateExecutionState.appendRedactedCommandLog(commandLog.text, for: activity) }
+        }
         errorMessage = nil
         do {
-            try await operation()
+            try await OperationCommandLogContext.$current.withValue(commandLog) { try await operation() }
             DiagnosticsStore.shared.record(.info, category: .update, "Update action completed", metadata: metadata.merging([
                 "Item": label,
                 "Duration": formattedDiagnosticDuration(since: startedAt)
@@ -1792,47 +2377,33 @@ final class UpkeepStore: ObservableObject {
     }
 
     private func beginExternalUpdateVerification(_ update: AvailableUpdate) {
-        externalVerificationTasks[update.id]?.cancel()
         externalUpdateVerifications[update.id] = ExternalUpdateVerification(
             state: .waiting,
             detail: "Waiting for \(update.app.name) to finish the update…"
         )
-        externalVerificationTasks[update.id] = Task { @MainActor [weak self] in
+        externalUpdateVerifier.start(update) { [weak self] result in
             guard let self else { return }
-            for _ in 0..<20 {
-                do { try await Task.sleep(for: self.dependencies.externalVerificationInterval) }
-                catch { return }
-                guard let refreshed = await self.dependencies.applicationDiscovery.discover(
-                    at: update.app.url
-                ) else { continue }
+            switch result {
+            case let .installed(refreshed):
+                await self.refresh(refreshed)
                 guard !Task.isCancelled else { return }
-                if update.primaryCandidate.isInstalled(in: refreshed) {
-                    await self.refresh(refreshed)
-                    guard !Task.isCancelled else { return }
-                    self.externalUpdateVerifications[update.id] = ExternalUpdateVerification(
-                        state: .completed,
-                        detail: "Verified \(refreshed.installedVersion) from the installed app bundle."
-                    )
-                    self.externalVerificationTasks[update.id] = nil
-                    return
-                }
+                self.externalUpdateVerifications[update.id] = ExternalUpdateVerification(
+                    state: .completed,
+                    detail: "Verified \(refreshed.installedVersion) from the installed app bundle."
+                )
+            case let .attention(lastObserved):
+                let reported = lastObserved?.installedVersion
+                let detail = reported.map {
+                    "\(update.app.name) still reports \($0). Finish its updater or restart the app, then refresh."
+                } ?? "Could not read \(update.app.name)'s installed bundle. Finish its updater, then refresh."
+                self.externalUpdateVerifications[update.id] = ExternalUpdateVerification(state: .attention, detail: detail)
+                DiagnosticsStore.shared.record(.warning, category: .update,
+                    "External update still needs verification", metadata: [
+                        "Item": update.app.name, "Expected": update.availableVersion,
+                        "Reported": reported ?? "Unavailable"
+                    ])
+                self.refreshDiagnostics()
             }
-            self.externalUpdateVerifications[update.id] = ExternalUpdateVerification(
-                state: .attention,
-                detail: "\(update.app.name) still reports \(update.app.installedVersion). Finish its updater or restart the app, then refresh."
-            )
-            DiagnosticsStore.shared.record(
-                .warning,
-                category: .update,
-                "External update still needs verification",
-                metadata: [
-                    "Item": update.app.name,
-                    "Expected": update.availableVersion,
-                    "Reported": update.app.installedVersion
-                ]
-            )
-            self.externalVerificationTasks[update.id] = nil
-            self.refreshDiagnostics()
         }
     }
 
@@ -2043,6 +2614,8 @@ final class UpkeepStore: ObservableObject {
     }
 
     private func replaceHomebrewPackage(_ package: HomebrewPackage) {
+        scanState.revision &+= 1
+        scanState.sourceRevisions["homebrew|\(package.kind.rawValue)|\(package.token)"] = scanState.revision
         let package = homebrewPackageApp(for: package).map { package.reconciled(with: $0) } ?? package
         if let index = homebrewPackages.firstIndex(where: { $0.id == package.id }) {
             homebrewPackages[index] = package
@@ -2050,6 +2623,16 @@ final class UpkeepStore: ObservableObject {
             homebrewPackages.append(package)
         }
         homebrewPackages.sort {
+            $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+        }
+    }
+
+    private func preservingOwnedHomebrewPackages(_ fresh: [HomebrewPackage], after revision: UInt64) -> [HomebrewPackage] {
+        let owned = homebrewPackages.filter {
+            scanState.sourceRevisions["homebrew|\($0.kind.rawValue)|\($0.token)", default: 0] > revision
+        }
+        let ownedIDs = Set(owned.map(\.id))
+        return (fresh.filter { !ownedIDs.contains($0.id) } + owned).sorted {
             $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
         }
     }
@@ -2131,47 +2714,8 @@ final class UpkeepStore: ObservableObject {
         }
     }
 
-    private func mergedMacOSUpdates(from report: ScanReport) -> [MacOSUpdate] {
-        let currentUpdates = report.macOSUpdates.filter { !$0.isFullInstaller }
-        let currentInstallers = report.macOSUpdates.filter(\.isFullInstaller)
-        let updatesPart: [MacOSUpdate] = report.macOSUpdatesStatus == .failed
-            ? macOSUpdates.filter { !$0.isFullInstaller }
-            : currentUpdates
-        let installersPart: [MacOSUpdate] = report.macOSInstallersStatus == .failed
-            ? macOSUpdates.filter(\.isFullInstaller)
-            : currentInstallers
-        return updatesPart + installersPart
-    }
-
-    private func mergedDeveloperPackages(from report: ScanReport) -> [DeveloperPackage] {
-        mergeDeveloperPackageResults(
-            fresh: report.developerPackages,
-            previous: developerPackages,
-            failedManagers: report.failedDeveloperManagers,
-            failedExecutablePaths: report.failedDeveloperExecutablePaths
-        ).sorted(by: developerPackageOrder)
-    }
-
-    private func mergedLocalModels(from report: ScanReport) -> [LocalLLMModel] {
-        guard report.localModelsStatus != .disabled else { return [] }
-        var merged = Dictionary(report.localModels.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        for previous in localModels where report.failedLocalModelIDs.contains(previous.id)
-            || report.failedLocalModelRuntimes.contains(previous.runtime) {
-            merged[previous.id] = previous
-        }
-        return merged.values.sorted(by: localModelOrder)
-    }
-
-    private func developerPackageOrder(_ lhs: DeveloperPackage, _ rhs: DeveloperPackage) -> Bool {
-        if lhs.manager != rhs.manager { return lhs.manager.rawValue < rhs.manager.rawValue }
-        let nameOrder = lhs.name.localizedStandardCompare(rhs.name)
-        if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
-        return (lhs.installationContext ?? lhs.executablePath).localizedStandardCompare(rhs.installationContext ?? rhs.executablePath) == .orderedAscending
-    }
-
-    private func localModelOrder(_ lhs: LocalLLMModel, _ rhs: LocalLLMModel) -> Bool {
-        if lhs.runtime != rhs.runtime { return lhs.runtime.rawValue < rhs.runtime.rawValue }
-        return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+    func recoveryStorage() async -> RecoveryStorage? {
+        await dependencies.history.recoveryStorage()
     }
 
     private func reconcileHomebrewUpdate(token: String, name: String) {
@@ -2185,17 +2729,4 @@ final class UpkeepStore: ObservableObject {
             errorMessage = "Homebrew completed the update for \(name), but Upkeep could not fully refresh Homebrew data. Review Diagnostics and refresh again."
         }
     }
-}
-
-func mergeDeveloperPackageResults(
-    fresh: [DeveloperPackage],
-    previous: [DeveloperPackage],
-    failedManagers: Set<DeveloperPackageManager>,
-    failedExecutablePaths: Set<String>
-) -> [DeveloperPackage] {
-    let retained = previous.filter {
-        failedManagers.contains($0.manager) || failedExecutablePaths.contains($0.executablePath)
-    }
-    let acceptedFresh = fresh.filter { !failedManagers.contains($0.manager) }
-    return Dictionary(grouping: retained + acceptedFresh, by: \.id).compactMap { $0.value.first }
 }

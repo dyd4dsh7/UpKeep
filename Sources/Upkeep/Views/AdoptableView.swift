@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 struct AdoptableView: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
 
     var body: some View {
         let adoptableApps = sortedAdoptableApps

@@ -137,7 +137,7 @@ struct ListDensityButton: View {
 }
 
 struct ScanToolbarButton: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
 
     var body: some View {
         AsyncToolbarButton(

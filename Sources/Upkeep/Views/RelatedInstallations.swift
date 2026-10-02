@@ -3,7 +3,7 @@ import AppKit
 
 /// Compare known installations without treating separate environments as redundant.
 struct RelatedInstallations: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     var app: InstalledApp? = nil
     var package: DeveloperPackage? = nil
 

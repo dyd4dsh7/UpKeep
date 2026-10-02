@@ -1,0 +1,45 @@
+Recorded UTC: 2026-10-01T02:30:17.056206+00:00
+After source-tree SHA256: cd1bb9dbbbcdc2db09825cbca6709d8a013b1b037f840d82aeb2cd9c17fa1a5a
+Before app binary SHA256: 281138e6e2cb086a5744664e28f28b9aaf2cc693525ef6fbbd6d039c0a8a90c9  .build/out/Products/Release/Upkeep
+
+Before count cache (current observation/task-owner build):
+◇ Test run started.
+↳ Testing Library Version: 6.1.3
+◇ Test responsivenessBenchmark() started.
+RESPONSIVENESS size=200 sample=1 lookup_ms=0.19825 count20_ms=1.681875 exclusion20_ms=0.343708 rebuild_ms=0.458291 checksum=6500
+RESPONSIVENESS size=200 sample=2 lookup_ms=0.207834 count20_ms=1.706417 exclusion20_ms=0.348166 rebuild_ms=0.458709 checksum=6500
+RESPONSIVENESS size=200 sample=3 lookup_ms=0.208167 count20_ms=1.713834 exclusion20_ms=0.368 rebuild_ms=0.59125 checksum=6500
+RESPONSIVENESS size=200 sample=4 lookup_ms=0.213208 count20_ms=1.672833 exclusion20_ms=0.336291 rebuild_ms=0.442292 checksum=6500
+RESPONSIVENESS size=200 sample=5 lookup_ms=0.208791 count20_ms=1.675333 exclusion20_ms=0.346125 rebuild_ms=0.460042 checksum=6500
+RESPONSIVENESS size=200 sample=6 lookup_ms=0.2065 count20_ms=1.690541 exclusion20_ms=0.353083 rebuild_ms=0.449 checksum=6500
+RESPONSIVENESS size=200 sample=7 lookup_ms=0.206 count20_ms=1.759084 exclusion20_ms=0.370917 rebuild_ms=0.46675 checksum=6500
+RESPONSIVENESS size=2000 sample=1 lookup_ms=2.123375 count20_ms=17.776083 exclusion20_ms=3.978667 rebuild_ms=4.943542 checksum=65000
+RESPONSIVENESS size=2000 sample=2 lookup_ms=2.250833 count20_ms=17.727583 exclusion20_ms=3.799416 rebuild_ms=5.069125 checksum=65000
+RESPONSIVENESS size=2000 sample=3 lookup_ms=2.1725 count20_ms=17.394584 exclusion20_ms=3.729875 rebuild_ms=4.878958 checksum=65000
+RESPONSIVENESS size=2000 sample=4 lookup_ms=2.31175 count20_ms=17.338417 exclusion20_ms=3.826041 rebuild_ms=4.805333 checksum=65000
+RESPONSIVENESS size=2000 sample=5 lookup_ms=2.161708 count20_ms=17.994833 exclusion20_ms=3.7605 rebuild_ms=4.830083 checksum=65000
+RESPONSIVENESS size=2000 sample=6 lookup_ms=2.353958 count20_ms=17.357667 exclusion20_ms=3.607833 rebuild_ms=5.025792 checksum=65000
+RESPONSIVENESS size=2000 sample=7 lookup_ms=2.324458 count20_ms=17.535042 exclusion20_ms=3.676458 rebuild_ms=4.942792 checksum=65000
+✔ Test responsivenessBenchmark() passed after 0.279 seconds.
+✔ Test run with 1 test passed after 0.279 seconds.
+
+After count cache:
+◇ Test run started.
+↳ Testing Library Version: 6.1.3
+◇ Test responsivenessBenchmark() started.
+RESPONSIVENESS size=200 sample=1 lookup_ms=0.225125 count20_ms=0.088833 exclusion20_ms=0.36825 rebuild_ms=0.4735 checksum=6500
+RESPONSIVENESS size=200 sample=2 lookup_ms=0.216958 count20_ms=0.083792 exclusion20_ms=0.36625 rebuild_ms=0.472958 checksum=6500
+RESPONSIVENESS size=200 sample=3 lookup_ms=0.224875 count20_ms=0.083291 exclusion20_ms=0.377292 rebuild_ms=0.529292 checksum=6500
+RESPONSIVENESS size=200 sample=4 lookup_ms=0.403833 count20_ms=0.095042 exclusion20_ms=0.375 rebuild_ms=0.471292 checksum=6500
+RESPONSIVENESS size=200 sample=5 lookup_ms=0.227958 count20_ms=0.084208 exclusion20_ms=0.372 rebuild_ms=0.473625 checksum=6500
+RESPONSIVENESS size=200 sample=6 lookup_ms=0.221833 count20_ms=0.084875 exclusion20_ms=0.369292 rebuild_ms=0.473709 checksum=6500
+RESPONSIVENESS size=200 sample=7 lookup_ms=0.219208 count20_ms=0.085375 exclusion20_ms=0.373916 rebuild_ms=0.469375 checksum=6500
+RESPONSIVENESS size=2000 sample=1 lookup_ms=2.137041 count20_ms=0.829083 exclusion20_ms=3.917584 rebuild_ms=4.760125 checksum=65000
+RESPONSIVENESS size=2000 sample=2 lookup_ms=2.141 count20_ms=0.797834 exclusion20_ms=3.763708 rebuild_ms=4.742834 checksum=65000
+RESPONSIVENESS size=2000 sample=3 lookup_ms=2.04175 count20_ms=0.757666 exclusion20_ms=3.764583 rebuild_ms=4.552916 checksum=65000
+RESPONSIVENESS size=2000 sample=4 lookup_ms=1.999542 count20_ms=0.754625 exclusion20_ms=3.789541 rebuild_ms=4.500041 checksum=65000
+RESPONSIVENESS size=2000 sample=5 lookup_ms=2.09525 count20_ms=0.83925 exclusion20_ms=3.857708 rebuild_ms=4.469083 checksum=65000
+RESPONSIVENESS size=2000 sample=6 lookup_ms=2.037375 count20_ms=0.759209 exclusion20_ms=3.539333 rebuild_ms=4.689292 checksum=65000
+RESPONSIVENESS size=2000 sample=7 lookup_ms=2.037083 count20_ms=0.778583 exclusion20_ms=3.696583 rebuild_ms=4.78625 checksum=65000
+✔ Test responsivenessBenchmark() passed after 0.124 seconds.
+✔ Test run with 1 test passed after 0.124 seconds.

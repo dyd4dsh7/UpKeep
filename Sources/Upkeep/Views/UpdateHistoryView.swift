@@ -24,8 +24,10 @@ private struct HistorySnapshot {
 }
 
 struct UpdateHistoryView: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     @State private var kindFilter: UpdateRecordKind?
+    @State private var showingStorage = false
+    @State private var storage: RecoveryStorage?
 
     var body: some View {
         let snapshot = HistorySnapshot(records: store.updateHistory, kind: kindFilter)
@@ -54,6 +56,11 @@ struct UpdateHistoryView: View {
         }
         .upkeepAnimated(for: snapshot.records.map(\.id))
         .toolbar {
+            ToolbarItem {
+                Button("Recovery Storage", systemImage: "externaldrive") {
+                    showingStorage = true
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Menu {
                     Button {
@@ -76,13 +83,47 @@ struct UpdateHistoryView: View {
                 .toolbarControlLabel("Filter update history")
             }
         }
+        .sheet(isPresented: $showingStorage) {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Recovery Storage").font(.title2.bold())
+                if let storage {
+                    if storage.unknownSizes {
+                        Text("Total backup size unavailable. Retention budget: \(ByteCountFormatter.string(fromByteCount: storage.byteLimit, countStyle: .file)).")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("\(ByteCountFormatter.string(fromByteCount: storage.measuredBytes, countStyle: .file)) of \(ByteCountFormatter.string(fromByteCount: storage.byteLimit, countStyle: .file)) retention budget")
+                    }
+                    if storage.metadataUnavailable {
+                        Text("Recovery metadata could not be read. Backups are protected until that metadata can be verified.")
+                            .foregroundStyle(.orange)
+                    }
+                    Text("Keeps up to three backups per app and twenty in total, within the byte budget. Recovery backups from interrupted updates are protected and can exceed that budget.")
+                        .font(.callout).foregroundStyle(.secondary)
+                    List(storage.backups) { backup in
+                        VStack(alignment: .leading) {
+                            Text(URL(fileURLWithPath: backup.path).lastPathComponent)
+                            Text((backup.bytes.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "Size unavailable")
+                                + (backup.protected ? " · Recovery protected" : " · Retained backup"))
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    Text(storage.directory.path).font(.caption).textSelection(.enabled)
+                    Button("Show in Finder") { NSWorkspace.shared.open(storage.directory) }
+                } else {
+                    Text("Storage information is unavailable.").foregroundStyle(.secondary)
+                }
+                Button("Done") { showingStorage = false }.frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .padding(24).frame(minWidth: 420, minHeight: 350)
+            .task { storage = await store.recoveryStorage() }
+        }
         .confirmationDialog(
             "Revert \(store.pendingRevert?.name ?? "this app")?",
             isPresented: Binding(get: { store.pendingRevert != nil }, set: { if !$0 { store.pendingRevert = nil } }),
             titleVisibility: .visible
         ) {
             if let record = store.pendingRevert {
-                Button("Restore version \(record.fromVersion)", role: .destructive) {
+                Button("Restore version \(record.fromVersionLabel)", role: .destructive) {
                     store.pendingRevert = nil
                     Task { await store.revert(record) }
                 }
@@ -105,7 +146,7 @@ struct UpdateHistoryView: View {
                 detail: record.kind.rawValue + " · " + record.date.formatted(date: .omitted, time: .shortened)
             )
         } accessories: {
-            VersionTransitionView(current: record.fromVersion, latest: record.toVersion)
+            VersionTransitionView(current: record.fromVersionLabel, latest: record.toVersionLabel)
             recoveryControl(for: record)
         }
         .help(record.recoveryNote ?? "Updated with Upkeep")

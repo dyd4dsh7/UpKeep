@@ -25,7 +25,7 @@ private struct MacOSUpdateGroups {
 }
 
 struct MacOSUpdatesView: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     @EnvironmentObject private var settings: AppSettings
 
     var body: some View {

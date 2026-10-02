@@ -1,12 +1,15 @@
 import Combine
 import Foundation
+import Observation
 
 enum MutationTarget: Hashable {
     case applicationPath(String)
     case bundleIdentifier(String)
     case homebrew(String)
     case developerEnvironment(String)
+    case packageEnvironment(String)
     case model(String)
+    case modelRuntime(LocalModelRuntime)
 }
 
 enum MutationContext {
@@ -16,7 +19,9 @@ enum MutationContext {
 /// Reserves targets before any suspension, including quitting apps and copying backups.
 /// Nested steps of one operation share ownership; unrelated actions cannot overlap.
 @MainActor
+@Observable
 final class MutationCoordinator: ObservableObject {
+    @ObservationIgnored nonisolated(unsafe) let objectWillChange = ObservableObjectPublisher()
     private var reservations: [UUID: Set<MutationTarget>] = [:]
     private var depths: [UUID: Int] = [:]
 

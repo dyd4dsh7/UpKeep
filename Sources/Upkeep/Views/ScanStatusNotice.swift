@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ScanStatusNotice: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     @State private var showsDetails = false
     let isMacOS: Bool
 
@@ -11,6 +11,15 @@ struct ScanStatusNotice: View {
     }
 
     var body: some View {
+        if store.isScanning, let progress = store.scanState.progress {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Checked \(progress.completed) of \(progress.total) app sources · \(progress.lastSource.rawValue)")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+            }.padding(12)
+            Divider()
+        }
         if state == .failed || state == .partial || !warnings.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {

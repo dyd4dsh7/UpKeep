@@ -4,25 +4,35 @@ import SwiftUI
 @main
 struct UpkeepApp: App {
     @StateObject private var settings: AppSettings
-    @StateObject private var store: UpkeepStore
+    @State private var store: UpkeepStore
     @StateObject private var updateViewState = UpdateViewState()
 
     init() {
+        #if DEBUG
+        if UIFixture.enabled {
+            let defaults = UserDefaults(suiteName: "test.upkeep.ui-fixture.\(UUID().uuidString)")!
+            defaults.set(true, forKey: "hasCompletedSetup")
+            let appSettings = AppSettings(defaults: defaults)
+            _settings = StateObject(wrappedValue: appSettings)
+            _store = State(initialValue: UIFixture.makeStore(settings: appSettings, operationState: UIFixture.operationState))
+            return
+        }
+        #endif
         let appSettings = AppSettings()
         _settings = StateObject(wrappedValue: appSettings)
-        _store = StateObject(wrappedValue: UpkeepStore(settings: appSettings))
+        _store = State(initialValue: UpkeepStore(settings: appSettings))
     }
 
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .environmentObject(store)
+                .environment(\.upkeepStoreReference, store)
                 .environmentObject(settings)
                 .environmentObject(updateViewState)
                 .frame(minWidth: 760, minHeight: 500)
         }
         .windowToolbarStyle(.unified(showsTitle: true))
-        .defaultSize(width: 1180, height: 720)
+        .defaultSize(width: initialWindowSize.width, height: initialWindowSize.height)
         .commands {
             InspectorCommands()
             CommandMenu("Updates") {
@@ -67,7 +77,17 @@ struct UpkeepApp: App {
         }
 
         Settings {
-            SettingsView().environmentObject(settings).environmentObject(store)
+            SettingsView().environmentObject(settings)
+                .environment(\.upkeepStoreReference, store)
         }
+    }
+
+    private var initialWindowSize: CGSize {
+        #if DEBUG
+        if UIFixture.enabled && ProcessInfo.processInfo.arguments.contains("--ui-fixture-narrow") {
+            return CGSize(width: 760, height: 500)
+        }
+        #endif
+        return CGSize(width: 1180, height: 720)
     }
 }
