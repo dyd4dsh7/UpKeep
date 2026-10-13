@@ -107,7 +107,6 @@ struct AllAppsView: View {
         ToolbarItemGroup(placement: .primaryAction) {
             appSortMenu
             appFilterMenu
-            ListDensityButton()
         }
         upkeepToolbarSpacer()
         ToolbarItem(placement: .primaryAction) {
@@ -441,9 +440,6 @@ struct AppDetailView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Label("Technical Details", systemImage: "info.circle")
                     .font(.headline)
-                Text("Bundle metadata, declared permissions, signing, and Gatekeeper status")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
         }
         .padding(14)
@@ -566,7 +562,7 @@ struct AppDetailView: View {
                     Text(statusTitle).font(.headline)
                     if let update {
                         Text(update.requiresInAppInstallation
-                             ? "Open \(app.name) to complete this Sparkle installer update."
+                             ? "Open \(app.name) to install this update."
                              : "Available through \(update.source.rawValue)")
                             .font(.callout)
                             .foregroundStyle(.secondary)
@@ -627,11 +623,6 @@ struct AppDetailView: View {
                             showsFullReleaseNotes.toggle()
                         }
                         .buttonStyle(.link)
-                    }
-                    if notes.isEmpty {
-                        Text("The developer did not provide release notes for this update source.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     }
                 }
                 .padding(16)

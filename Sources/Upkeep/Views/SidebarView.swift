@@ -4,7 +4,7 @@ struct UpkeepSidebarView: View {
     @UpkeepStoreReference private var store
     @EnvironmentObject private var settings: AppSettings
 
-    @AppStorage("sidebarSourcesExpanded") private var sourcesExpanded = true
+    @AppStorage("sidebarSourcesExpanded") private var sourcesExpanded = false
 
     var body: some View {
         List(selection: $store.navigation.selection) {
@@ -28,18 +28,9 @@ struct UpkeepSidebarView: View {
                 item(.history)
             }
 
-            if settings.sidebarViewMode == .advanced {
+            if settings.sidebarViewMode == .advanced, !sourceDestinations.isEmpty {
                 Section("Sources", isExpanded: $sourcesExpanded) {
-                    item(.appStore)
-                    item(.testFlight)
-                    item(.setapp)
-                    item(.microsoftAutoUpdate)
-                    item(.steam)
-                    item(.otherUpdaters)
-                    item(.homebrewApps)
-                    item(.sparkle)
-                    item(.github)
-                    item(.noSource)
+                    ForEach(sourceDestinations, id: \.self) { item($0) }
                 }
             }
         }
@@ -55,6 +46,15 @@ struct UpkeepSidebarView: View {
                 store.navigation.selection = .allApps
             }
         }
+    }
+
+    private var sourceDestinations: [SidebarDestination] {
+        let destinations: [SidebarDestination] = [
+            .appStore, .testFlight, .setapp, .microsoftAutoUpdate, .steam,
+            .otherUpdaters, .homebrewApps, .sparkle, .github, .noSource
+        ]
+        // Keep the selected destination visible while a scan replaces its inventory.
+        return destinations.filter { store.count(for: $0) > 0 || store.navigation.selection == $0 }
     }
 
     private var packageDestinations: [SidebarDestination] {

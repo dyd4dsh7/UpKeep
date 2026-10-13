@@ -111,9 +111,6 @@ struct SettingsView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                Text(settings.listDensity.detail)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
             } header: {
                 Text("Appearance")
             }

@@ -1,8 +1,8 @@
 import SwiftUI
 
 enum UpkeepMotion {
-    static let quick = Animation.easeOut(duration: 0.16)
-    static let standard = Animation.spring(duration: 0.32, bounce: 0.08)
+    static let quick = Animation.easeOut(duration: 0.15)
+    static let standard = Animation.spring(duration: 0.3, bounce: 0)
 
     static var stateTransition: AnyTransition {
         // Scaling a surface also scales native AppKit progress controls through
@@ -11,10 +11,7 @@ enum UpkeepMotion {
     }
 
     static var rowTransition: AnyTransition {
-        .asymmetric(
-            insertion: .opacity.combined(with: .move(edge: .top)),
-            removal: .opacity.combined(with: .scale(scale: 0.985))
-        )
+        .opacity
     }
 }
 
@@ -24,7 +21,7 @@ private struct UpkeepAnimatedModifier<Value: Equatable>: ViewModifier {
     let animation: Animation
 
     func body(content: Content) -> some View {
-        content.animation(reduceMotion ? .easeOut(duration: 0.1) : animation, value: value)
+        content.animation(reduceMotion ? nil : animation, value: value)
     }
 }
 

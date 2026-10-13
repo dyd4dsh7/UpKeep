@@ -90,7 +90,6 @@ struct UpdatesView: View {
         ToolbarItemGroup(placement: .primaryAction) {
             updateSortMenu
             updateFilterMenu
-            ListDensityButton()
         }
         upkeepToolbarSpacer()
         ToolbarItem(placement: .primaryAction) {
@@ -287,10 +286,8 @@ struct UpdatesView: View {
     private var scanningState: some View {
         VStack(spacing: 16) {
             ProgressView().controlSize(.large)
-            Text("Checking your applications")
+            Text("Checking for updates…")
                 .font(.title3.weight(.medium))
-            Text("Comparing installed versions with publisher and package-manager sources.")
-                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -790,6 +787,7 @@ struct UpdateCard: View {
             .disabled(store.isUpdating(update))
         }
         .tag("app:\(update.app.id)")
+        .help(update.source.confidenceDetail)
         .contentShape(Rectangle())
         .contextMenu {
             Button(actionTitle) { Task { await store.performUpdate(update) } }
@@ -821,9 +819,7 @@ struct UpdateCard: View {
     }
 
     private var appUpdateDetail: String {
-        var parts = [update.source.confidenceDetail]
-        if update.canInstallDirectly { parts.append("Installs in Upkeep") }
-        if update.requiresInAppInstallation { parts.append("Open app to install") }
+        var parts = [update.source.rawValue]
         if update.homebrewToken != nil { parts.append("May require password") }
         return parts.joined(separator: " · ")
     }

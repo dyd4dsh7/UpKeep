@@ -30,7 +30,6 @@ struct HomebrewView: View {
         ToolbarItemGroup(placement: .primaryAction) {
             homebrewSortMenu
             homebrewFilterMenu
-            ListDensityButton()
         }
         upkeepToolbarSpacer()
         ToolbarItem(placement: .primaryAction) {
