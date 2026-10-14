@@ -11,7 +11,7 @@ let package = Package(
         // Resolve the same Testing sources locally and in CI. Some Command Line
         // Tools installations omit required runtime support; use full Xcode
         // if the test linker cannot find `_TestingInterop`.
-        .package(url: "https://github.com/swiftlang/swift-testing.git", exact: "6.3.2")
+        .package(url: "https://github.com/swiftlang/swift-testing.git", exact: "6.4.1")
     ],
     targets: [
         .executableTarget(
