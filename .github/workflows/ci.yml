@@ -42,7 +42,9 @@ jobs:
           swift --version
           xcrun --sdk macosx --show-sdk-version
       - name: Test with warnings as errors
-        run: swift test -Xswiftc -warnings-as-errors
+        # Process fixtures share admission gates and have bounded shutdown timers.
+        # Run cases separately; concurrency is exercised within dedicated tests.
+        run: swift test --no-parallel -Xswiftc -warnings-as-errors
       - name: Test global process admission in isolation
         env:
           UPKEEP_PROCESS_STRESS: "1"
@@ -98,7 +100,7 @@ jobs:
       - name: Measure isolated real command-process workload
         run: bash scripts/benchmark-performance.sh outputs/performance/processes.log processes
       - name: Test optimized build
-        run: swift test -c release --skip-build -Xswiftc -warnings-as-errors
+        run: swift test -c release --skip-build --no-parallel -Xswiftc -warnings-as-errors
       - name: Summarize paired search measurements
         run: python3 scripts/compare-performance.py outputs/performance/search-paired.log --paired-search > outputs/performance/search-summary.md
       - name: Retain performance measurements
