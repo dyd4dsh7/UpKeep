@@ -7,6 +7,18 @@ struct DeveloperPackageClient: Sendable {
         let warnings: [String]
         let failedManagers: Set<DeveloperPackageManager>
         let failedExecutablePaths: Set<String>
+        var warningManagers: [String: Set<DeveloperPackageManager>] = [:]
+
+        func hasFailures(for manager: DeveloperPackageManager) -> Bool {
+            failedManagers.contains(manager)
+                || packages.contains { $0.manager == manager && failedExecutablePaths.contains($0.executablePath) }
+                || (!failedExecutablePaths.isEmpty && warningManagers.values.contains { $0.contains(manager) })
+        }
+
+        var scanWarnings: [ScanWarning] {
+            warnings.map { ScanWarning(source: .developerPackages,
+                itemNames: warningManagers[$0]?.map(\.rawValue) ?? [], message: $0) }
+        }
 
         static let empty = Report(
             packages: [], installedManagers: [], warnings: [],
@@ -14,9 +26,15 @@ struct DeveloperPackageClient: Sendable {
         )
     }
 
+    func scan(enabledManagers: Set<DeveloperPackageManager> = Set(DeveloperPackageManager.allCases),
+              includePrereleases: Bool = false) async -> Report {
+        await scan(enabledManagers: enabledManagers, includePrereleases: includePrereleases, managerProgress: nil)
+    }
+
     func scan(
         enabledManagers: Set<DeveloperPackageManager> = Set(DeveloperPackageManager.allCases),
-        includePrereleases: Bool = false
+        includePrereleases: Bool = false,
+        managerProgress: DeveloperScanProgressReporter?
     ) async -> Report {
         var tools: [(DeveloperPackageManager, String)] = []
         let defaultNode = nvmDefaultExecutable(named: "node")
@@ -54,16 +72,49 @@ struct DeveloperPackageClient: Sendable {
         var seenTargets = Set<String>()
         tools = tools.filter { seenTargets.insert("\($0.0.rawValue):\($0.1)").inserted }
 
-        let results = await withTaskGroup(of: ManagerScanResult.self) { group in
-            for (manager, path) in tools {
+        let targets = Dictionary(grouping: tools, by: { $0.0 })
+        let reports = await withTaskGroup(of: (DeveloperPackageManager, Report).self) { group in
+            for manager in enabledManagers {
+                let paths = targets[manager]?.map { $0.1 } ?? []
                 group.addTask {
-                    await scanDeveloperTarget(manager: manager, path: path, defaultNode: defaultNode)
+                    let results = await withTaskGroup(of: ManagerScanResult.self) { workers in
+                        for path in paths {
+                            workers.addTask { await scanDeveloperTarget(manager: manager, path: path, defaultNode: defaultNode) }
+                        }
+                        var values: [ManagerScanResult] = []
+                        for await result in workers { values.append(result) }
+                        return values
+                    }
+                    return (manager, await managerReport(results: results, manager: manager, includePrereleases: includePrereleases))
                 }
             }
-            var values: [ManagerScanResult] = []
-            for await result in group { values.append(result) }
-            return values
+            var completed: [Report] = []
+            for await (manager, report) in group {
+                if let managerProgress { await managerProgress(report, [manager]) }
+                completed.append(report)
+            }
+            return completed
         }
+        return Self.combine(reports)
+    }
+
+    static func combine(_ reports: [Report]) -> Report {
+        var warningManagers: [String: Set<DeveloperPackageManager>] = [:]
+        for report in reports {
+            for (warning, managers) in report.warningManagers { warningManagers[warning, default: []].formUnion(managers) }
+        }
+        return Report(packages: reports.flatMap(\.packages).sorted {
+            if $0.manager != $1.manager { return $0.manager.rawValue < $1.manager.rawValue }
+            let order = $0.name.localizedStandardCompare($1.name)
+            if order != .orderedSame { return order == .orderedAscending }
+            return ($0.installationContext ?? $0.executablePath).localizedStandardCompare($1.installationContext ?? $1.executablePath) == .orderedAscending
+        }, installedManagers: Array(Set(reports.flatMap(\.installedManagers))).sorted { $0.rawValue < $1.rawValue },
+        warnings: reports.flatMap(\.warnings), failedManagers: Set(reports.flatMap { $0.failedManagers }),
+        failedExecutablePaths: Set(reports.flatMap { $0.failedExecutablePaths }), warningManagers: warningManagers)
+    }
+
+    private func managerReport(results: [ManagerScanResult], manager: DeveloperPackageManager,
+                               includePrereleases: Bool) async -> Report {
         var packagesByID: [String: DeveloperPackage] = [:]
         for package in results.flatMap(\.packages) { packagesByID[package.id] = package }
         let stablePackages = packagesByID.values.sorted {
@@ -75,17 +126,22 @@ struct DeveloperPackageClient: Sendable {
         let packages = includePrereleases
             ? await includingPrereleaseUpdates(in: stablePackages)
             : stablePackages
+        var warningManagers: [String: Set<DeveloperPackageManager>] = [:]
+        for result in results {
+            if let warning = result.warning { warningManagers[warning, default: []].insert(result.manager) }
+        }
         return Report(
             packages: packages,
-            installedManagers: Array(Set(tools.map(\.0))).sorted { $0.rawValue < $1.rawValue },
+            installedManagers: results.isEmpty ? [] : [manager],
             warnings: results.compactMap(\.warning),
-            failedManagers: Set(Set(tools.map(\.0)).filter { manager in
+            failedManagers: Set([manager].filter { manager in
                 let managerResults = results.filter { $0.manager == manager }
                 return !managerResults.isEmpty && managerResults.allSatisfy { $0.warning != nil && $0.packages.isEmpty }
             }),
             failedExecutablePaths: Set(results.compactMap { result in
                 result.warning != nil ? result.executablePath : nil
-            })
+            }),
+            warningManagers: warningManagers
         )
     }
 
@@ -201,7 +257,8 @@ struct DeveloperPackageClient: Sendable {
             let result = await captureDeveloperCommandAsync(
                 executable,
                 arguments,
-                qos: .userInitiated
+                qos: .userInitiated,
+                purpose: .mutation
             )
             guard result.status == 0 else {
                 let output = String(data: result.data, encoding: .utf8)
@@ -215,7 +272,8 @@ struct DeveloperPackageClient: Sendable {
         let result = await captureDeveloperCommandAsync(
             plan.executable,
             plan.arguments,
-            qos: .userInitiated
+            qos: .userInitiated,
+            purpose: .mutation
         )
         guard result.status == 0 else {
             let output = String(data: result.data, encoding: .utf8)
@@ -246,7 +304,8 @@ struct DeveloperPackageClient: Sendable {
         let result = await captureDeveloperCommandAsync(
             URL(fileURLWithPath: "/bin/zsh"),
             arguments,
-            qos: .userInitiated
+            qos: .userInitiated,
+            purpose: .mutation
         )
         guard result.status == 0 else {
             let output = String(data: result.data, encoding: .utf8)?
@@ -386,7 +445,7 @@ func scanYarn(_ path: String) async -> ManagerScanResult {
     }
     let managerPackage = DeveloperPackage(name: "Yarn", currentVersion: output, latestVersion: latest, manager: .yarn, executablePath: path, installationContext: nvmInstallationContext(for: path))
     let globalsResult = await captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["global", "list", "--json", "--depth=0"])
-    let globals = parseYarnGlobalPackages(globalsResult.data)
+    let globals = DeveloperInventoryParsers.parseYarnGlobalPackages(globalsResult.data)
     let globalPackages = await packagesFromNPMRegistry(
         installed: globals,
         manager: .yarn,
@@ -490,16 +549,7 @@ func scanGems(_ path: String) async -> ManagerScanResult {
     let installedOutput = String(data: installedResult.data, encoding: .utf8) ?? ""
     let outdatedResult = await captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["outdated"])
     let outdatedOutput = String(data: outdatedResult.data, encoding: .utf8) ?? ""
-    let outdated = parseGemOutdated(outdatedOutput)
-    let regex = try? NSRegularExpression(pattern: #"^(.+?)\s+\((?:default:\s*)?([^,\)]+)"#, options: .anchorsMatchLines)
-    let packages = installedOutput.split(separator: "\n").compactMap { line -> DeveloperPackage? in
-        let value = String(line)
-        guard let match = regex?.firstMatch(in: value, range: NSRange(value.startIndex..., in: value)),
-              let nameRange = Range(match.range(at: 1), in: value), let versionRange = Range(match.range(at: 2), in: value)
-        else { return nil }
-        let name = String(value[nameRange]); let version = String(value[versionRange])
-        return DeveloperPackage(name: name, currentVersion: version, latestVersion: outdated[name] ?? version, manager: .rubyGems, executablePath: path)
-    }
+    let packages = DeveloperInventoryParsers.parseGemInventory(installedOutput, outdatedOutput: outdatedOutput, executablePath: path)
     return ManagerScanResult(
         manager: .rubyGems,
         packages: packages,
@@ -507,16 +557,6 @@ func scanGems(_ path: String) async -> ManagerScanResult {
     )
 }
 
-private func parseGemOutdated(_ output: String) -> [String: String] {
-    let regex = try? NSRegularExpression(pattern: #"^(.+?)\s+\([^\s]+\s+<\s+([^\)]+)\)$"#, options: .anchorsMatchLines)
-    return output.split(separator: "\n").reduce(into: [:]) { values, line in
-        let value = String(line)
-        guard let match = regex?.firstMatch(in: value, range: NSRange(value.startIndex..., in: value)),
-              let nameRange = Range(match.range(at: 1), in: value), let latestRange = Range(match.range(at: 2), in: value)
-        else { return }
-        values[String(value[nameRange])] = String(value[latestRange])
-    }
-}
 
 func scanCargo(_ path: String) async -> ManagerScanResult {
     let installedResult = await captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["install", "--list"])
@@ -552,7 +592,7 @@ func scanCargo(_ path: String) async -> ManagerScanResult {
 func scanVSCodeExtensions(_ path: String) async -> ManagerScanResult {
     let result = await captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["--list-extensions", "--show-versions"])
     guard result.status == 0 else { return failedManagerScan(.vsCode, command: "inventory", result: result) }
-    let installed = parseExtensionInventory(result.data)
+    let installed = DeveloperInventoryParsers.parseExtensionInventory(result.data)
     let context = editorName(for: path)
     let values = await withTaskGroup(of: (DeveloperPackage, Bool).self) { group in
         for (identifier, version) in installed {
@@ -584,7 +624,7 @@ func scanVSCodeExtensions(_ path: String) async -> ManagerScanResult {
 func scanUVTools(_ path: String) async -> ManagerScanResult {
     let result = await captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["tool", "list", "--show-version-specifiers"])
     guard result.status == 0 else { return failedManagerScan(.uv, command: "tool inventory", result: result) }
-    async let toolScan = scanPyPIToolInventory(parseSimpleToolList(result.data), manager: .uv, executablePath: path)
+    async let toolScan = scanPyPIToolInventory(DeveloperInventoryParsers.parseSimpleToolList(result.data), manager: .uv, executablePath: path)
     async let runtimeScan = scanUVManagedPythons(path)
     let (tools, runtimes) = await (toolScan, runtimeScan)
     return ManagerScanResult(
@@ -599,14 +639,14 @@ private func scanUVManagedPythons(_ path: String) async -> ManagerScanResult {
         .map(URL.init(fileURLWithPath:))
         ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/share/uv/python")
     let directories = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
-    let installed = directories.compactMap { parseUVPythonDirectoryName($0.lastPathComponent) }
+    let installed = directories.compactMap { DeveloperInventoryParsers.parseUVPythonDirectoryName($0.lastPathComponent) }
     let values = await withTaskGroup(of: DeveloperPackage.self) { group in
         for runtime in installed {
             group.addTask {
                 let result = await captureDeveloperCommandAsync(
                     URL(fileURLWithPath: path), ["python", "list", runtime.minor, "--managed-python"]
                 )
-                let latest = parseUVPythonList(result.data, matchingMinor: runtime.minor).first ?? runtime.version
+                let latest = DeveloperInventoryParsers.parseUVPythonList(result.data, matchingMinor: runtime.minor).first ?? runtime.version
                 return DeveloperPackage(
                     name: "\(runtime.implementation) Python \(runtime.minor)",
                     currentVersion: runtime.version,
@@ -670,7 +710,7 @@ private func scanPyPIToolInventory(
 func scanRustup(_ path: String) async -> ManagerScanResult {
     let result = await captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["check"])
     guard result.status == 0 else { return failedManagerScan(.rustup, command: "toolchain check", result: result) }
-    let packages = parseRustupCheck(result.data).filter { $0.name != "rustup" }.map { toolchain in
+    let packages = DeveloperInventoryParsers.parseRustupCheck(result.data).filter { $0.name != "rustup" }.map { toolchain in
         DeveloperPackage(
             name: toolchain.name,
             currentVersion: toolchain.current,
@@ -686,9 +726,9 @@ func scanRustup(_ path: String) async -> ManagerScanResult {
 func scanGitHubCLIExtensions(_ path: String) async -> ManagerScanResult {
     let listResult = await captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["extension", "list"])
     guard listResult.status == 0 else { return failedManagerScan(.githubCLI, command: "extension inventory", result: listResult) }
-    let installed = parseGitHubExtensionList(listResult.data)
+    let installed = DeveloperInventoryParsers.parseGitHubExtensionList(listResult.data)
     let updatesResult = await captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["extension", "upgrade", "--all", "--dry-run"])
-    let updates = parseGitHubExtensionUpdates(updatesResult.data)
+    let updates = DeveloperInventoryParsers.parseGitHubExtensionUpdates(updatesResult.data)
     let packages = installed.map { repository, version in
         DeveloperPackage(
             name: repository.split(separator: "/").last.map(String.init) ?? repository,
@@ -719,7 +759,7 @@ func scanGoTools(_ path: String) async -> ManagerScanResult {
         for url in urls where FileManager.default.isExecutableFile(atPath: url.path) {
             group.addTask {
                 let result = await captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["version", "-m", url.path])
-                return parseGoBuildInfo(result.data)
+                return DeveloperInventoryParsers.parseGoBuildInfo(result.data)
             }
         }
         var output: [GoInstalledTool] = []
@@ -745,7 +785,7 @@ func scanGoTools(_ path: String) async -> ManagerScanResult {
         return output
     }
     var packages = values.map(\.0)
-    if let currentRuntime = parseGoRuntimeVersion(versionResult.data) {
+    if let currentRuntime = DeveloperInventoryParsers.parseGoRuntimeVersion(versionResult.data) {
         packages.append(DeveloperPackage(
             name: "Go", currentVersion: currentRuntime, latestVersion: latestRuntime ?? currentRuntime,
             manager: .go, executablePath: path, registryIdentifier: "go-runtime",
@@ -775,7 +815,7 @@ func scanComposer(_ path: String) async -> ManagerScanResult {
 func scanDotnetTools(_ path: String) async -> ManagerScanResult {
     let result = await captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["tool", "list", "--global"])
     guard result.status == 0 else { return failedManagerScan(.dotnet, command: "global tool inventory", result: result) }
-    let installed = parseDotnetToolList(result.data)
+    let installed = DeveloperInventoryParsers.parseDotnetToolList(result.data)
     let values = await withTaskGroup(of: (DeveloperPackage, Bool).self) { group in
         for (identifier, version) in installed {
             group.addTask {
@@ -800,8 +840,8 @@ func scanMacPorts(_ path: String) async -> ManagerScanResult {
     let (installedResult, outdatedResult) = await (installedCommand, outdatedCommand)
     guard installedResult.status == 0 else { return failedManagerScan(.macPorts, command: "inventory", result: installedResult) }
     guard outdatedResult.status == 0 else { return failedManagerScan(.macPorts, command: "outdated check", result: outdatedResult) }
-    let installed = parseMacPortsInstalled(installedResult.data)
-    let outdated = Dictionary(uniqueKeysWithValues: parseMacPortsOutdated(outdatedResult.data).map { ($0.name, $0.latest) })
+    let installed = DeveloperInventoryParsers.parseMacPortsInstalled(installedResult.data)
+    let outdated = Dictionary(uniqueKeysWithValues: DeveloperInventoryParsers.parseMacPortsOutdated(outdatedResult.data).map { ($0.name, $0.latest) })
     let packages = installed.map {
         DeveloperPackage(
             name: $0.name, currentVersion: $0.version, latestVersion: outdated[$0.name] ?? $0.version,
@@ -818,9 +858,9 @@ func scanNixProfile(_ path: String) async -> ManagerScanResult {
     let (listResult, updateResult) = await (listCommand, updateCommand)
     guard listResult.status == 0 else { return failedManagerScan(.nix, command: "profile inventory", result: listResult) }
     guard updateResult.status == 0 else { return failedManagerScan(.nix, command: "profile update check", result: updateResult) }
-    let updates = parseNixDryRun(updateResult.data)
+    let updates = DeveloperInventoryParsers.parseNixDryRun(updateResult.data)
     let latestByName = Dictionary(uniqueKeysWithValues: updates.map { ($0.name, $0.latest) })
-    let packages = parseNixProfileJSON(listResult.data).map {
+    let packages = DeveloperInventoryParsers.parseNixProfileJSON(listResult.data).map {
         DeveloperPackage(
             name: $0.name, currentVersion: $0.version, latestVersion: latestByName[$0.name] ?? $0.version,
             manager: .nix, executablePath: path, registryIdentifier: $0.selector
@@ -835,8 +875,8 @@ func scanMise(_ path: String) async -> ManagerScanResult {
     let (installedResult, outdatedResult) = await (installedCommand, outdatedCommand)
     guard installedResult.status == 0 else { return failedManagerScan(.mise, command: "tool inventory", result: installedResult) }
     guard outdatedResult.status == 0 else { return failedManagerScan(.mise, command: "tool update check", result: outdatedResult) }
-    let outdated = Dictionary(uniqueKeysWithValues: parseGenericOutdatedJSON(outdatedResult.data).map { ($0.name, $0.latest) })
-    let packages = parseMiseInstalledJSON(installedResult.data).map {
+    let outdated = Dictionary(uniqueKeysWithValues: DeveloperInventoryParsers.parseGenericOutdatedJSON(outdatedResult.data).map { ($0.name, $0.latest) })
+    let packages = DeveloperInventoryParsers.parseMiseInstalledJSON(installedResult.data).map {
         DeveloperPackage(
             name: $0.name, currentVersion: $0.version, latestVersion: outdated[$0.name] ?? $0.version,
             manager: .mise, executablePath: path, registryIdentifier: $0.name,
@@ -849,7 +889,7 @@ func scanMise(_ path: String) async -> ManagerScanResult {
 func scanASDF(_ path: String) async -> ManagerScanResult {
     let configURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".tool-versions")
     let configData = (try? Data(contentsOf: configURL)) ?? Data()
-    let installed = parseASDFCurrent(configData)
+    let installed = DeveloperInventoryParsers.parseASDFCurrent(configData)
     let values = await withTaskGroup(of: DeveloperPackage.self) { group in
         for (name, version) in installed {
             group.addTask {
@@ -873,7 +913,7 @@ func scanASDF(_ path: String) async -> ManagerScanResult {
 func scanVolta(_ path: String) async -> ManagerScanResult {
     let result = await captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["list", "--format", "plain", "--all"])
     guard result.status == 0 else { return failedManagerScan(.volta, command: "tool inventory", result: result) }
-    let installed = parseVoltaList(result.data)
+    let installed = DeveloperInventoryParsers.parseVoltaList(result.data)
     let nodeReleases = installed.keys.contains("node") ? await nodeReleaseVersions() : []
     let packages = await withTaskGroup(of: DeveloperPackage.self) { group in
         for (name, version) in installed {
@@ -897,7 +937,7 @@ func scanVolta(_ path: String) async -> ManagerScanResult {
 func scanFNM(_ path: String) async -> ManagerScanResult {
     let result = await captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["list"])
     guard result.status == 0 else { return failedManagerScan(.fnm, command: "runtime inventory", result: result) }
-    let installed = parseFNMList(result.data)
+    let installed = DeveloperInventoryParsers.parseFNMList(result.data)
     let releases = await nodeReleaseVersions()
     let packages = installed.map { version, isDefault in
         let major = version.split(separator: ".").first.map(String.init)
@@ -1034,284 +1074,6 @@ private func packagesFromNPMRegistry(
     )
 }
 
-func parseExtensionInventory(_ data: Data) -> [String: String] {
-    let output = String(data: data, encoding: .utf8) ?? ""
-    return output.split(separator: "\n").reduce(into: [:]) { values, line in
-        guard let separator = line.lastIndex(of: "@") else { return }
-        let name = String(line[..<separator]).trimmingCharacters(in: .whitespacesAndNewlines)
-        let text = String(line)
-        let textSeparator = text.index(text.startIndex, offsetBy: line.distance(from: line.startIndex, to: separator))
-        let version = String(text[text.index(after: textSeparator)...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        if !name.isEmpty, !version.isEmpty { values[name] = version }
-    }
-}
-
-func parseYarnGlobalPackages(_ data: Data) -> [String: String] {
-    let output = String(data: data, encoding: .utf8) ?? ""
-    var packages: [String: String] = [:]
-    for line in output.split(separator: "\n") {
-        guard let lineData = String(line).data(using: .utf8),
-              let event = try? JSONDecoder().decode(YarnListEvent.self, from: lineData),
-              event.type == "tree" else { continue }
-        for tree in event.data?.trees ?? [] {
-            guard let separator = tree.name.lastIndex(of: "@") else { continue }
-            let name = String(tree.name[..<separator])
-            let version = String(tree.name[tree.name.index(after: separator)...])
-            if !name.isEmpty, !version.isEmpty { packages[name] = version }
-        }
-    }
-    return packages
-}
-
-func parseSimpleToolList(_ data: Data) -> [String: String] {
-    let output = String(data: data, encoding: .utf8) ?? ""
-    return output.split(separator: "\n").reduce(into: [:]) { values, rawLine in
-        let parts = rawLine.split(whereSeparator: \.isWhitespace)
-        guard parts.count >= 2 else { return }
-        let name = String(parts[0])
-        let version = String(parts[1]).trimmingCharacters(in: CharacterSet(charactersIn: "v"))
-        if version.first?.isNumber == true { values[name] = version }
-    }
-}
-
-func parseUVPythonDirectoryName(_ name: String) -> (implementation: String, version: String, minor: String)? {
-    let regex = try? NSRegularExpression(pattern: #"^(cpython|pypy)-(\d+\.\d+\.\d+)(?:[-+].*)?$"#, options: .caseInsensitive)
-    guard let match = regex?.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)),
-          let implementationRange = Range(match.range(at: 1), in: name),
-          let versionRange = Range(match.range(at: 2), in: name) else { return nil }
-    let version = String(name[versionRange])
-    let components = version.split(separator: ".")
-    guard components.count >= 2 else { return nil }
-    let implementation = String(name[implementationRange]).lowercased() == "pypy" ? "PyPy" : "CPython"
-    return (implementation, version, components.prefix(2).joined(separator: "."))
-}
-
-func parseUVPythonList(_ data: Data, matchingMinor minor: String) -> [String] {
-    let output = String(data: data, encoding: .utf8) ?? ""
-    let regex = try? NSRegularExpression(pattern: #"(?:cpython|pypy)-(\d+\.\d+\.\d+)"#, options: .caseInsensitive)
-    let versions = output.split(separator: "\n").compactMap { rawLine -> String? in
-        let line = String(rawLine)
-        guard let match = regex?.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
-              let range = Range(match.range(at: 1), in: line) else { return nil }
-        let version = String(line[range])
-        return version.hasPrefix(minor + ".") ? version : nil
-    }
-    return VersionComparator.sortedNewestFirst(Set(versions))
-}
-
-func parseRustupCheck(_ data: Data) -> [(name: String, current: String, latest: String)] {
-    let output = String(data: data, encoding: .utf8) ?? ""
-    let versionPattern = #"\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?"#
-    let regex = try? NSRegularExpression(pattern: versionPattern)
-    return output.split(separator: "\n").compactMap { rawLine in
-        let line = String(rawLine)
-        guard let divider = line.range(of: " - "), line.contains(":") else { return nil }
-        let name = String(line[..<divider.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
-        let matches = regex?.matches(in: line, range: NSRange(line.startIndex..., in: line)) ?? []
-        let versions = matches.compactMap { Range($0.range, in: line).map { String(line[$0]) } }
-        guard let current = versions.first else { return nil }
-        return (name, current, versions.count > 1 ? versions.last! : current)
-    }
-}
-
-func parseGitHubExtensionList(_ data: Data) -> [String: String] {
-    let output = String(data: data, encoding: .utf8) ?? ""
-    var values: [String: String] = [:]
-    for rawLine in output.split(separator: "\n") {
-        let fields = rawLine.split(whereSeparator: \.isWhitespace).map(String.init)
-        guard let repository = fields.first(where: { $0.contains("/") }) else { continue }
-        let version = fields.reversed().first(where: {
-            $0.trimmingCharacters(in: CharacterSet(charactersIn: "vV")).first?.isNumber == true
-        })?.trimmingCharacters(in: CharacterSet(charactersIn: "vV")) ?? "unknown"
-        values[repository] = version
-    }
-    return values
-}
-
-func parseGitHubExtensionUpdates(_ data: Data) -> [String: String] {
-    let output = String(data: data, encoding: .utf8) ?? ""
-    let regex = try? NSRegularExpression(pattern: #"([\w.-]+/[\w.-]+).*?(?:to|->)\s+v?([0-9][0-9A-Za-z.+-]*)"#, options: .caseInsensitive)
-    return output.split(separator: "\n").reduce(into: [:]) { values, rawLine in
-        let line = String(rawLine)
-        guard let match = regex?.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
-              let repositoryRange = Range(match.range(at: 1), in: line),
-              let versionRange = Range(match.range(at: 2), in: line) else { return }
-        values[String(line[repositoryRange])] = String(line[versionRange])
-    }
-}
-
-func parseGoBuildInfo(_ data: Data) -> GoInstalledTool? {
-    let lines = (String(data: data, encoding: .utf8) ?? "").split(separator: "\n").map(String.init)
-    let command = lines.first(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("path\t") })?
-        .split(separator: "\t", maxSplits: 1).last.map(String.init)
-    let moduleFields = lines.first(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("mod\t") })?
-        .split(separator: "\t").map(String.init)
-    guard let command, let moduleFields, moduleFields.count >= 3 else { return nil }
-    let version = moduleFields[2].trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
-    guard version.first?.isNumber == true else { return nil }
-    return GoInstalledTool(command: command, module: moduleFields[1], version: version)
-}
-
-func parseGoRuntimeVersion(_ data: Data) -> String? {
-    let output = String(data: data, encoding: .utf8) ?? ""
-    let regex = try? NSRegularExpression(pattern: #"\bgo(\d+\.\d+(?:\.\d+)?)\b"#)
-    guard let match = regex?.firstMatch(in: output, range: NSRange(output.startIndex..., in: output)),
-          let range = Range(match.range(at: 1), in: output) else { return nil }
-    return String(output[range])
-}
-
-func parseDotnetToolList(_ data: Data) -> [String: String] {
-    if let root = try? JSONDecoder().decode(DotnetToolList.self, from: data) {
-        return root.data.reduce(into: [:]) { values, tool in values[tool.packageId] = tool.version }
-    }
-    let output = String(data: data, encoding: .utf8) ?? ""
-    return output.split(separator: "\n").reduce(into: [:]) { values, rawLine in
-        let fields = rawLine.split(whereSeparator: \.isWhitespace).map(String.init)
-        guard fields.count >= 2, fields[1].first?.isNumber == true else { return }
-        values[fields[0]] = fields[1]
-    }
-}
-
-func parseMacPortsOutdated(_ data: Data) -> [(name: String, current: String, latest: String)] {
-    let output = String(data: data, encoding: .utf8) ?? ""
-    let regex = try? NSRegularExpression(pattern: #"^\s*(\S+)\s+@?([^\s]+).*?<\s+@?([^\s]+)"#, options: .anchorsMatchLines)
-    return output.split(separator: "\n").compactMap { rawLine in
-        let line = String(rawLine)
-        guard let match = regex?.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
-              let name = Range(match.range(at: 1), in: line),
-              let current = Range(match.range(at: 2), in: line),
-              let latest = Range(match.range(at: 3), in: line) else { return nil }
-        return (String(line[name]), stripPackageRevision(String(line[current])), stripPackageRevision(String(line[latest])))
-    }
-}
-
-func parseMacPortsInstalled(_ data: Data) -> [(name: String, version: String)] {
-    let output = String(data: data, encoding: .utf8) ?? ""
-    let regex = try? NSRegularExpression(pattern: #"^\s*(\S+)\s+@([^\s]+)"#, options: .anchorsMatchLines)
-    return output.split(separator: "\n").compactMap { rawLine in
-        let line = String(rawLine)
-        guard let match = regex?.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
-              let name = Range(match.range(at: 1), in: line),
-              let version = Range(match.range(at: 2), in: line) else { return nil }
-        return (String(line[name]), stripPackageRevision(String(line[version])))
-    }
-}
-
-func parseNixDryRun(_ data: Data) -> [(name: String, current: String, latest: String, selector: String)] {
-    let output = String(data: data, encoding: .utf8) ?? ""
-    let regex = try? NSRegularExpression(
-        pattern: #"(?:upgrade|upgrading)\s+['\"]?([^'\"\s]+)['\"]?.*?from\s+['\"]?v?([^'\"\s]+)['\"]?\s+(?:to|->)\s+['\"]?v?([^'\"\s]+)"#,
-        options: .caseInsensitive
-    )
-    let arrowRegex = try? NSRegularExpression(
-        pattern: #"^\s*['\"]?([^:'\"\s]+)['\"]?\s*:\s*['\"]?v?([0-9][^'\"\s]*)['\"]?\s*(?:->|→)\s*['\"]?v?([0-9][^'\"\s]*)"#,
-        options: .caseInsensitive
-    )
-    return output.split(separator: "\n").compactMap { rawLine in
-        let line = String(rawLine)
-        let match = regex?.firstMatch(in: line, range: NSRange(line.startIndex..., in: line))
-            ?? arrowRegex?.firstMatch(in: line, range: NSRange(line.startIndex..., in: line))
-        guard let match,
-              let selectorRange = Range(match.range(at: 1), in: line),
-              let currentRange = Range(match.range(at: 2), in: line),
-              let latestRange = Range(match.range(at: 3), in: line) else { return nil }
-        let selector = String(line[selectorRange])
-        let name = selector.split(separator: "#").last.map(String.init) ?? selector
-        return (name, String(line[currentRange]), String(line[latestRange]), selector)
-    }
-}
-
-func parseNixProfileJSON(_ data: Data) -> [(name: String, version: String, selector: String)] {
-    guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [] }
-    let elements = (root["elements"] as? [String: Any]) ?? root
-    return elements.compactMap { selector, rawValue in
-        guard let value = rawValue as? [String: Any] else { return nil }
-        let storePaths = value["storePaths"] as? [String] ?? value["store-paths"] as? [String] ?? []
-        guard let storePath = storePaths.first,
-              let parsed = parseNixStorePath(storePath) else { return nil }
-        return (parsed.name, parsed.version, selector)
-    }
-}
-
-private func parseNixStorePath(_ path: String) -> (name: String, version: String)? {
-    let fileName = URL(fileURLWithPath: path).lastPathComponent
-    let withoutHash = fileName.split(separator: "-", maxSplits: 1).dropFirst().first.map(String.init) ?? fileName
-    let regex = try? NSRegularExpression(pattern: #"^(.+)-([0-9][0-9A-Za-z.+_-]*)$"#)
-    guard let match = regex?.firstMatch(in: withoutHash, range: NSRange(withoutHash.startIndex..., in: withoutHash)),
-          let name = Range(match.range(at: 1), in: withoutHash),
-          let version = Range(match.range(at: 2), in: withoutHash) else { return nil }
-    return (String(withoutHash[name]), stripPackageRevision(String(withoutHash[version])))
-}
-
-func parseGenericOutdatedJSON(_ data: Data) -> [(name: String, current: String, latest: String)] {
-    guard let value = try? JSONSerialization.jsonObject(with: data) else { return [] }
-    var results: [(String, String, String)] = []
-    func visit(_ value: Any, hintedName: String? = nil) {
-        if let dictionary = value as? [String: Any] {
-            let name = (dictionary["name"] as? String) ?? (dictionary["tool"] as? String) ?? hintedName
-            let current = (dictionary["current"] as? String) ?? (dictionary["version"] as? String)
-            let latest = (dictionary["latest"] as? String) ?? (dictionary["new_version"] as? String)
-            if let name, let current, let latest, current != latest { results.append((name, current, latest)) }
-            for (key, child) in dictionary { visit(child, hintedName: key) }
-        } else if let array = value as? [Any] {
-            for child in array { visit(child, hintedName: hintedName) }
-        }
-    }
-    visit(value)
-    var seen = Set<String>()
-    return results.filter { seen.insert("\($0.0):\($0.1):\($0.2)").inserted }
-}
-
-func parseMiseInstalledJSON(_ data: Data) -> [(name: String, version: String)] {
-    guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [] }
-    var values: [(String, String)] = []
-    for (name, rawEntries) in root {
-        let entries = rawEntries as? [[String: Any]] ?? []
-        for entry in entries {
-            guard let version = entry["version"] as? String, !version.isEmpty else { continue }
-            values.append((name, version.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))))
-        }
-    }
-    return values
-}
-
-func parseASDFCurrent(_ data: Data) -> [String: String] {
-    let output = String(data: data, encoding: .utf8) ?? ""
-    return output.split(separator: "\n").reduce(into: [:]) { values, line in
-        let fields = line.split(whereSeparator: \.isWhitespace).map(String.init)
-        guard fields.count >= 2, fields[1] != "______", fields[1] != "No" else { return }
-        values[fields[0]] = fields[1].trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
-    }
-}
-
-func parseVoltaList(_ data: Data) -> [String: String] {
-    let output = String(data: data, encoding: .utf8) ?? ""
-    return output.split(separator: "\n").reduce(into: [:]) { values, line in
-        let fields = line.split(whereSeparator: \.isWhitespace).map(String.init)
-        guard let token = fields.first(where: { $0.contains("@") }),
-              let separator = token.lastIndex(of: "@") else { return }
-        let name = String(token[..<separator])
-        let version = String(token[token.index(after: separator)...]).trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
-        if !name.isEmpty, version.first?.isNumber == true, values[name] == nil { values[name] = version }
-    }
-}
-
-func parseFNMList(_ data: Data) -> [(version: String, isDefault: Bool)] {
-    let output = String(data: data, encoding: .utf8) ?? ""
-    return output.split(separator: "\n").compactMap { line in
-        let fields = line.split(whereSeparator: \.isWhitespace).map(String.init)
-        guard let versionToken = fields.first(where: { $0.trimmingCharacters(in: CharacterSet(charactersIn: "*vV" )).first?.isNumber == true }) else { return nil }
-        return (
-            versionToken.trimmingCharacters(in: CharacterSet(charactersIn: "*vV")),
-            line.contains("default") || line.hasPrefix("*")
-        )
-    }
-}
-
-private func stripPackageRevision(_ value: String) -> String {
-    value.split(separator: "_").first.map(String.init) ?? value
-}
-
 private func normalizedComposerVersion(_ value: String) -> String {
     value.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
 }
@@ -1426,18 +1188,12 @@ func captureDeveloperCommand(
     _ arguments: [String],
     baseEnvironment: [String: String] = ProcessInfo.processInfo.environment
 ) -> (data: Data, status: Int32) {
-    let process = Process(); let output = Pipe()
-    process.executableURL = executable; process.arguments = arguments
-    process.environment = developerCommandEnvironment(for: executable, base: baseEnvironment)
-    // Finder launches apps from `/`. pnpm probes the current directory when
-    // locating its store, independently of TMPDIR. These are global commands;
-    // do not inherit the read-only root or an unrelated project's configuration.
-    process.currentDirectoryURL = developerCommandWorkingDirectory(base: process.environment ?? [:])
-    process.standardOutput = output; process.standardError = output
-    do { try process.run() }
-    catch { return (Data(error.localizedDescription.utf8), -1) }
-    let data = output.fileHandleForReading.readDataToEndOfFile(); process.waitUntilExit()
-    return (data, process.terminationStatus)
+    let environment = developerCommandEnvironment(for: executable, base: baseEnvironment)
+    do {
+        let result = try CommandRunner.capture(executable, arguments, environment: environment,
+            directory: developerCommandWorkingDirectory(base: environment), timeout: CommandRunner.deadline(for: arguments))
+        return (result.output, result.status)
+    } catch { return (Data(error.localizedDescription.utf8), -1) }
 }
 
 func developerCommandWorkingDirectory(
@@ -1460,17 +1216,27 @@ func captureDeveloperCommandAsync(
     _ executable: URL,
     _ arguments: [String],
     baseEnvironment: [String: String] = ProcessInfo.processInfo.environment,
-    qos: DispatchQoS.QoSClass = .utility
+    qos: DispatchQoS.QoSClass = .utility,
+    purpose: CommandRunner.Purpose = .automatic
 ) async -> (data: Data, status: Int32) {
-    await withCheckedContinuation { continuation in
-        DispatchQueue.global(qos: qos).async {
-            continuation.resume(returning: captureDeveloperCommand(
-                executable,
-                arguments,
-                baseEnvironment: baseEnvironment
-            ))
+    let environment = developerCommandEnvironment(for: executable, base: baseEnvironment)
+    do {
+        let result = try await CommandRunner.run(executable, arguments, environment: environment,
+            directory: developerCommandWorkingDirectory(base: environment), timeout: CommandRunner.deadline(for: arguments, purpose: purpose))
+        return (result.output, result.status)
+    } catch { return (Data(error.localizedDescription.utf8), -1) }
+}
+
+func developerNodeRuntimePath(for executable: URL,
+                              base: [String: String] = ProcessInfo.processInfo.environment) -> String? {
+    let environment = developerCommandEnvironment(for: executable, base: base)
+    for directory in (environment["PATH"] ?? "").split(separator: ":") {
+        let node = URL(fileURLWithPath: String(directory)).appendingPathComponent("node")
+        if FileManager.default.isExecutableFile(atPath: node.path) {
+            return node.resolvingSymlinksInPath().standardizedFileURL.path
         }
     }
+    return nil
 }
 
 func developerCommandEnvironment(
@@ -1549,12 +1315,6 @@ private struct BunGlobalManifest: Decodable {
     let dependencies: [String: String]?
     let devDependencies: [String: String]?
 }
-private struct YarnListEvent: Decodable {
-    let type: String
-    let data: TreeData?
-    struct TreeData: Decodable { let trees: [Tree] }
-    struct Tree: Decodable { let name: String }
-}
 private struct PipxList: Decodable {
     let venvs: [String: Environment]
     struct Environment: Decodable { let metadata: Metadata }
@@ -1576,14 +1336,6 @@ struct GoInstalledTool: Sendable {
 private struct ComposerOutdated: Decodable {
     let installed: [Package]
     struct Package: Decodable { let name: String; let version: String; let latest: String? }
-}
-private struct DotnetToolList: Decodable {
-    let data: [Tool]
-    struct Tool: Decodable {
-        let packageId: String
-        let version: String
-        enum CodingKeys: String, CodingKey { case packageId = "packageId"; case version }
-    }
 }
 
 func parsePNPMInstalledPackages(_ data: Data) -> [String: String]? {

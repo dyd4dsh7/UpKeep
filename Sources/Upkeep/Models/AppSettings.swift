@@ -199,6 +199,7 @@ struct UpdateExclusion: Codable, Hashable, Identifiable, Sendable {
 }
 
 struct ScanSettings: Sendable {
+    var appSourceFilter: Set<UpdateSource>? = nil
     let checkAppStore: Bool
     let checkSparkle: Bool
     let checkHomebrew: Bool
@@ -242,10 +243,13 @@ final class AppSettings: ObservableObject {
     @Published private(set) var updateExclusions: [UpdateExclusion]
     @Published private(set) var ignoredHomebrewAdoptionKeys: Set<String>
     @Published private(set) var itemLastCheckedDates: [String: Date]
+    @Published private(set) var sourceCheckFreshness: [String: CheckFreshness]
     @Published private(set) var customGitHubRepositories: [String: String]
     @Published var selectedSection: SettingsSection = .general
     @Published var confirmingPrereleaseUpdates = false
     private var exclusionExpiryTask: Task<Void, Never>?
+    private(set) var exclusionCacheRevision: UInt64 = 0
+    private(set) var nextExclusionExpiration: Date?
     private var exclusionsByKey: [String: [UpdateExclusion]] = [:]
 
     init(defaults: UserDefaults = .standard) {
@@ -295,6 +299,8 @@ final class AppSettings: ObservableObject {
         checkLocalModels = defaults.bool(forKey: "checkLocalModels")
         includePrereleaseUpdates = defaults.bool(forKey: "includePrereleaseUpdates")
         lastCompletedScanDate = defaults.object(forKey: "lastCompletedScanDate") as? Date
+        sourceCheckFreshness = defaults.data(forKey: "sourceCheckFreshness")
+            .flatMap { try? JSONDecoder().decode([String: CheckFreshness].self, from: $0) } ?? [:]
         let disabled = Set(defaults.stringArray(forKey: "disabledDeveloperManagers") ?? [])
         enabledDeveloperManagers = completedSetup
             ? Set(DeveloperPackageManager.allCases.filter { !disabled.contains($0.rawValue) })
@@ -436,6 +442,24 @@ final class AppSettings: ObservableObject {
         recordChecks(for: [key], at: date)
     }
 
+    func recordSourceAttempt(_ key: String, at date: Date, failure: String? = nil) {
+        recordSourceAttempts([key: failure ?? ""], at: date)
+    }
+
+    /// Empty values denote success. Persist once per source group, not once per app.
+    func recordSourceAttempts(_ attempts: [String: String], at date: Date) {
+        var freshness = sourceCheckFreshness
+        for (key, failure) in attempts {
+            freshness[key] = CheckFreshness(lastAttempt: date,
+                lastSuccess: failure.isEmpty ? date : freshness[key]?.lastSuccess,
+                failure: failure.isEmpty ? nil : failure)
+        }
+        sourceCheckFreshness = freshness
+        if let data = try? JSONEncoder().encode(sourceCheckFreshness) {
+            defaults.set(data, forKey: "sourceCheckFreshness")
+        }
+    }
+
     func recordChecks(for keys: [String], at date: Date = Date()) {
         for key in keys { itemLastCheckedDates[key] = date }
         if let data = try? JSONEncoder().encode(itemLastCheckedDates) {
@@ -500,6 +524,8 @@ final class AppSettings: ObservableObject {
         // Every exclusion mutation passes through here. Grouping preserves first-match
         // ordering for older persisted data with duplicate keys; reads still check expiry.
         exclusionsByKey = Dictionary(grouping: updateExclusions, by: \.key)
+        exclusionCacheRevision &+= 1
+        nextExclusionExpiration = updateExclusions.compactMap(\.expiresAt).min()
         if let data = try? JSONEncoder().encode(updateExclusions) { defaults.set(data, forKey: "updateExclusions") }
         scheduleExclusionExpiry()
     }

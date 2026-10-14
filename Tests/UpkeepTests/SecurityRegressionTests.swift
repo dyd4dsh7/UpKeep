@@ -143,13 +143,13 @@ import Testing
     #expect(stopped)
 }
 
-@Test func directReplacementValidatesTheStagedCopyImmediatelyBeforeReplacement() throws {
+@Test func directReplacementValidatesTheStagedCopyImmediatelyBeforeReplacement() async throws {
     let source = URL(fileURLWithPath: "/tmp/Downloaded.app")
     let staged = URL(fileURLWithPath: "/Applications/.Upkeep-Example.app")
     let installed = URL(fileURLWithPath: "/Applications/Example.app")
     var events: [String] = []
 
-    try StagedReplacementTransaction.perform(
+    try await StagedReplacementTransaction.performAsync(
         replacement: source,
         staged: staged,
         installed: installed,
@@ -248,4 +248,28 @@ private extension Data {
         var littleEndian = value.littleEndian
         Swift.withUnsafeBytes(of: &littleEndian) { append(contentsOf: $0) }
     }
+}
+
+@Test(arguments: [false, true])
+func stagedAsyncValidationFailureOrCancellationPreventsReplacement(cancel: Bool) async {
+    let task = Task {
+        var events: [String] = []
+        do {
+            try await StagedReplacementTransaction.performAsync(
+                replacement: URL(fileURLWithPath: "/fixture/source"),
+                staged: URL(fileURLWithPath: "/fixture/staged"),
+                installed: URL(fileURLWithPath: "/fixture/installed"),
+                copy: { _, _ in events.append("copy") },
+                validate: { _ in
+                    events.append("validate")
+                    if cancel { withUnsafeCurrentTask { $0?.cancel() } }
+                    else { throw CancellationError() }
+                },
+                replace: { _, _ in events.append("replace") })
+            return (events, false)
+        } catch { return (events, true) }
+    }
+    let (events, failed) = await task.value
+    #expect(failed)
+    #expect(events == ["copy", "validate"])
 }

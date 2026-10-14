@@ -12,6 +12,11 @@ CI selects Xcode 26.3 explicitly. Homebrew and other package managers are option
 integrations, not build dependencies. You do not need signing credentials to
 contribute.
 
+Some newer Command Line Tools omit the `_TestingInterop` library required by
+Swift Testing 6.3.2. If test linking reports that library missing, select a full
+Xcode installation through `DEVELOPER_DIR`; selecting another SDK alone is
+insufficient. CI verifies the dependency with Xcode 26.3.
+
 ```sh
 git clone https://github.com/dyd4dsh7/UpKeep.git
 cd UpKeep

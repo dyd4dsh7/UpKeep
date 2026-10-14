@@ -7,23 +7,57 @@ struct LocalModelClient: Sendable {
         let warnings: [String]
         let failedModelIDs: Set<String>
         let failedRuntimes: Set<LocalModelRuntime>
+        var warningRuntimes: [String: Set<LocalModelRuntime>] = [:]
+
+        var scanWarnings: [ScanWarning] {
+            warnings.map { ScanWarning(source: .localModels,
+                itemNames: warningRuntimes[$0]?.map(\.rawValue) ?? [], message: $0) }
+        }
 
         static let empty = Report(models: [], warnings: [], failedModelIDs: [], failedRuntimes: [])
     }
 
     func scan() async -> Report {
-        async let ollama = scanOllama()
-        async let lmStudio = scanLMStudio()
-        let results = await [ollama, lmStudio]
+        await scan(progress: nil)
+    }
+
+    func scan(progress: LocalModelScanProgressReporter?) async -> Report {
+        await withTaskGroup(of: ModelRuntimeScanResult.self) { group in
+            group.addTask { await scanOllama() }
+            group.addTask { await scanLMStudio() }
+            var results: [ModelRuntimeScanResult] = []
+            for await result in group {
+                if let progress { await progress(report(from: [result]), [result.runtime]) }
+                results.append(result)
+            }
+            return report(from: results)
+        }
+    }
+
+    func scan(runtime: LocalModelRuntime) async -> Report {
+        let result: ModelRuntimeScanResult
+        switch runtime {
+        case .ollama: result = await scanOllama()
+        case .lmStudio: result = await scanLMStudio()
+        }
+        return report(from: [result])
+    }
+
+    private func report(from results: [ModelRuntimeScanResult]) -> Report {
         let models = results.flatMap(\.models).sorted {
             if $0.runtime != $1.runtime { return $0.runtime.rawValue < $1.runtime.rawValue }
             return $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+        var warningRuntimes: [String: Set<LocalModelRuntime>] = [:]
+        for result in results {
+            if let warning = result.warning { warningRuntimes[warning, default: []].insert(result.runtime) }
         }
         return Report(
             models: models,
             warnings: results.compactMap(\.warning),
             failedModelIDs: Set(results.flatMap(\.failedModelIDs)),
-            failedRuntimes: Set(results.filter(\.runtimeFailed).map(\.runtime))
+            failedRuntimes: Set(results.filter(\.runtimeFailed).map(\.runtime)),
+            warningRuntimes: warningRuntimes
         )
     }
 
@@ -398,24 +432,15 @@ private func executable(named name: String, extra: [String]) -> String? {
 }
 
 private func capture(_ executable: URL, _ arguments: [String]) async -> (data: Data, status: Int32) {
-    await Task.detached(priority: .utility) { synchronousCapture(executable, arguments) }.value
+    do {
+        let result = try await CommandRunner.run(executable, arguments, timeout: CommandRunner.deadline(for: arguments))
+        return (result.output, result.status)
+    } catch { return (Data(error.localizedDescription.utf8), -1) }
 }
 
 private func run(_ executable: URL, _ arguments: [String]) async throws {
-    let result = await Task.detached(priority: .userInitiated) { synchronousCapture(executable, arguments) }.value
-    guard result.status == 0 else { throw LocalModelClient.ModelError.failed(String(decoding: result.data, as: UTF8.self)) }
-}
-
-private func synchronousCapture(_ executable: URL, _ arguments: [String]) -> (data: Data, status: Int32) {
-    let process = Process(), pipe = Pipe()
-    process.executableURL = executable
-    process.arguments = arguments
-    process.standardOutput = pipe
-    process.standardError = pipe
-    do { try process.run() } catch { return (Data(), -1) }
-    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-    process.waitUntilExit()
-    return (data, process.terminationStatus)
+    let result = try await CommandRunner.run(executable, arguments, timeout: CommandRunner.deadline(for: arguments))
+    guard result.status == 0 else { throw LocalModelClient.ModelError.failed(String(decoding: result.output, as: UTF8.self)) }
 }
 
 extension LocalModelClient {

@@ -1,0 +1,21 @@
+SERVICE_BENCHMARK sample=1 diagnostics_load_ms=12.805542 plain_redact_ms=3.863917 mixed_redact_ms=1.929375 entries=2000 plain_strings=14000 mixed_strings=2000
+SERVICE_BENCHMARK sample=2 diagnostics_load_ms=12.896334 plain_redact_ms=4.046416 mixed_redact_ms=1.998166 entries=2000 plain_strings=14000 mixed_strings=2000
+SERVICE_BENCHMARK sample=3 diagnostics_load_ms=13.082542 plain_redact_ms=3.75925 mixed_redact_ms=2.0205 entries=2000 plain_strings=14000 mixed_strings=2000
+SERVICE_BENCHMARK sample=4 diagnostics_load_ms=12.575292 plain_redact_ms=3.769167 mixed_redact_ms=1.8975 entries=2000 plain_strings=14000 mixed_strings=2000
+SERVICE_BENCHMARK sample=5 diagnostics_load_ms=12.793417 plain_redact_ms=3.882166 mixed_redact_ms=2.005416 entries=2000 plain_strings=14000 mixed_strings=2000
+SERVICE_BENCHMARK sample=6 diagnostics_load_ms=12.73425 plain_redact_ms=3.673917 mixed_redact_ms=1.859375 entries=2000 plain_strings=14000 mixed_strings=2000
+SERVICE_BENCHMARK sample=7 diagnostics_load_ms=12.717708 plain_redact_ms=3.816333 mixed_redact_ms=1.881041 entries=2000 plain_strings=14000 mixed_strings=2000
+RELEASE_MENU_BENCHMARK size=200 sample=1 elapsed_ms=0.158167 results=202
+RELEASE_MENU_BENCHMARK size=200 sample=2 elapsed_ms=0.15625 results=202
+RELEASE_MENU_BENCHMARK size=200 sample=3 elapsed_ms=0.144084 results=202
+RELEASE_MENU_BENCHMARK size=200 sample=4 elapsed_ms=0.147208 results=202
+RELEASE_MENU_BENCHMARK size=200 sample=5 elapsed_ms=0.162916 results=202
+RELEASE_MENU_BENCHMARK size=200 sample=6 elapsed_ms=0.1645 results=202
+RELEASE_MENU_BENCHMARK size=200 sample=7 elapsed_ms=0.154375 results=202
+RELEASE_MENU_BENCHMARK size=5000 sample=1 elapsed_ms=13.8645 results=5002
+RELEASE_MENU_BENCHMARK size=5000 sample=2 elapsed_ms=14.225 results=5002
+RELEASE_MENU_BENCHMARK size=5000 sample=3 elapsed_ms=13.813208 results=5002
+RELEASE_MENU_BENCHMARK size=5000 sample=4 elapsed_ms=13.700666 results=5002
+RELEASE_MENU_BENCHMARK size=5000 sample=5 elapsed_ms=14.001459 results=5002
+RELEASE_MENU_BENCHMARK size=5000 sample=6 elapsed_ms=14.248375 results=5002
+RELEASE_MENU_BENCHMARK size=5000 sample=7 elapsed_ms=13.760125 results=5002

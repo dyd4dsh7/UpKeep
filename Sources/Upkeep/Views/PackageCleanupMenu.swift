@@ -31,7 +31,7 @@ struct PackageCleanupContainer<Content: View>: View {
 }
 
 struct PackageCleanupMenu: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     let targets: [PackageCleanupTarget]
     @Binding var result: PackageCleanupResult?
     @State private var showsCleanup = false
@@ -44,7 +44,7 @@ struct PackageCleanupMenu: View {
         .disabled(targets.isEmpty)
         .sheet(isPresented: $showsCleanup) {
             PackageCleanupSheet(targets: targets, result: $result)
-                .environmentObject(store)
+                .environment(\.upkeepStoreReference, store)
         }
     }
 }

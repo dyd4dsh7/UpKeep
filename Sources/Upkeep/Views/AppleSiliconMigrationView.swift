@@ -31,7 +31,7 @@ struct AppleSiliconMigrationWarning: View {
 }
 
 struct AppleSiliconMigrationView: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     @Environment(\.dismiss) private var dismiss
     @StateObject private var state = AppleSiliconMigrationState()
     let app: InstalledApp

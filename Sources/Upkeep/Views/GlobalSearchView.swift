@@ -1,14 +1,14 @@
 import SwiftUI
 
 struct GlobalSearchView: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     // AppKit can update List selection while SwiftUI reconciles its rows.
     // Keep this view-local value in State so it does not synchronously publish
     // an ObservableObject change from inside that update.
     @State private var selection: SearchResultSelection?
 
     var body: some View {
-        let results = GlobalSearch(store: store).results
+        let results = store.globalSearchResults
         VStack(spacing: 0) {
             if results.isEmpty {
                 ContentUnavailableView {

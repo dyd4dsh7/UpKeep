@@ -1,0 +1,17 @@
+Measured UTC: 2026-09-30T23:59:16.937430+00:00
+Source tree SHA256: 429c7b10f754c4f430070355229eb8dc83c153875974c0764d084c2b11825040
+Configuration: release, macOS 26.5 SDK, Swift warnings as errors, dirty working tree
+RESPONSIVENESS size=200 sample=1 lookup_ms=0.231375 count20_ms=1.449292 exclusion20_ms=0.325375 rebuild_ms=0.361708 checksum=6500
+RESPONSIVENESS size=200 sample=2 lookup_ms=0.239292 count20_ms=1.508833 exclusion20_ms=0.336292 rebuild_ms=0.391625 checksum=6500
+RESPONSIVENESS size=200 sample=3 lookup_ms=0.247333 count20_ms=1.672208 exclusion20_ms=0.48325 rebuild_ms=0.41475 checksum=6500
+RESPONSIVENESS size=200 sample=4 lookup_ms=0.2505 count20_ms=1.550958 exclusion20_ms=0.3225 rebuild_ms=0.391791 checksum=6500
+RESPONSIVENESS size=200 sample=5 lookup_ms=0.253792 count20_ms=1.519083 exclusion20_ms=0.354625 rebuild_ms=0.388291 checksum=6500
+RESPONSIVENESS size=200 sample=6 lookup_ms=0.266125 count20_ms=1.577416 exclusion20_ms=0.343708 rebuild_ms=0.37875 checksum=6500
+RESPONSIVENESS size=200 sample=7 lookup_ms=0.287125 count20_ms=1.606625 exclusion20_ms=0.335 rebuild_ms=0.380125 checksum=6500
+RESPONSIVENESS size=2000 sample=1 lookup_ms=2.446833 count20_ms=15.888084 exclusion20_ms=3.668 rebuild_ms=4.061458 checksum=65000
+RESPONSIVENESS size=2000 sample=2 lookup_ms=2.713 count20_ms=15.981125 exclusion20_ms=3.680375 rebuild_ms=4.027917 checksum=65000
+RESPONSIVENESS size=2000 sample=3 lookup_ms=2.449167 count20_ms=15.3745 exclusion20_ms=3.725416 rebuild_ms=4.058292 checksum=65000
+RESPONSIVENESS size=2000 sample=4 lookup_ms=2.548084 count20_ms=15.8665 exclusion20_ms=3.824917 rebuild_ms=3.971584 checksum=65000
+RESPONSIVENESS size=2000 sample=5 lookup_ms=2.556958 count20_ms=15.64825 exclusion20_ms=3.707709 rebuild_ms=4.131542 checksum=65000
+RESPONSIVENESS size=2000 sample=6 lookup_ms=2.630042 count20_ms=15.733333 exclusion20_ms=3.916167 rebuild_ms=3.948167 checksum=65000
+RESPONSIVENESS size=2000 sample=7 lookup_ms=2.401166 count20_ms=15.471333 exclusion20_ms=3.560333 rebuild_ms=4.004791 checksum=65000

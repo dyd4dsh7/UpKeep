@@ -25,7 +25,16 @@ struct AppSecurityReport: Equatable, Sendable {
 
 enum AppSecurityInspector {
     static func inspect(_ app: InstalledApp) async -> AppSecurityReport {
-        await Task.detached(priority: .utility) { inspectSynchronously(app) }.value
+        let cancellation = CommandRunner.Cancellation()
+        let task = Task.detached(priority: .utility) {
+            await inspectWorker(app, cancellation: cancellation)
+        }
+        return await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            cancellation.cancel()
+            task.cancel()
+        }
     }
 
     static func declaredPermissions(
@@ -72,13 +81,16 @@ enum AppSecurityInspector {
             .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
     }
 
-    private static func inspectSynchronously(_ app: InstalledApp) -> AppSecurityReport {
+    private static func inspectWorker(_ app: InstalledApp, cancellation: CommandRunner.Cancellation) async -> AppSecurityReport {
+        func command(_ executable: String, _ arguments: [String]) async -> (status: Int32?, output: String) {
+            await securityCommand(executable, arguments, cancellation: cancellation)
+        }
         let info = Bundle(url: app.url)?.infoDictionary ?? [:]
-        let codesignDetails = command("/usr/bin/codesign", ["-dvvv", "--entitlements", ":-", "--xml", app.url.path])
+        let codesignDetails = await command("/usr/bin/codesign", ["-dvvv", "--entitlements", ":-", "--xml", app.url.path])
         let entitlements = plistDictionary(in: codesignDetails.output) ?? [:]
-        let signature = command("/usr/bin/codesign", ["--verify", "--deep", "--strict", app.url.path])
-        let assessment = command("/usr/sbin/spctl", ["-a", "-vv", "--type", "execute", app.url.path])
-        let quarantine = command("/usr/bin/xattr", ["-p", "com.apple.quarantine", app.url.path]).status == 0
+        let signature = await command("/usr/bin/codesign", ["--verify", "--deep", "--strict", app.url.path])
+        let assessment = await command("/usr/sbin/spctl", ["-a", "-vv", "--type", "execute", app.url.path])
+        let quarantine = await command("/usr/bin/xattr", ["-p", "com.apple.quarantine", app.url.path]).status == 0
         let architectures = AppArchitectureInspector.architectures(at: app.url, info: info)
         let authority = lines(in: codesignDetails.output, prefix: "Authority=").first
             ?? lines(in: assessment.output, prefix: "origin=").first
@@ -92,17 +104,17 @@ enum AppSecurityInspector {
         return AppSecurityReport(
             permissions: declaredPermissions(info: info, entitlements: entitlements),
             sandboxed: boolValue(entitlements["com.apple.security.app-sandbox"]),
-            hardenedRuntime: codesignDetails.output.localizedCaseInsensitiveContains("runtime"),
-            signatureValid: signature.status == 0,
+            hardenedRuntime: codesignDetails.status == 0 ? codesignDetails.output.localizedCaseInsensitiveContains("runtime") : nil,
+            signatureValid: signature.status.map { $0 == 0 },
             signingIdentity: authority,
             teamIdentifier: team,
-            gatekeeper: assessment.status == 0 ? "Accepted" : "Not accepted",
+            gatekeeper: assessment.status.map { $0 == 0 ? "Accepted" : "Not accepted" } ?? "Unavailable",
             notarization: notarization,
             architectures: architectures,
             quarantine: quarantine,
             minimumSystemVersion: info["LSMinimumSystemVersion"] as? String,
             bundleType: info["CFBundlePackageType"] as? String,
-            fileSize: allocatedSize(of: app.url)
+            fileSize: allocatedSize(of: app.url, cancellation: cancellation)
         )
     }
 
@@ -136,7 +148,7 @@ enum AppSecurityInspector {
         }
     }
 
-    private static func allocatedSize(of url: URL) -> Int64? {
+    private static func allocatedSize(of url: URL, cancellation: CommandRunner.Cancellation) -> Int64? {
         guard let enumerator = FileManager.default.enumerator(
             at: url,
             includingPropertiesForKeys: [.totalFileAllocatedSizeKey, .fileAllocatedSizeKey],
@@ -144,33 +156,36 @@ enum AppSecurityInspector {
         ) else { return nil }
         var total: Int64 = 0
         for case let fileURL as URL in enumerator {
+            do { try cancellation.check() } catch { return nil }
             let values = try? fileURL.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .fileAllocatedSizeKey])
             total += Int64(values?.totalFileAllocatedSize ?? values?.fileAllocatedSize ?? 0)
         }
         return total
     }
 
-    private static func command(_ executable: String, _ arguments: [String]) -> (status: Int32, output: String) {
-        guard FileManager.default.isExecutableFile(atPath: executable) else { return (-1, "") }
-        let process = Process()
-        let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = arguments
-        process.standardOutput = pipe
-        process.standardError = pipe
-        do { try process.run() } catch { return (-1, error.localizedDescription) }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        return (process.terminationStatus, String(data: data, encoding: .utf8) ?? "")
+    static func securityCommand(_ executable: String, _ arguments: [String],
+                                timeout: TimeInterval = 30,
+                                cancellation: CommandRunner.Cancellation? = nil) async -> (status: Int32?, output: String) {
+        do {
+            try cancellation?.check()
+            let result = try await CommandRunner.run(URL(fileURLWithPath: executable), arguments,
+                                                    timeout: timeout, maximumOutputBytes: 1_024 * 1_024)
+            return (result.status, String(decoding: result.output, as: UTF8.self))
+        } catch { return (nil, error.localizedDescription) }
     }
 }
 
 @MainActor
 final class AppSecurityInspectionModel: ObservableObject {
     @Published private(set) var report: AppSecurityReport?
+    private var generation = UUID()
 
     func load(_ app: InstalledApp) async {
+        let request = UUID()
+        generation = request
         report = nil
-        report = await AppSecurityInspector.inspect(app)
+        let result = await AppSecurityInspector.inspect(app)
+        guard generation == request, !Task.isCancelled else { return }
+        report = result
     }
 }

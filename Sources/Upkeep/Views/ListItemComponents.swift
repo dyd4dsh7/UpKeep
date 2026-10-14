@@ -8,6 +8,17 @@ enum UpkeepLayout {
     static let inspectorMaximumWidth: CGFloat = 500
 }
 
+private struct ItemRowSelectionKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+private extension EnvironmentValues {
+    var upkeepItemRowSelected: Bool {
+        get { self[ItemRowSelectionKey.self] }
+        set { self[ItemRowSelectionKey.self] = newValue }
+    }
+}
+
 struct StandardItemRow<Icon: View, Content: View, Accessories: View>: View {
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -45,9 +56,13 @@ struct StandardItemRow<Icon: View, Content: View, Accessories: View>: View {
                 }
             }
         }
+        // Let native Lists measure the wrapped layout's full height after an
+        // inspector changes the available width, rather than reuse a short row.
+        .fixedSize(horizontal: false, vertical: true)
         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+        .environment(\.upkeepItemRowSelected, isSelected)
         .padding(.horizontal, settings.listDensity == .compact ? 2 : 6)
-        .padding(.vertical, settings.listDensity == .compact ? 5 : 10)
+        .padding(.vertical, settings.listDensity == .compact ? 5 : 8)
         .contentShape(Rectangle())
         .listRowSeparator(.visible)
         .animation(reduceMotion ? nil : UpkeepMotion.quick, value: settings.listDensity)
@@ -86,8 +101,9 @@ struct ItemIdentityView: View {
         VStack(alignment: .leading, spacing: settings.listDensity == .compact ? 1 : 4) {
             HStack(spacing: 7) {
                 Text(title)
-                    .font(.body.weight(.semibold))
+                    .font(.body.weight(.medium))
                     .lineLimit(1)
+                    .help(title)
                 if isRunning { RunningIndicator() }
                 if showsIntelWarning { IntelAppBadge() }
                 if let tag {
@@ -103,6 +119,7 @@ struct ItemIdentityView: View {
                 .font(settings.listDensity == .compact ? .caption : .subheadline)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+                .help(detail)
         }
     }
 }
@@ -117,27 +134,8 @@ struct RefreshingIndicator: View {
     }
 }
 
-struct ListDensityButton: View {
-    @EnvironmentObject private var settings: AppSettings
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        Button {
-            withAnimation(reduceMotion ? nil : UpkeepMotion.quick) {
-                settings.listDensity = settings.listDensity == .comfortable ? .compact : .comfortable
-            }
-        } label: {
-            ListControlLabel(
-                systemImage: "arrow.up.and.down.text.horizontal",
-                isActive: settings.listDensity == .compact
-            )
-        }
-        .toolbarControlLabel(settings.listDensity == .compact ? "Use comfortable rows" : "Use compact rows")
-    }
-}
-
 struct ScanToolbarButton: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
 
     var body: some View {
         AsyncToolbarButton(
@@ -286,6 +284,7 @@ struct InstalledVersionView: View {
 }
 
 struct VersionTransitionView: View {
+    @Environment(\.upkeepItemRowSelected) private var isSelected
     let current: String
     var latest: String?
     var usesFixedWidth = true
@@ -301,7 +300,7 @@ struct VersionTransitionView: View {
                         .foregroundStyle(.tertiary)
                     Text(latest)
                         .fontWeight(.semibold)
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(isSelected ? Color(nsColor: .alternateSelectedControlTextColor) : .accentColor)
                 }
             } else {
                 HStack(spacing: 5) {
@@ -318,7 +317,7 @@ struct VersionTransitionView: View {
         .font(.subheadline.monospacedDigit())
         .lineLimit(1)
         .minimumScaleFactor(0.8)
-        .frame(width: usesFixedWidth ? 178 : nil, alignment: usesFixedWidth ? .trailing : .leading)
+        .frame(width: usesFixedWidth ? 138 : nil, alignment: usesFixedWidth ? .trailing : .leading)
         .accessibilityElement(children: .combine)
     }
 }
@@ -362,8 +361,7 @@ struct ListRowPrimaryAction: ViewModifier {
     func body(content: Content) -> some View {
         content
             .buttonStyle(.bordered)
-            .buttonBorderShape(.capsule)
-            .controlSize(.small)
+            .controlSize(.regular)
             .fixedSize(horizontal: true, vertical: false)
             .frame(minWidth: UpkeepLayout.listActionWidth, alignment: .trailing)
     }

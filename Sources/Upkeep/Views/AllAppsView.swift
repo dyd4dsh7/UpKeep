@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 struct AllAppsView: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     let apps: [InstalledApp]
     let title: String
     let systemImage: String
@@ -107,7 +107,6 @@ struct AllAppsView: View {
         ToolbarItemGroup(placement: .primaryAction) {
             appSortMenu
             appFilterMenu
-            ListDensityButton()
         }
         upkeepToolbarSpacer()
         ToolbarItem(placement: .primaryAction) {
@@ -331,7 +330,7 @@ struct AllAppsView: View {
 }
 
 struct AppDetailView: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     @EnvironmentObject private var settings: AppSettings
     @StateObject private var inspection = AppSecurityInspectionModel()
     @StateObject private var detailState = AppDetailState()
@@ -376,7 +375,7 @@ struct AppDetailView: View {
         .frame(minHeight: 0)
         .onChange(of: app.id) { _, _ in showsFullReleaseNotes = false }
         .sheet(isPresented: $detailState.showsAppleSiliconMigration) {
-            AppleSiliconMigrationView(app: app).environmentObject(store)
+            AppleSiliconMigrationView(app: app).environment(\.upkeepStoreReference, store)
         }
         .task(id: detailState.showsTechnicalDetails ? app.id : nil) {
             guard detailState.showsTechnicalDetails else { return }
@@ -441,9 +440,6 @@ struct AppDetailView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Label("Technical Details", systemImage: "info.circle")
                     .font(.headline)
-                Text("Bundle metadata, declared permissions, signing, and Gatekeeper status")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
         }
         .padding(14)
@@ -566,7 +562,7 @@ struct AppDetailView: View {
                     Text(statusTitle).font(.headline)
                     if let update {
                         Text(update.requiresInAppInstallation
-                             ? "Open \(app.name) to complete this Sparkle installer update."
+                             ? "Open \(app.name) to install this update."
                              : "Available through \(update.source.rawValue)")
                             .font(.callout)
                             .foregroundStyle(.secondary)
@@ -627,11 +623,6 @@ struct AppDetailView: View {
                             showsFullReleaseNotes.toggle()
                         }
                         .buttonStyle(.link)
-                    }
-                    if notes.isEmpty {
-                        Text("The developer did not provide release notes for this update source.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     }
                 }
                 .padding(16)
@@ -935,13 +926,6 @@ private final class AppDetailState: ObservableObject {
     @Published var isSavingGitHubRepository = false
 }
 
-struct AppIcon: View {
-    let url: URL
-    let size: CGFloat
-    var body: some View {
-        Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().scaledToFit().frame(width: size, height: size)
-    }
-}
 
 struct SourceBadge: View {
     let source: UpdateSource

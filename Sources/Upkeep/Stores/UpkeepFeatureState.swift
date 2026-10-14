@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import Observation
 
 enum OperationID: Hashable, Sendable {
     case applicationUpdate(String)
@@ -16,22 +17,41 @@ enum OperationID: Hashable, Sendable {
     case developerScan(DeveloperPackageManager?)
     case packageCleanup(String)
     case localModelScan
+    case localModelRuntimeScan(LocalModelRuntime)
     case homebrewBatch
+    case homebrewInventoryScan
+    case homebrewCatalogScan
+    case macOSSourceScan
     case unifiedBatch
     case batchItem(String)
 }
 
 @MainActor
+@Observable
 final class UpkeepLibraryState: ObservableObject {
-    @Published var apps: [InstalledApp] = [] { didSet { rebuildAppLookups() } }
-    @Published var updates: [AvailableUpdate] = [] { didSet { rebuildUpdateLookup() } }
-    @Published var homebrewPackages: [HomebrewPackage] = [] { didSet { rebuildHomebrewLookups() } }
-    @Published var adoptableApps: [AdoptableApp] = [] { didSet { rebuildAdoptableLookups() } }
-    @Published var macOSUpdates: [MacOSUpdate] = []
-    @Published var updateHistory: [UpdateRecord] = []
-    @Published var developerPackages: [DeveloperPackage] = [] { didSet { rebuildDeveloperPackageLookup() } }
-    @Published var installedDeveloperManagers: [DeveloperPackageManager] = []
-    @Published var localModels: [LocalLLMModel] = [] { didSet { rebuildLocalModelLookup() } }
+    private(set) var appGeneration: UInt64 = 0
+    private(set) var adoptableGeneration: UInt64 = 0
+    private(set) var developerGeneration: UInt64 = 0
+    private(set) var homebrewGeneration: UInt64 = 0
+    private(set) var primaryUpdateGeneration: UInt64 = 0
+    // Stable legacy publisher; all sends remain inside this MainActor model.
+    @ObservationIgnored nonisolated(unsafe) let objectWillChange = ObservableObjectPublisher()
+    private(set) var generation: UInt64 = 0
+    private func changed() { generation &+= 1 }
+    var apps: [InstalledApp] = [] { willSet { objectWillChange.send() } didSet { appGeneration &+= 1; changed(); rebuildAppLookups() } }
+    var updates: [AvailableUpdate] = [] { willSet { objectWillChange.send() } didSet { primaryUpdateGeneration &+= 1; changed(); rebuildUpdateLookup() } }
+    var homebrewPackages: [HomebrewPackage] = [] { willSet { objectWillChange.send() } didSet { homebrewGeneration &+= 1; primaryUpdateGeneration &+= 1; changed(); rebuildHomebrewLookups() } }
+    var homebrewServices: [HomebrewService] = [] { willSet { objectWillChange.send() } }
+    var homebrewServicesCheckedAt: Date? { willSet { objectWillChange.send() } }
+    var homebrewServicesSucceededAt: Date? { willSet { objectWillChange.send() } }
+    var homebrewServicesFailure: String? { willSet { objectWillChange.send() } }
+    var isCheckingHomebrewServices = false { willSet { objectWillChange.send() } }
+    var adoptableApps: [AdoptableApp] = [] { willSet { objectWillChange.send() } didSet { adoptableGeneration &+= 1; changed(); rebuildAdoptableLookups() } }
+    var macOSUpdates: [MacOSUpdate] = [] { willSet { objectWillChange.send() } didSet { primaryUpdateGeneration &+= 1; changed() } }
+    var updateHistory: [UpdateRecord] = [] { willSet { objectWillChange.send() } didSet { changed() } }
+    var developerPackages: [DeveloperPackage] = [] { willSet { objectWillChange.send() } didSet { developerGeneration &+= 1; changed(); rebuildDeveloperPackageLookup() } }
+    var installedDeveloperManagers: [DeveloperPackageManager] = [] { willSet { objectWillChange.send() } }
+    var localModels: [LocalLLMModel] = [] { willSet { objectWillChange.send() } didSet { changed(); rebuildLocalModelLookup() } }
 
     private var appByID: [String: InstalledApp] = [:]
     private var appIndexByProductName: [String: Int] = [:]
@@ -163,40 +183,52 @@ final class UpkeepLibraryState: ObservableObject {
 }
 
 @MainActor
+@Observable
 final class UpkeepNavigationState: ObservableObject {
-    @Published var selection: SidebarDestination = .updates
-    @Published var homebrewFilter: HomebrewFilter = .all
-    @Published var appListFilter: AppListFilter = .all
-    @Published var appSortOrder: AppSortOrder = .recommended
-    @Published var appSortAscending = true
-    @Published var homebrewSortOrder: HomebrewSortOrder = .recommended
-    @Published var homebrewSortAscending = true
-    @Published var developerManagerFilter: DeveloperManagerFilter = .all
-    @Published var selectedPackageID: String?
-    @Published var selectedDeveloperPackageID: String?
-    @Published var selectedDeveloperVersion = ""
-    @Published var selectedLocalModelID: String?
-    @Published var availableDeveloperVersions: [String] = []
-    @Published var isLoadingDeveloperVersions = false
-    @Published var selectedApp: InstalledApp?
-    @Published var updateInspectorSelection: UpdateInspectorSelection?
-    @Published var searchText = ""
-    @Published var pendingRevert: UpdateRecord?
-    @Published var pendingRunningAppConfirmation: RunningAppConfirmation?
-    @Published var pendingHomebrewAuthorizationConfirmation: HomebrewAuthorizationConfirmation?
-    @Published var isShowingBatchReview = false
+    // Stable legacy publisher; all sends remain inside this MainActor model.
+    @ObservationIgnored nonisolated(unsafe) let objectWillChange = ObservableObjectPublisher()
+    var selection: SidebarDestination = .updates { willSet { objectWillChange.send() } }
+    var homebrewFilter: HomebrewFilter = .all { willSet { objectWillChange.send() } }
+    var appListFilter: AppListFilter = .all { willSet { objectWillChange.send() } }
+    var appSortOrder: AppSortOrder = .recommended { willSet { objectWillChange.send() } }
+    var appSortAscending = true { willSet { objectWillChange.send() } }
+    var homebrewSortOrder: HomebrewSortOrder = .recommended { willSet { objectWillChange.send() } }
+    var homebrewSortAscending = true { willSet { objectWillChange.send() } }
+    var developerManagerFilter: DeveloperManagerFilter = .all { willSet { objectWillChange.send() } }
+    var selectedPackageID: String? { willSet { objectWillChange.send() } }
+    var selectedDeveloperPackageID: String? { willSet { objectWillChange.send() } }
+    var selectedDeveloperVersion = "" { willSet { objectWillChange.send() } }
+    var selectedLocalModelID: String? { willSet { objectWillChange.send() } }
+    var availableDeveloperVersions: [String] = [] { willSet { objectWillChange.send() } }
+    var isLoadingDeveloperVersions = false { willSet { objectWillChange.send() } }
+    var selectedApp: InstalledApp? { willSet { objectWillChange.send() } }
+    var updateInspectorSelection: UpdateInspectorSelection? { willSet { objectWillChange.send() } }
+    var searchText = "" { willSet { objectWillChange.send() } }
+    var pendingRevert: UpdateRecord? { willSet { objectWillChange.send() } }
+    var pendingRunningAppConfirmation: RunningAppConfirmation? { willSet { objectWillChange.send() } }
+    var pendingHomebrewAuthorizationConfirmation: HomebrewAuthorizationConfirmation? { willSet { objectWillChange.send() } }
+    var isShowingBatchReview = false { willSet { objectWillChange.send() } }
 }
 
 @MainActor
+@Observable
 final class UpkeepScanState: ObservableObject {
-    @Published var isScanning = false
-    @Published var lastChecked: Date?
-    @Published var nextScheduledCheck: Date?
-    @Published var errorMessage: String?
-    @Published var scanWarnings: [ScanWarning] = []
-    @Published var failedAppSources: [String: Set<UpdateSource>] = [:]
-    @Published var completedCheckState: UpdateCheckState?
-    @Published var macOSStatus: ScanStatus?
+    // Stable legacy publisher; all sends remain inside this MainActor model.
+    @ObservationIgnored nonisolated(unsafe) let objectWillChange = ObservableObjectPublisher()
+    var generation: UUID?
+    var revision: UInt64 = 0
+    var latestFullRevision: UInt64 = 0
+    var sourceRevisions: [String: UInt64] = [:]
+    var progress: ScanProgress? { willSet { objectWillChange.send() } }
+    var firstResultSeconds: TimeInterval? { willSet { objectWillChange.send() } }
+    var isScanning = false { willSet { objectWillChange.send() } }
+    var lastChecked: Date? { willSet { objectWillChange.send() } }
+    var nextScheduledCheck: Date? { willSet { objectWillChange.send() } }
+    var errorMessage: String? { willSet { objectWillChange.send() } }
+    var scanWarnings: [ScanWarning] = [] { willSet { objectWillChange.send() } }
+    var failedAppSources: [String: Set<UpdateSource>] = [:] { willSet { objectWillChange.send() } }
+    var completedCheckState: UpdateCheckState? { willSet { objectWillChange.send() } }
+    var macOSStatus: ScanStatus? { willSet { objectWillChange.send() } }
 
     init(lastChecked: Date?) {
         self.lastChecked = lastChecked
@@ -204,14 +236,59 @@ final class UpkeepScanState: ObservableObject {
 }
 
 @MainActor
+@Observable
 final class UpkeepUpdateExecutionState: ObservableObject {
-    @Published var activeOperations = Set<OperationID>()
-    @Published var activities: [OperationID: UpdateActivity] = [:]
-    @Published var batchUpdateProgress: BatchUpdateProgress?
-    @Published var appManagementPermissionCheck: AppManagementPermissionCheck?
-    @Published var runningBundleIdentifiers = Set<String>()
-    @Published var runningApplicationPaths = Set<String>()
-    @Published var externalUpdateVerifications: [String: ExternalUpdateVerification] = [:]
+    // Stable legacy publisher; all sends remain inside this MainActor model.
+    @ObservationIgnored nonisolated(unsafe) let objectWillChange = ObservableObjectPublisher()
+    var activeOperations = Set<OperationID>() { willSet { objectWillChange.send() } }
+    private(set) var activities: [OperationID: UpdateActivity] = [:] { willSet { objectWillChange.send() } }
+    private(set) var completedOperations: [CompletedOperation] = [] { willSet { objectWillChange.send() } }
+    var batchUpdateProgress: BatchUpdateProgress? { willSet { objectWillChange.send() } }
+    var appManagementPermissionCheck: AppManagementPermissionCheck? { willSet { objectWillChange.send() } }
+    var runningBundleIdentifiers = Set<String>() { willSet { objectWillChange.send() } }
+    var runningApplicationPaths = Set<String>() { willSet { objectWillChange.send() } }
+    var externalUpdateVerifications: [String: ExternalUpdateVerification] = [:] { willSet { objectWillChange.send() } }
+
+    func begin(_ operation: OperationID, targets: Set<MutationTarget>, phase: UpdatePhase,
+               label: String, at date: Date = Date()) {
+        activities[operation] = UpdateActivity(targets: targets, phase: phase, startedAt: date, label: label)
+    }
+
+    func setPhase(_ phase: UpdatePhase, for operation: OperationID) {
+        activities[operation]?.phase = phase
+    }
+
+    func recordVerification(_ result: OperationResult, for operation: OperationID,
+                            commandError: String? = nil, verification: OperationVerificationDetail? = nil) {
+        activities[operation]?.result = result
+        activities[operation]?.commandError = commandError
+        activities[operation]?.verification = verification
+    }
+
+    /// Input has already passed command-log redaction. Bound the aggregate too,
+    /// since an operation can execute multiple individually bounded commands.
+    func appendRedactedCommandLog(_ text: String, for operation: OperationID) {
+        guard let previous = activities[operation]?.commandLog else { return }
+        let marker = "\n[Log output truncated]\n"
+        guard !previous.hasSuffix(marker) else { return }
+        let limit = 32_768
+        if previous.count + text.count <= limit {
+            activities[operation]?.commandLog = previous + text
+        } else {
+            let prefix = String((previous + text).prefix(limit - marker.count))
+            activities[operation]?.commandLog = prefix + marker
+        }
+    }
+
+    func finish(_ operation: OperationID, at date: Date = Date()) {
+        guard let activity = activities.removeValue(forKey: operation) else { return }
+        completedOperations.insert(CompletedOperation(id: UUID(), operation: operation,
+            startedAt: activity.startedAt, finishedAt: date, result: activity.result ?? .unverified,
+            label: activity.label, commandError: activity.commandError, verification: activity.verification,
+            commandLog: activity.commandLog), at: 0)
+        completedOperations = Array(completedOperations.prefix(100))
+    }
+
 }
 
 struct ExternalUpdateVerification: Equatable, Sendable {
@@ -226,9 +303,12 @@ struct ExternalUpdateVerification: Equatable, Sendable {
 }
 
 @MainActor
+@Observable
 final class UpkeepDiagnosticsState: ObservableObject {
-    @Published var diagnosticEntries = DiagnosticsStore.shared.entries()
-    @Published var diagnosticsSearchText = ""
-    @Published var diagnosticsLevelFilter = DiagnosticLevelFilter.all
-    @Published var diagnosticsCategoryFilter: DiagnosticCategory?
+    // Stable legacy publisher; all sends remain inside this MainActor model.
+    @ObservationIgnored nonisolated(unsafe) let objectWillChange = ObservableObjectPublisher()
+    var diagnosticEntries = DiagnosticsStore.shared.entries() { willSet { objectWillChange.send() } }
+    var diagnosticsSearchText = "" { willSet { objectWillChange.send() } }
+    var diagnosticsLevelFilter = DiagnosticLevelFilter.all { willSet { objectWillChange.send() } }
+    var diagnosticsCategoryFilter: DiagnosticCategory? { willSet { objectWillChange.send() } }
 }

@@ -16,19 +16,43 @@ jobs:
   test-and-package:
     runs-on: macos-26
     timeout-minutes: 30
+    outputs:
+      oldest_runtime_available: ${{ steps.oldest-runtime.outputs.available }}
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # GitHub retires hosted macOS 14 on 2026-11-02. Retain an explicit
+      # infrastructure gate rather than silently testing a newer OS as macOS 14.
+      # https://github.com/actions/runner-images/issues/13518
+      - name: Determine oldest-runtime infrastructure availability
+        id: oldest-runtime
+        run: |
+          if (( $(date -u +%Y%m%d) < 20261102 )); then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Hosted macOS 14 is retired; oldest-runtime validation requires replacement infrastructure."
+          fi
       - name: Verify toolchain
         run: |
           xcodebuild -version
           swift --version
           xcrun --sdk macosx --show-sdk-version
       - name: Test with warnings as errors
-        run: swift test -Xswiftc -warnings-as-errors
+        # Process fixtures share admission gates and have bounded shutdown timers.
+        # Run cases separately; concurrency is exercised within dedicated tests.
+        run: swift test --no-parallel -Xswiftc -warnings-as-errors
+      - name: Test global process admission in isolation
+        env:
+          UPKEEP_PROCESS_STRESS: "1"
+        run: swift test -Xswiftc -warnings-as-errors --filter globalProcessAdmissionAcrossDistinctExecutables
+      - name: Test network destination process admission in isolation
+        env:
+          UPKEEP_PROCESS_STRESS: "1"
+        run: swift test -Xswiftc -warnings-as-errors --filter processAdmissionAcrossNetworkDestinations
       - name: Package debug app
         id: package
         run: ./scripts/package-app.sh debug
@@ -45,9 +69,9 @@ jobs:
             echo "Debug artifact unexpectedly passed release validation" >&2
             exit 1
           fi
-      - name: Launch smoke test
+      - name: Isolated narrow fixture launch smoke test
         run: |
-          open -n --stdout "$RUNNER_TEMP/upkeep-stdout.log" --stderr "$RUNNER_TEMP/upkeep-stderr.log" ci-artifact/Upkeep.app
+          open -n --stdout "$RUNNER_TEMP/upkeep-stdout.log" --stderr "$RUNNER_TEMP/upkeep-stderr.log" ci-artifact/Upkeep.app --args --ui-fixture --ui-fixture-narrow --ui-fixture-state=active
           for attempt in {1..15}; do
             if pgrep -x Upkeep >/dev/null; then break; fi
             sleep 1
@@ -59,6 +83,34 @@ jobs:
             exit 1
           fi
           pkill -x Upkeep
+      - name: Measure offline responsiveness fixtures
+        run: bash scripts/benchmark-performance.sh outputs/performance/responsiveness.log responsiveness
+      - name: Measure offline list projection fixtures
+        run: bash scripts/benchmark-performance.sh outputs/performance/lists.log lists
+      - name: Measure offline service fixtures
+        run: bash scripts/benchmark-performance.sh outputs/performance/services.log services
+      - name: Measure paired search fixtures
+        run: bash scripts/benchmark-performance.sh outputs/performance/search-paired.log search-paired
+      - name: Measure progressive publication fixtures
+        run: bash scripts/benchmark-performance.sh outputs/performance/progress.log progress
+      - name: Measure bounded source concurrency fixtures
+        run: bash scripts/benchmark-performance.sh outputs/performance/concurrency.log concurrency
+      - name: Measure unbounded fixture reference in a separate process
+        run: bash scripts/benchmark-performance.sh outputs/performance/concurrency-unbounded.log concurrency-unbounded
+      - name: Measure isolated real command-process workload
+        run: bash scripts/benchmark-performance.sh outputs/performance/processes.log processes
+      - name: Test optimized build
+        run: swift test -c release --skip-build --no-parallel -Xswiftc -warnings-as-errors
+      - name: Summarize paired search measurements
+        run: python3 scripts/compare-performance.py outputs/performance/search-paired.log --paired-search > outputs/performance/search-summary.md
+      - name: Retain performance measurements
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: Upkeep-performance-${{ github.sha }}
+          path: outputs/performance/
+          retention-days: 30
+          if-no-files-found: warn
       - name: Retain debug package for verification
         if: always() && steps.package.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -67,11 +119,53 @@ jobs:
           path: outputs/Upkeep.zip
           retention-days: 7
           if-no-files-found: error
+  oldest-runtime:
+    needs: test-and-package
+    if: needs.test-and-package.outputs.oldest_runtime_available == 'true'
+    runs-on: macos-14
+    timeout-minutes: 10
+    steps:
+      - name: Download the already-built debug package
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: Upkeep-debug
+          path: compatibility-artifact
+      - name: Verify oldest runtime and artifact architecture
+        run: |
+          sw_vers
+          test "$(sw_vers -productVersion | cut -d. -f1)" = "14"
+          ditto -x -k compatibility-artifact/Upkeep.zip compatibility-app
+          codesign --verify --deep --strict compatibility-app/Upkeep.app
+          lipo compatibility-app/Upkeep.app/Contents/MacOS/Upkeep -verify_arch "$(uname -m)"
+      - name: Launch isolated fixture on the oldest supported runtime
+        run: |
+          open -n --stdout "$RUNNER_TEMP/upkeep-stdout.log" --stderr "$RUNNER_TEMP/upkeep-stderr.log" compatibility-app/Upkeep.app --args --ui-fixture --ui-fixture-narrow --ui-fixture-state=active
+          for attempt in {1..15}; do
+            if pgrep -x Upkeep >/dev/null; then break; fi
+            sleep 1
+          done
+          sleep 3
+          if ! pgrep -x Upkeep; then
+            cat "$RUNNER_TEMP/upkeep-stdout.log" "$RUNNER_TEMP/upkeep-stderr.log" || true
+            /usr/bin/log show --last 2m --style compact --predicate 'process == "Upkeep"' || true
+            exit 1
+          fi
+          pkill -x Upkeep
+      - name: Retain compatibility launch output
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: Upkeep-macos14-launch-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/upkeep-stdout.log
+            ${{ runner.temp }}/upkeep-stderr.log
+          retention-days: 7
+          if-no-files-found: warn
   secret-scan:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false

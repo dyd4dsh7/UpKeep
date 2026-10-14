@@ -49,6 +49,18 @@ struct UpdateScanner: Sendable {
         self.dependencies = dependencies
     }
 
+    func homebrewInventory(includePrereleases: Bool) async throws -> [HomebrewPackage] {
+        try await dependencies.homebrew.inventory(includePrereleases: includePrereleases)
+    }
+
+    func macOS(scope: MacOSScanScope) async throws -> MacOSUpdateClient.Report {
+        try await dependencies.macOS.scan(scope: scope)
+    }
+
+    func homebrewCatalog() async throws -> [CatalogCask] {
+        try await dependencies.homebrew.caskCatalog()
+    }
+
     struct TargetedAppReport: Sendable {
         let updates: [AvailableUpdate]
         let failedSources: Set<UpdateSource>
@@ -68,7 +80,36 @@ struct UpdateScanner: Sendable {
         )
     }
 
+    private func scanModelSources(settings: ScanSettings, progress: @escaping ScanProgressReporter) async -> LocalModelClient.Report {
+        guard settings.checkLocalModels else { return .empty }
+        let report = await dependencies.localModels.scan { report, runtimes in
+            await progress(.localModels(report, runtimes: runtimes))
+        }
+        return report
+    }
+
+    private func scanDeveloperSources(settings: ScanSettings, progress: @escaping ScanProgressReporter) async -> DeveloperPackageClient.Report {
+        guard !settings.enabledDeveloperManagers.isEmpty else { return .empty }
+        let report = await dependencies.developerPackages.scan(enabledManagers: settings.enabledDeveloperManagers,
+            includePrereleases: settings.includePrereleaseUpdates) { report, managers in
+                await progress(.developerPackages(report, managers: managers))
+            }
+        return report
+    }
+
+    private func scanSystem(settings: ScanSettings, progress: @escaping ScanProgressReporter) async -> MacOSUpdateClient.Report {
+        guard settings.checkMacOS else { return .empty }
+        let report = await dependencies.macOS.scan(includeInstallers: settings.includeAdvancedSources)
+        await progress(.macOS(report, includeInstallers: settings.includeAdvancedSources,
+            includePrereleases: settings.includePrereleaseUpdates))
+        return report
+    }
+
     func scan(settings: ScanSettings) async -> ScanReport {
+        await scan(settings: settings, progress: { _ in })
+    }
+
+    func scan(settings: ScanSettings, progress: @escaping ScanProgressReporter) async -> ScanReport {
         let scanStartedAt = Date()
         DiagnosticsStore.shared.recordBuffered(.info, category: .scan, "Update scan started", metadata: [
             "App Store": settings.checkAppStore.description,
@@ -82,28 +123,22 @@ struct UpdateScanner: Sendable {
         ])
         async let installedApps = dependencies.applicationDiscovery.discover()
         async let brewInventory = scopedResult(enabled: settings.checkHomebrew) {
-            try await dependencies.homebrew.inventory(includePrereleases: settings.includePrereleaseUpdates)
+            let packages = try await dependencies.homebrew.inventory(includePrereleases: settings.includePrereleaseUpdates)
+            await progress(.homebrewInventory(packages))
+            return packages
         }
         async let brewCatalog = scopedResult(enabled: settings.checkHomebrew && settings.includeAdvancedSources) {
             try await dependencies.homebrew.caskCatalog()
         }
-        async let macOSReport = settings.checkMacOS
-            ? dependencies.macOS.scan(includeInstallers: settings.includeAdvancedSources)
-            : MacOSUpdateClient.Report.empty
-        async let developerReport = settings.enabledDeveloperManagers.isEmpty
-            ? DeveloperPackageClient.Report.empty
-            : dependencies.developerPackages.scan(
-                enabledManagers: settings.enabledDeveloperManagers,
-                includePrereleases: settings.includePrereleaseUpdates
-            )
-        async let localModels = settings.checkLocalModels
-            ? dependencies.localModels.scan()
-            : LocalModelClient.Report.empty
+        async let macOSReport = scanSystem(settings: settings, progress: progress)
+        async let developerReport = scanDeveloperSources(settings: settings, progress: progress)
+        async let localModels = scanModelSources(settings: settings, progress: progress)
 
         // App source checks only depend on discovery, so do not hold them behind
         // Homebrew, softwareupdate, developer-manager, or model scans.
         let apps = await installedApps
-        async let appChecks = checkApps(apps, settings: settings)
+        await progress(.discovered(apps))
+        async let appChecks = checkApps(apps, settings: settings, progress: progress)
         let brewResult = await brewInventory
 
         var warnings: [ScanWarning] = []
@@ -119,7 +154,7 @@ struct UpdateScanner: Sendable {
         case let .failure(error):
             packages = []
             homebrewInventoryStatus = .failed
-            warnings.append(scanWarning(.homebrew, error: error))
+            warnings.append(scanWarning(.homebrew, error: error, prefix: "Installed packages: "))
         }
         DiagnosticsStore.shared.recordBuffered(
             homebrewInventoryStatus == .failed ? .error : .info,
@@ -217,12 +252,8 @@ struct UpdateScanner: Sendable {
         warnings.append(contentsOf: systemReport.warnings.map {
             ScanWarning(source: .macOS, message: $0)
         })
-        warnings.append(contentsOf: devReport.warnings.map {
-            ScanWarning(source: .developerPackages, message: $0)
-        })
-        warnings.append(contentsOf: modelReport.warnings.map {
-            ScanWarning(source: .localModels, message: $0)
-        })
+        warnings.append(contentsOf: devReport.scanWarnings)
+        warnings.append(contentsOf: modelReport.scanWarnings)
         DiagnosticsStore.shared.recordBuffered(
             homebrewCatalogStatus == .failed ? .error : .info,
             category: .source,
@@ -332,7 +363,7 @@ struct UpdateScanner: Sendable {
         let warning: ScanWarning?
     }
 
-    private func checkApps(_ apps: [InstalledApp], settings: ScanSettings) async -> ApplicationCheckResults {
+    private func checkApps(_ apps: [InstalledApp], settings: ScanSettings, progress: @escaping ScanProgressReporter) async -> ApplicationCheckResults {
         await withTaskGroup(of: AppSourceCheckResult.self) { group in
             for app in apps {
                 for source in enabledSources(for: app, settings: settings) {
@@ -348,12 +379,17 @@ struct UpdateScanner: Sendable {
             var updates: [AvailableUpdate] = []
             var failedSources: [String: Set<UpdateSource>] = [:]
             var warnings: [ScanWarning] = []
+            let total = apps.reduce(0) { $0 + enabledSources(for: $1, settings: settings).count }
+            var completed = 0
             for await result in group {
                 if let update = result.update { updates.append(update) }
                 if let warning = result.warning {
                     failedSources[result.appID, default: []].insert(result.source)
                     warnings.append(warning)
                 }
+                completed += 1
+                await progress(.appSource(appID: result.appID, source: result.source,
+                    update: result.update, warning: result.warning, completed: completed, total: total))
             }
             return ApplicationCheckResults(
                 updates: updates,
@@ -394,7 +430,7 @@ struct UpdateScanner: Sendable {
             checkAppStore: settings.checkAppStore,
             checkSparkle: settings.checkSparkle,
             checkGitHub: settings.checkGitHub
-        )
+        ).filter { settings.appSourceFilter?.contains($0.source) ?? true }
     }
 
     private func checkSource(
@@ -430,7 +466,7 @@ struct UpdateScanner: Sendable {
                 appID: app.id,
                 source: source,
                 update: nil,
-                warning: scanWarning(source.warningSource, error: error, itemName: app.name)
+                warning: scanWarning(source.warningSource, error: error, itemName: app.name, itemID: app.id)
             )
         }
     }
@@ -462,7 +498,7 @@ struct UpdateScanner: Sendable {
     }
 }
 
-private extension UpdateSource {
+extension UpdateSource {
     var warningSource: ScanWarningSource {
         switch self {
         case .appStore: .appStore
@@ -540,21 +576,26 @@ private func scanWarning(
     _ source: ScanWarningSource,
     error: Error,
     itemName: String? = nil,
+    itemID: String? = nil,
     prefix: String = ""
 ) -> ScanWarning {
     let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-    return ScanWarning(source: source, itemNames: itemName.map { [$0] } ?? [], message: prefix + message)
+    let ownership = itemID.flatMap { id in itemName.map { [id: $0] } }
+    return ScanWarning(source: source, itemNames: itemName.map { [$0] } ?? [], itemNamesByID: ownership, message: prefix + message)
 }
 
 private func aggregate(_ warnings: [ScanWarning]) -> [ScanWarning] {
     struct Key: Hashable { let source: ScanWarningSource; let message: String }
     var grouped: [Key: [String]] = [:]
+    var ownership: [Key: [String: String]] = [:]
     for warning in warnings {
-        grouped[Key(source: warning.source, message: warning.message), default: []].append(contentsOf: warning.itemNames)
+        let key = Key(source: warning.source, message: warning.message)
+        grouped[key, default: []].append(contentsOf: warning.itemNames)
+        if let items = warning.itemNamesByID { ownership[key, default: [:]].merge(items) { _, latest in latest } }
     }
     return grouped.map { key, names in
         let uniqueNames = Array(Set(names))
-        return ScanWarning(source: key.source, itemNames: uniqueNames, affectedItemCount: uniqueNames.count, message: key.message)
+        return ScanWarning(source: key.source, itemNames: uniqueNames, affectedItemCount: max(uniqueNames.count, ownership[key]?.count ?? 0), itemNamesByID: ownership[key], message: key.message)
     }.sorted {
         if $0.source.rawValue != $1.source.rawValue { return $0.source.rawValue < $1.source.rawValue }
         return $0.message < $1.message

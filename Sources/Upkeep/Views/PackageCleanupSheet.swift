@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct PackageCleanupSheet: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     @Environment(\.dismiss) private var dismiss
     let targets: [PackageCleanupTarget]
     @Binding var result: PackageCleanupResult?
@@ -106,7 +106,8 @@ struct PackageCleanupSheet: View {
             Button("Clean Up", role: .destructive) { Task { await clean() } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("The files identified by the package manager will be removed. This cannot be undone in Upkeep.")
+            Text(estimate?.cleanupConfirmationMessage
+                 ?? "The files identified by the package manager will be removed. This cannot be undone in Upkeep.")
         }
     }
 
@@ -131,11 +132,14 @@ struct PackageCleanupSheet: View {
             Text(failure).foregroundStyle(.secondary).textSelection(.enabled)
         } else if let estimate {
             VStack(alignment: .leading, spacing: 8) {
-                Text(estimate.basis == .reclaimable ? "Estimated space to recover" : "Current cache size")
+                Text(estimate.basis == .unavailable ? "Cleanup estimate unavailable"
+                     : estimate.basis == .reclaimable ? "Estimated space to recover" : "Current cache size")
                     .font(.headline)
-                Text(ByteCountFormatter.string(fromByteCount: estimate.bytes, countStyle: .file))
+                Text(estimate.basis == .unavailable ? "Unavailable"
+                     : ByteCountFormatter.string(fromByteCount: estimate.bytes, countStyle: .file))
                     .font(.largeTitle.weight(.semibold).monospacedDigit())
-                Text(estimate.basis == .cacheFootprintOnly
+                Text(estimate.basis == .unavailable ? estimate.confirmationMessage
+                     : estimate.basis == .cacheFootprintOnly
                      ? "The manager cannot estimate how much it will remove. This is the total cache size; cleanup may recover less or no space."
                      : estimate.shouldOfferCleanup
                      ? "The final amount may differ from this estimate."

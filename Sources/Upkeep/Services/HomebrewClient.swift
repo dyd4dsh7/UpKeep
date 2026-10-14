@@ -2,48 +2,27 @@ import Darwin
 import Foundation
 
 struct HomebrewClient: Sendable {
+    /// Inspects services for the current user without starting or stopping them.
+    func services() async throws -> [HomebrewService] {
+        guard let brew = Self.brewURL else { throw BrewError.failed("Homebrew is unavailable.") }
+        let data = try await run(brew, ["services", "list", "--json"])
+        do {
+            return try JSONDecoder().decode([HomebrewService].self, from: data)
+                .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        } catch {
+            throw BrewError.failed("Homebrew service inventory could not be read: \(error.localizedDescription)")
+        }
+    }
+
     func inventory(includePrereleases: Bool = false) async throws -> [HomebrewPackage] {
         guard let brew = Self.brewURL else { return [] }
-        return try await Task.detached(priority: .utility) {
-            let data = try await runWithRetry(brew, ["info", "--json=v2", "--installed"])
-            let response: InfoResponse
-            do { response = try JSONDecoder().decode(InfoResponse.self, from: data) }
-            catch { throw BrewError.failed("Homebrew inventory could not be read: \(error.localizedDescription)") }
+        let data = try await runWithRetry(brew, ["info", "--json=v2", "--installed"])
+        let response: InfoResponse
+        do { response = try JSONDecoder().decode(InfoResponse.self, from: data) }
+        catch { throw BrewError.failed("Homebrew inventory could not be read: \(error.localizedDescription)") }
 
-            let formulae = response.formulae.compactMap { formula -> HomebrewPackage? in
-                guard let installed = formula.installed.last else { return nil }
-                return HomebrewPackage(
-                    token: formula.name,
-                    displayName: formula.name,
-                    description: formula.desc,
-                    homepage: formula.homepage.flatMap(URL.init(string:)),
-                    license: formula.license,
-                    installedVersion: installed.version,
-                    currentVersion: formula.versions.stable ?? installed.version,
-                    kind: .formula,
-                    isOutdated: formula.outdated && (includePrereleases || !VersionComparator.isPrerelease(formula.versions.stable ?? installed.version)),
-                    isDependency: !installed.installedOnRequest,
-                    dependencies: formula.dependencies
-                )
-            }
-            let casks = response.casks.compactMap { cask -> HomebrewPackage? in
-                guard let installed = cask.installedVersion else { return nil }
-                return HomebrewPackage(
-                    token: cask.token,
-                    displayName: cask.name.first ?? cask.token,
-                    description: cask.desc,
-                    homepage: cask.homepage.flatMap(URL.init(string:)),
-                    license: nil,
-                    installedVersion: installed,
-                    currentVersion: cask.version,
-                    kind: .cask,
-                    isOutdated: cask.outdated && (includePrereleases || !VersionComparator.isPrerelease(cask.version)),
-                    isDependency: false,
-                    dependencies: []
-                )
-            }
-            return (formulae + casks).sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
-        }.value
+        return packages(from: response, includePrereleases: includePrereleases)
+            .sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
     }
 
     /// Reads metadata for one installed token instead of loading the full Homebrew inventory.
@@ -53,17 +32,15 @@ struct HomebrewClient: Sendable {
         includePrereleases: Bool = false
     ) async throws -> HomebrewPackage? {
         guard let brew = Self.brewURL else { return nil }
-        return try await Task.detached(priority: .utility) {
-            var arguments = ["info", "--json=v2"]
-            if kind == .cask { arguments.append("--cask") }
-            arguments.append(token)
-            let data = try await runWithRetry(brew, arguments)
-            let response: InfoResponse
-            do { response = try JSONDecoder().decode(InfoResponse.self, from: data) }
-            catch { throw BrewError.failed("Homebrew package data could not be read: \(error.localizedDescription)") }
-            return packages(from: response, includePrereleases: includePrereleases)
-                .first { $0.kind == kind && $0.token == token }
-        }.value
+        var arguments = ["info", "--json=v2"]
+        if kind == .cask { arguments.append("--cask") }
+        arguments.append(token)
+        let data = try await runWithRetry(brew, arguments)
+        let response: InfoResponse
+        do { response = try JSONDecoder().decode(InfoResponse.self, from: data) }
+        catch { throw BrewError.failed("Homebrew package data could not be read: \(error.localizedDescription)") }
+        return packages(from: response, includePrereleases: includePrereleases)
+            .first { $0.kind == kind && $0.token == token }
     }
 
     func caskCatalog() async throws -> [CatalogCask] {
@@ -140,13 +117,7 @@ struct HomebrewClient: Sendable {
                   let brew = Self.brewURL
             else { throw error }
 
-            try await Task.detached(priority: .userInitiated) {
-                _ = try await runInTerminal(
-                    brew,
-                    arguments,
-                    permissionRepairURL: item.app.url
-                )
-            }.value
+            _ = try await runInTerminal(brew, arguments, permissionRepairURL: item.app.url)
         }
     }
 
@@ -160,16 +131,14 @@ struct HomebrewClient: Sendable {
 
     private func execute(_ arguments: [String]) async throws {
         guard let brew = Self.brewURL else { throw BrewError.notInstalled }
-        try await Task.detached(priority: .userInitiated) {
-            do {
-                _ = try await runWithRetry(brew, arguments)
-            } catch let error as BrewError {
-                guard case let .failed(message) = error,
-                      BrewError.requiresInteractiveAuthorization(message)
-                else { throw error }
-                _ = try await runInTerminal(brew, arguments)
-            }
-        }.value
+        do {
+            _ = try await runWithRetry(brew, arguments)
+        } catch let error as BrewError {
+            guard case let .failed(message) = error,
+                  BrewError.requiresInteractiveAuthorization(message)
+            else { throw error }
+            _ = try await runInTerminal(brew, arguments)
+        }
     }
 
     static var brewURL: URL? {
@@ -242,7 +211,7 @@ private func cacheCaskCatalog(_ data: Data) {
 private func runWithRetry(_ executable: URL, _ arguments: [String]) async throws -> Data {
     let delays: [UInt64] = [1, 2, 4]
     for attempt in 0...delays.count {
-        do { return try run(executable, arguments) }
+        do { return try await run(executable, arguments) }
         catch let error as HomebrewClient.BrewError {
             guard case let .failed(message) = error,
                   HomebrewClient.BrewError.isConcurrentCommandFailure(message),
@@ -260,47 +229,28 @@ private func runWithRetry(_ executable: URL, _ arguments: [String]) async throws
     throw HomebrewClient.BrewError.failed("Homebrew did not become available after retrying.")
 }
 
-private func run(_ executable: URL, _ arguments: [String]) throws -> Data {
+private func run(_ executable: URL, _ arguments: [String]) async throws -> Data {
     let startedAt = Date()
     let command = "brew " + arguments.joined(separator: " ")
-    let process = Process()
-    let output = Pipe()
-    process.executableURL = executable
-    process.arguments = arguments
-    process.standardOutput = output
-    process.standardError = output
-    do { try process.run() }
-    catch {
-        DiagnosticsStore.shared.record(.error, category: .command, "Homebrew command could not start", metadata: [
-            "Command": command,
-            "Duration": String(format: "%.0f ms", Date().timeIntervalSince(startedAt) * 1_000),
-            "Error": error.localizedDescription
+    do {
+        let result = try await CommandRunner.run(executable, arguments, timeout: CommandRunner.deadline(for: arguments))
+        var metadata = ["Command": command, "Exit status": "\(result.status)",
+                        "Duration": formattedDiagnosticDuration(since: startedAt), "Output bytes": "\(result.output.count)"]
+        if arguments.first != "info" || result.status != 0 {
+            metadata["Output"] = String(decoding: result.output.prefix(1_200), as: UTF8.self)
+        }
+        DiagnosticsStore.shared.record(result.status == 0 ? .info : .error, category: .command,
+            "Homebrew command \(result.status == 0 ? "completed" : "failed")", metadata: metadata)
+        guard result.status == 0 else {
+            throw HomebrewClient.BrewError.failed(String(decoding: result.output, as: UTF8.self))
+        }
+        return result.output
+    } catch {
+        DiagnosticsStore.shared.record(.error, category: .command, "Homebrew command failed", metadata: [
+            "Command": command, "Duration": formattedDiagnosticDuration(since: startedAt), "Error": error.localizedDescription
         ])
         throw error
     }
-    let data = output.fileHandleForReading.readDataToEndOfFile()
-    process.waitUntilExit()
-    let outputText = String(data: data.prefix(1_200), encoding: .utf8)?
-        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    var metadata = [
-        "Command": command,
-        "Exit status": "\(process.terminationStatus)",
-        "Duration": String(format: "%.0f ms", Date().timeIntervalSince(startedAt) * 1_000),
-        "Output bytes": "\(data.count)"
-    ]
-    if arguments.first != "info" || process.terminationStatus != 0 {
-        metadata["Output"] = outputText.isEmpty ? "(no output)" : outputText
-    }
-    DiagnosticsStore.shared.record(
-        process.terminationStatus == 0 ? .info : .error,
-        category: .command,
-        "Homebrew command \(process.terminationStatus == 0 ? "completed" : "failed")",
-        metadata: metadata
-    )
-    guard process.terminationStatus == 0 else {
-        throw HomebrewClient.BrewError.failed(String(data: data, encoding: .utf8) ?? "Homebrew failed")
-    }
-    return data
 }
 
 private func runInTerminal(
@@ -308,25 +258,63 @@ private func runInTerminal(
     _ arguments: [String],
     permissionRepairURL: URL? = nil
 ) async throws -> Data {
+    let commandLog = OperationCommandLogContext.current
+    let cancellation = CommandRunner.Cancellation()
+    return try await awaitingInteractiveCommand(onCancellation: {
+        cancellation.cancel()
+        commandLog?.append("Cancellation requested. Waiting for the dedicated Terminal command group to stop before releasing the install reservation.")
+    }) {
+        try await runInTerminalUntilCompletion(executable, arguments, permissionRepairURL: permissionRepairURL,
+                                              cancellation: cancellation)
+    }
+}
+
+private func runInTerminalUntilCompletion(
+    _ executable: URL,
+    _ arguments: [String],
+    permissionRepairURL: URL?, cancellation: CommandRunner.Cancellation
+) async throws -> Data {
     let fileManager = FileManager.default
     let directory = fileManager.temporaryDirectory
         .appendingPathComponent("Upkeep-Homebrew-\(UUID().uuidString)", isDirectory: true)
     let outputURL = directory.appendingPathComponent("output.log")
     let statusURL = directory.appendingPathComponent("status")
     let processIDURL = directory.appendingPathComponent("pid")
+    let scriptURL = directory.appendingPathComponent("command.zsh")
+    let launchFence = TerminalLaunchFence(url: directory.appendingPathComponent("launch-cancelled"),
+                                          processIDURL: processIDURL)
     try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
     try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
-    defer { try? fileManager.removeItem(at: directory) }
+    let commandLog = OperationCommandLogContext.current
+    var commandStopped = false
+    defer {
+        if !commandStopped || (try? TerminalCommandFiles.removeCompletedWorkspace(directory, statusURL: statusURL)) != true {
+            commandLog?.append("Terminal result unavailable; command files retained at \(directory.path). The command may still be running. Review Terminal before retrying.")
+            DiagnosticsStore.shared.record(.warning, category: .command,
+                "Terminal command files retained because completion is unverified",
+                metadata: ["Location": directory.path])
+        }
+    }
+    commandLog?.append("Terminal command: " + executable.lastPathComponent + " " + arguments.joined(separator: " "))
+    defer { commandLog?.appendTerminalOutput(outputURL: outputURL, statusURL: statusURL) }
 
     let command = ([executable.path] + arguments).map(shellQuote).joined(separator: " ")
+    guard fileManager.isExecutableFile(atPath: TerminalOutputRelay.executable.path) else {
+        throw HomebrewClient.BrewError.failed("The system command-output relay is unavailable. Run this update manually in Terminal.")
+    }
+    func relay(append: Bool) -> String {
+        ([TerminalOutputRelay.executable.path] + TerminalOutputRelay.arguments(output: outputURL, append: append))
+            .map(shellQuote).joined(separator: " ")
+    }
+    let pipelineStatus = TerminalOutputRelay.pipelineStatus
     let permissionRepair: String
     if let permissionRepairURL {
         permissionRepair = """
         print "Homebrew could not adjust permissions inside the existing app."
         print "Upkeep will repair only that app bundle, then retry adoption."
         print
-        /usr/bin/sudo /bin/chmod -R a+rX \(shellQuote(permissionRepairURL.path)) 2>&1 | /usr/bin/tee \(shellQuote(outputURL.path))
-        upkeep_status=${pipestatus[1]}
+        /usr/bin/sudo /bin/chmod -R a+rX \(shellQuote(permissionRepairURL.path)) 2>&1 | \(relay(append: false))
+        \(pipelineStatus)
         if (( upkeep_status != 0 )); then
           print -r -- "$upkeep_status" > \(shellQuote(statusURL.path))
           print
@@ -341,19 +329,19 @@ private func runInTerminal(
         permissionRepair = ""
     }
 
-    let outputMode = permissionRepairURL == nil ? "" : "-a "
-    let terminalCommand = """
+    let commandScript = """
+    setopt NO_MONITOR
     set -o pipefail
     typeset -i upkeep_status=1
-    print -r -- "$$" > \(shellQuote(processIDURL.path))
+    \(launchFence.scriptPreamble(statusURL: statusURL))
     trap 'print -r -- "$upkeep_status" > \(shellQuote(statusURL.path))' EXIT HUP INT TERM
     print
     print "Upkeep needs administrator approval to finish this Homebrew update."
     print "Enter your macOS password when sudo asks for it."
     print
     \(permissionRepair)
-    \(command) 2>&1 | /usr/bin/tee \(outputMode)\(shellQuote(outputURL.path))
-    upkeep_status=${pipestatus[1]}
+    \(command) 2>&1 | \(relay(append: permissionRepairURL != nil))
+    \(pipelineStatus)
     print -r -- "$upkeep_status" > \(shellQuote(statusURL.path))
     trap - EXIT HUP INT TERM
     print
@@ -364,6 +352,13 @@ private func runInTerminal(
     fi
     exit $upkeep_status
     """
+    try commandScript.write(to: scriptURL, atomically: true, encoding: .utf8)
+    try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: scriptURL.path)
+    guard fileManager.isExecutableFile(atPath: TerminalCommandLaunch.executable.path) else {
+        throw HomebrewClient.BrewError.failed("The system interactive command launcher is unavailable. Run this update manually in Terminal.")
+    }
+    let terminalCommand = ([TerminalCommandLaunch.executable.path] + TerminalCommandLaunch.arguments(script: scriptURL))
+        .map(shellQuote).joined(separator: " ")
 
     DiagnosticsStore.shared.record(.info, category: .command, "Homebrew needs interactive authorization", metadata: [
         "Command": "brew " + arguments.joined(separator: " "),
@@ -373,29 +368,49 @@ private func runInTerminal(
         "App path": permissionRepairURL?.path ?? "(not applicable)"
     ])
 
-    let opener = Process()
-    opener.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-    opener.arguments = terminalAppleScriptArguments(command: terminalCommand)
+    let opener: CommandRunner.Result
     do {
-        try opener.run()
-        opener.waitUntilExit()
+        opener = try await CommandRunner.run(URL(fileURLWithPath: "/usr/bin/osascript"),
+                                             terminalAppleScriptArguments(command: terminalCommand), timeout: 30)
     } catch {
+        commandStopped = await settleFailedTerminalLaunch(fence: launchFence, statusURL: statusURL,
+            scriptURL: scriptURL, cancellation: cancellation)
         throw HomebrewClient.BrewError.failed(
             "Homebrew needs administrator approval, but Upkeep could not open Terminal: \(error.localizedDescription)"
         )
     }
-    guard opener.terminationStatus == 0 else {
+    guard opener.status == 0 else {
+        commandStopped = await settleFailedTerminalLaunch(fence: launchFence, statusURL: statusURL,
+            scriptURL: scriptURL, cancellation: cancellation)
         throw HomebrewClient.BrewError.failed(
             "Homebrew needs administrator approval, but Terminal could not be opened."
         )
     }
 
-    try await waitForTerminalStatus(at: statusURL, processIDURL: processIDURL)
+    let completion: TerminalCommandCompletion
+    do {
+        completion = try await monitorOwnedTerminalCommand(statusURL: statusURL, processIDURL: processIDURL,
+                                                         scriptURL: scriptURL, cancellation: cancellation)
+    } catch {
+        commandStopped = await settleFailedTerminalLaunch(fence: launchFence, statusURL: statusURL,
+            scriptURL: scriptURL, cancellation: cancellation)
+        throw error
+    }
+    commandStopped = true
+    switch completion {
+    case .timedOut: throw CommandRunner.Failure.timedOut
+    case .cancelled: throw CommandRunner.Failure.cancelled
+    case .missingReceipt:
+        throw HomebrewClient.BrewError.failed("The Terminal command stopped without reporting a result. Refresh the installed item to verify its state.")
+    case .completed: break
+    }
 
-    let statusText = (try? String(contentsOf: statusURL, encoding: .utf8))?
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-    let status = Int32(statusText ?? "") ?? 1
-    let data = (try? Data(contentsOf: outputURL)) ?? Data()
+    guard let status = TerminalCommandFiles.status(at: statusURL) else {
+        throw HomebrewClient.BrewError.failed(
+            "Terminal did not report a valid Homebrew exit status. Refresh the installed item to verify its state."
+        )
+    }
+    let data = (try? TerminalCommandFiles.readOutput(at: outputURL).displayData) ?? Data()
     guard status == 0 else {
         let message = String(data: data, encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -419,10 +434,10 @@ func waitForTerminalStatus(
     let launchDeadline = clock.now.advanced(by: launchTimeout)
     var processID: Int32?
     var stoppedPollCount = 0
-    while !FileManager.default.fileExists(atPath: statusURL.path) {
+    while TerminalCommandFiles.status(at: statusURL) == nil {
         try Task.checkCancellation()
         if processID == nil {
-            processID = terminalProcessID(at: processIDURL)
+            processID = TerminalCommandFiles.processID(at: processIDURL)
         }
         if let processID {
             if processIsRunning(processID) {
@@ -442,13 +457,6 @@ func waitForTerminalStatus(
         }
         try await Task.sleep(for: pollInterval)
     }
-}
-
-private func terminalProcessID(at url: URL) -> Int32? {
-    guard let value = try? String(contentsOf: url, encoding: .utf8)
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-    else { return nil }
-    return Int32(value)
 }
 
 private func terminalProcessIsRunning(_ processID: Int32) -> Bool {
@@ -475,6 +483,11 @@ private func shellQuote(_ value: String) -> String {
 private struct InfoResponse: Decodable { let formulae: [FormulaDTO]; let casks: [CaskDTO] }
 private struct FormulaDTO: Decodable {
     let name: String; let desc: String?; let license: String?; let homepage: String?
+    let revision: Int?; let versionScheme: Int?
+    enum CodingKeys: String, CodingKey {
+        case name, desc, license, homepage, versions, dependencies, installed, outdated, revision
+        case versionScheme = "version_scheme"
+    }
     let versions: Versions; let dependencies: [String]; let installed: [Installed]; let outdated: Bool
     struct Versions: Decodable { let stable: String? }
     struct Installed: Decodable {
@@ -553,7 +566,7 @@ private func normalize(_ value: String) -> String { value.lowercased().filter(\.
 private func packages(from response: InfoResponse, includePrereleases: Bool) -> [HomebrewPackage] {
     let formulae = response.formulae.compactMap { formula -> HomebrewPackage? in
         guard let installed = formula.installed.last else { return nil }
-        let current = formula.versions.stable ?? installed.version
+        let current = formula.versions.stable.map { homebrewFormulaVersion($0, revision: formula.revision ?? 0) } ?? installed.version
         return HomebrewPackage(
             token: formula.name,
             displayName: formula.name,
@@ -565,7 +578,8 @@ private func packages(from response: InfoResponse, includePrereleases: Bool) -> 
             kind: .formula,
             isOutdated: formula.outdated && (includePrereleases || !VersionComparator.isPrerelease(current)),
             isDependency: !installed.installedOnRequest,
-            dependencies: formula.dependencies
+            dependencies: formula.dependencies,
+            versionScheme: formula.versionScheme ?? 0
         )
     }
     let casks = response.casks.compactMap { cask -> HomebrewPackage? in
@@ -585,4 +599,12 @@ private func packages(from response: InfoResponse, includePrereleases: Bool) -> 
         )
     }
     return formulae + casks
+}
+
+func homebrewFormulaVersion(_ upstream: String, revision: Int) -> String {
+    revision > 0 ? "\(upstream)_\(revision)" : upstream
+}
+
+func decodeHomebrewInventory(_ data: Data, includePrereleases: Bool = false) throws -> [HomebrewPackage] {
+    packages(from: try JSONDecoder().decode(InfoResponse.self, from: data), includePrereleases: includePrereleases)
 }

@@ -24,7 +24,7 @@ private struct UpdateListSnapshot {
 }
 
 struct UpdatesView: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     @EnvironmentObject private var viewState: UpdateViewState
 
     var body: some View {
@@ -81,7 +81,7 @@ struct UpdatesView: View {
         .upkeepAnimated(for: snapshot.identity)
         .sheet(isPresented: $store.navigation.isShowingBatchReview) {
             BatchUpdateSheet(items: store.availableBatchUpdateItems)
-                .environmentObject(store)
+                .environment(\.upkeepStoreReference, store)
         }
         .toolbar { listToolbar }
     }
@@ -90,7 +90,6 @@ struct UpdatesView: View {
         ToolbarItemGroup(placement: .primaryAction) {
             updateSortMenu
             updateFilterMenu
-            ListDensityButton()
         }
         upkeepToolbarSpacer()
         ToolbarItem(placement: .primaryAction) {
@@ -287,10 +286,8 @@ struct UpdatesView: View {
     private var scanningState: some View {
         VStack(spacing: 16) {
             ProgressView().controlSize(.large)
-            Text("Checking your applications")
+            Text("Checking for updates…")
                 .font(.title3.weight(.medium))
-            Text("Comparing installed versions with publisher and package-manager sources.")
-                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -323,7 +320,7 @@ struct UpdatesView: View {
 
 private struct BatchUpdateSheet: View {
     @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     @EnvironmentObject private var settings: AppSettings
     let items: [BatchUpdateItem]
 
@@ -624,7 +621,7 @@ private struct BatchGroupHeader: View {
 }
 
 private struct BatchReviewRow: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     let item: BatchUpdateItem
     @Binding var isSelected: Bool
 
@@ -685,7 +682,7 @@ private struct BatchReviewRow: View {
 }
 
 private struct DeveloperUpdateCard: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     let package: DeveloperPackage
     var body: some View {
         StandardItemRow(isSelected: store.updateInspectorSelection == .developer(package.id)) {
@@ -732,7 +729,7 @@ private struct DeveloperUpdateCard: View {
 }
 
 private struct MacOSUpdateCard: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     let update: MacOSUpdate
     var body: some View {
         StandardItemRow {
@@ -761,7 +758,7 @@ private struct MacOSUpdateCard: View {
 }
 
 struct UpdateCard: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     let update: AvailableUpdate
 
     var body: some View {
@@ -790,6 +787,7 @@ struct UpdateCard: View {
             .disabled(store.isUpdating(update))
         }
         .tag("app:\(update.app.id)")
+        .help(update.source.confidenceDetail)
         .contentShape(Rectangle())
         .contextMenu {
             Button(actionTitle) { Task { await store.performUpdate(update) } }
@@ -821,16 +819,14 @@ struct UpdateCard: View {
     }
 
     private var appUpdateDetail: String {
-        var parts = [update.source.confidenceDetail]
-        if update.canInstallDirectly { parts.append("Installs in Upkeep") }
-        if update.requiresInAppInstallation { parts.append("Open app to install") }
+        var parts = [update.source.rawValue]
         if update.homebrewToken != nil { parts.append("May require password") }
         return parts.joined(separator: " · ")
     }
 }
 
 private struct HomebrewUpdateCard: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     let package: HomebrewPackage
 
     var body: some View {
@@ -840,6 +836,7 @@ private struct HomebrewUpdateCard: View {
             ItemIdentityView(
                 title: package.displayName,
                 detail: package.kind.rawValue
+                    + (package.isRevisionUpdate ? " · Rebuild update" : "")
                     + (package.isDependency ? " · Dependency" : "")
                     + (package.kind == .cask ? " · May require password" : ""),
                 prereleaseChannel: package.prereleaseChannel,
@@ -879,7 +876,7 @@ private struct HomebrewUpdateCard: View {
 }
 
 private struct LocalModelUpdateCard: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     let model: LocalLLMModel
 
     var body: some View {

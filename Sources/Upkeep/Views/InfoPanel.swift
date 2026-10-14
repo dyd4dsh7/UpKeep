@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The single inspector layout for applications, packages, and models.
 struct InfoPanel<Header: View, Content: View>: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     @ViewBuilder let header: Header
     @ViewBuilder let content: Content
 
@@ -19,6 +19,8 @@ struct InfoPanel<Header: View, Content: View>: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .symbolRenderingMode(.hierarchical)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)

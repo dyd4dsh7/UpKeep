@@ -88,6 +88,8 @@ Use **Xcode 26.3 or newer**, or matching Apple Command Line Tools, with the
 than the macOS 14 deployment target because the source uses newer SwiftUI APIs
 behind availability checks. A complete stable toolchain is recommended; beta
 Command Line Tools may omit SwiftUI macro plugins.
+If tests fail to link `_TestingInterop`, select a full Xcode installation;
+changing only the SDK does not supply that test runtime library.
 
 No Apple Developer membership or signing secrets are needed for local debug builds.
 Clone this repository, then:

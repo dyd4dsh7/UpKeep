@@ -36,6 +36,9 @@ struct SparkleFeedItem: Equatable {
     let downloadURL: URL?
     let installationType: SparkleInstallationType
     let hasEdSignature: Bool
+    let minimumSystemVersion: String?
+    let maximumSystemVersion: String?
+    let hardwareRequirements: String?
 
     func availableUpdate(for app: InstalledApp, fallbackURL: URL) -> AvailableUpdate {
         AvailableUpdate(
@@ -80,6 +83,9 @@ final class SparkleFeedParser: XMLTextParser {
     private var downloadURL: URL?
     private var installationType: SparkleInstallationType = .application
     private var hasEdSignature = false
+    private var minimumSystemVersion: String?
+    private var maximumSystemVersion: String?
+    private var hardwareRequirements: String?
     private(set) var hasParsedItems = false
 
     init(data: Data, baseURL: URL) {
@@ -87,7 +93,7 @@ final class SparkleFeedParser: XMLTextParser {
         self.baseURL = baseURL
     }
 
-    func parse(includePrereleases: Bool = true) -> SparkleFeedItem? {
+    func parse(includePrereleases: Bool = true, compatibility: AppCompatibility = .current) -> SparkleFeedItem? {
         items.removeAll(keepingCapacity: true)
         hasParsedItems = false
         let parser = XMLParser(data: data)
@@ -98,6 +104,9 @@ final class SparkleFeedParser: XMLTextParser {
         }
         return items
             .filter { includePrereleases || $0.prereleaseChannel == nil }
+            .filter { compatibility.permits(minimum: $0.minimumSystemVersion,
+                                            maximum: $0.maximumSystemVersion,
+                                            hardware: $0.hardwareRequirements) }
             .max { left, right in
                 let versionComparison = VersionComparator.compare(left.version, right.version)
                 if versionComparison != .orderedSame { return versionComparison == .orderedAscending }
@@ -131,6 +140,9 @@ final class SparkleFeedParser: XMLTextParser {
             downloadURL = nil
             installationType = .application
             hasEdSignature = false
+            minimumSystemVersion = nil
+            maximumSystemVersion = nil
+            hardwareRequirements = nil
         }
         guard inItem, elementName == "enclosure" else { return }
         let shortVersion = attributeDict["sparkle:shortVersionString"]
@@ -174,7 +186,14 @@ final class SparkleFeedParser: XMLTextParser {
         guard inItem else { return }
         let qualified = qName ?? elementName
         let text = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if qualified == "sparkle:shortVersionString" || elementName == "shortVersionString" {
+        let localName = qualified.split(separator: ":").last.map(String.init) ?? elementName
+        if localName == "minimumSystemVersion" {
+            minimumSystemVersion = text
+        } else if localName == "maximumSystemVersion" {
+            maximumSystemVersion = text
+        } else if localName == "hardwareRequirements" {
+            hardwareRequirements = text
+        } else if qualified == "sparkle:shortVersionString" || elementName == "shortVersionString" {
             if !text.isEmpty {
                 version = text
                 hasMarketingVersion = true
@@ -202,7 +221,10 @@ final class SparkleFeedParser: XMLTextParser {
                     releaseNotes: releaseNotes,
                     downloadURL: downloadURL,
                     installationType: installationType,
-                    hasEdSignature: hasEdSignature
+                    hasEdSignature: hasEdSignature,
+                    minimumSystemVersion: minimumSystemVersion,
+                    maximumSystemVersion: maximumSystemVersion,
+                    hardwareRequirements: hardwareRequirements
                 ))
                 hasParsedItems = true
             }

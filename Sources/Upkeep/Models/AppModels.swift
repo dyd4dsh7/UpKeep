@@ -649,14 +649,25 @@ struct ScanWarning: Identifiable, Hashable, Codable, Sendable {
     let itemNames: [String]
     let affectedItemCount: Int
     let message: String
+    let itemNamesByID: [String: String]?
 
-    init(source: ScanWarningSource, itemNames: [String] = [], affectedItemCount: Int? = nil, message: String) {
+    init(source: ScanWarningSource, itemNames: [String] = [], affectedItemCount: Int? = nil,
+         itemNamesByID: [String: String]? = nil, message: String) {
         self.source = source
         let uniqueNames = Array(Set(itemNames)).sorted()
         self.itemNames = uniqueNames.prefix(20).map { $0 }
-        self.affectedItemCount = max(affectedItemCount ?? uniqueNames.count, uniqueNames.count)
+        self.itemNamesByID = itemNamesByID
+        self.affectedItemCount = max(affectedItemCount ?? uniqueNames.count, uniqueNames.count, itemNamesByID?.count ?? 0)
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         self.message = trimmed.count > 600 ? String(trimmed.prefix(600)) + "…" : trimmed
+    }
+
+    func removingItems(ids: Set<String>) -> ScanWarning? {
+        guard let ownership = itemNamesByID else { return self }
+        let remaining = ownership.filter { !ids.contains($0.key) }
+        guard !remaining.isEmpty else { return nil }
+        return ScanWarning(source: source, itemNames: Array(remaining.values),
+                           affectedItemCount: remaining.count, itemNamesByID: remaining, message: message)
     }
 
     var id: String { "\(source.rawValue)|\(message)" }
@@ -794,6 +805,14 @@ struct HomebrewPackage: Identifiable, Hashable, Sendable {
     let isOutdated: Bool
     let isDependency: Bool
     let dependencies: [String]
+    var versionScheme: Int = 0
+    var exclusionVersion: String {
+        versionScheme == 0 ? currentVersion : "scheme:\(versionScheme)|\(currentVersion)"
+    }
+    var isRevisionUpdate: Bool {
+        kind == .formula && installedVersion.split(separator: "_").first == currentVersion.split(separator: "_").first
+            && installedVersion != currentVersion
+    }
     var availablePrereleaseChannel: PrereleaseChannel? {
         VersionComparator.prereleaseChannel(for: currentVersion)
     }
@@ -847,6 +866,16 @@ struct UpdateRecord: Identifiable, Codable, Hashable, Sendable {
     let originalAppPath: String?
     let backupPath: String?
     let recoveryNote: String?
+    var fromBuildVersion: String? = nil
+    var toBuildVersion: String? = nil
+
+    var fromVersionLabel: String { versionLabel(fromVersion, build: fromBuildVersion) }
+    var toVersionLabel: String { versionLabel(toVersion, build: toBuildVersion) }
+
+    private func versionLabel(_ version: String, build: String?) -> String {
+        guard let build, !build.isEmpty else { return version }
+        return "\(version) (build \(build))"
+    }
 
     var canRevertDirectly: Bool {
         originalAppPath != nil && backupPath.map(FileManager.default.fileExists(atPath:)) == true

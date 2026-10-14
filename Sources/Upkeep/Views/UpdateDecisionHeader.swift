@@ -20,8 +20,7 @@ struct UpdateDecisionHeader: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 16)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .padding(.vertical, 12)
         .accessibilityElement(children: .contain)
         .upkeepAnimated(for: recommendedCount)
         .upkeepAnimated(for: attentionCount)
@@ -30,10 +29,10 @@ struct UpdateDecisionHeader: View {
     private var heading: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(title)
-                .font(.title2.bold())
+                .font(.headline)
                 .contentTransition(.numericText())
             Text(detail)
-                .font(.callout)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
     }
@@ -44,27 +43,27 @@ struct UpdateDecisionHeader: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
                 .fixedSize()
-                .disabled(isWorking)
+                .disabled(isWorking || recommendedCount + attentionCount == 0)
         }
     }
 
     private var title: String {
         if recommendedCount > 0 {
-            return recommendedCount == 1 ? "1 update ready" : "\(recommendedCount) updates ready"
+            return recommendedCount == 1 ? "1 recommended update" : "\(recommendedCount) recommended updates"
         }
-        return "Review available updates"
+        return "Updates need review"
     }
 
     private var detail: String {
         if recommendedCount > 0 {
             return attentionCount > 0
-                ? "Across all sources: \(attentionCount) additional items need review."
-                : "Review the selected updates before installing."
+                ? "All sources · \(attentionCount) more to review"
+                : "Ready to review and install"
         }
-        return "These updates open another app, change a major version, or affect developer tools."
+        return "Review installation options before updating."
     }
 
     private var buttonTitle: String {
-        recommendedCount > 0 ? "Review Recommended" : "Review Updates"
+        "Review Updates…"
     }
 }

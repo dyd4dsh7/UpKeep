@@ -81,7 +81,7 @@ import Testing
     )
     let dependencies = UpkeepDependencies(
         scanner: scanner,
-        applicationDiscovery: TransactionDiscovery(app: app),
+        applicationDiscovery: TransactionDiscovery(app: app, installedVersion: "1.1.0"),
         homebrew: homebrew,
         developerPackages: TransactionDeveloperPackages(),
         localModels: TransactionLocalModels(),
@@ -103,14 +103,14 @@ import Testing
     await store.confirmHomebrewAuthorization(authorization)
 
     let savedRecord = try #require(await history.records().first)
-    #expect(await recorder.events() == ["backup", "upgrade", "history", "scan"])
+    #expect(await recorder.events() == ["backup", "upgrade", "history"])
     #expect(store.errorMessage == nil)
     #expect(store.updateHistory == [savedRecord])
 
     await store.revert(savedRecord)
 
     #expect(await recorder.events() == [
-        "backup", "upgrade", "history", "scan", "restore", "scan"
+        "backup", "upgrade", "history", "restore", "scan"
     ])
     #expect(!store.isWorking(.historyRestore(savedRecord.id)))
 }
@@ -265,8 +265,14 @@ private struct TransactionScanner: UpdateScanning {
 
 private struct TransactionDiscovery: ApplicationDiscovering {
     let app: InstalledApp
+    var installedVersion: String? = nil
     func discover() async -> [InstalledApp] { [app] }
-    func discover(at url: URL) async -> InstalledApp? { app }
+    func discover(at url: URL) async -> InstalledApp? {
+        guard let installedVersion else { return app }
+        return InstalledApp(name: app.name, bundleIdentifier: app.bundleIdentifier, installedVersion: installedVersion,
+            buildVersion: app.buildVersion, url: app.url, sparkleFeedURL: app.sparkleFeedURL,
+            githubRepository: app.githubRepository, hasAppStoreReceipt: app.hasAppStoreReceipt)
+    }
 }
 
 private struct TransactionHomebrew: HomebrewManaging {
@@ -429,4 +435,74 @@ private final class RecordingTransactionExternalOpener: ExternalOpening {
         openedURLs.append(url)
         return true
     }
+}
+
+@MainActor
+@Test(arguments: ["updated", "outdated", "failed", "partial"], ["individual", "batch", "all"])
+func formulaUpdateVerifiesItsTokenWithoutScanningUnrelatedSources(result: String, mode: String) async throws {
+    let suite = "FormulaUpdateVerification.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let recorder = TransactionRecorder()
+    let package = HomebrewPackage(
+        token: "gh", displayName: "gh", description: nil, homepage: nil, license: nil,
+        installedVersion: "1.0", currentVersion: "2.0", kind: .formula,
+        isOutdated: true, isDependency: false, dependencies: []
+    )
+    let store = UpkeepStore(settings: AppSettings(defaults: defaults), dependencies: UpkeepDependencies(
+        scanner: TransactionScanner(recorder: recorder),
+        applicationDiscovery: TransactionDiscovery(app: InstalledApp(
+            name: "Example", bundleIdentifier: "test.example", installedVersion: "1.0",
+            buildVersion: nil, url: URL(fileURLWithPath: "/Applications/Example.app"),
+            sparkleFeedURL: nil, githubRepository: nil, hasAppStoreReceipt: false
+        )),
+        homebrew: FormulaVerificationHomebrew(result: result, recorder: recorder),
+        developerPackages: TransactionDeveloperPackages(), localModels: TransactionLocalModels(),
+        history: TransactionHistory(recorder: recorder), externalOpener: TransactionExternalOpener()
+    ))
+    store.homebrewPackages = [package]
+    switch mode {
+    case "batch":
+        let summary = await store.performBatchUpdates([.homebrew(package)])
+        #expect(summary.results.first?.outcome == (result == "updated" ? .updated : .failed))
+    case "all": await store.updateAllPackages()
+    default: await store.updatePackage(package)
+    }
+    #expect(await recorder.events() == ((result == "updated" || result == "partial") ? ["upgrade", "verify", "history"] : ["upgrade", "verify"]))
+    #expect(store.totalUpdateCount == ((result == "updated" || result == "partial") ? 0 : 1))
+    #expect(store.homebrewPackages.first?.installedVersion == ((result == "updated" || result == "partial") ? "2.0" : "1.0"))
+    #expect(!store.isWorking(.homebrewPackage(package.id)))
+    #expect(store.updatePhase(for: .homebrewPackage(package.id)) == nil)
+    #expect(store.updateHistory.count == ((result == "updated" || result == "partial") ? 1 : 0))
+    if result == "updated" || result == "partial" {
+        #expect(store.updateHistory.first?.toVersion == "2.0")
+    }
+    if result == "partial" {
+        #expect(store.errorMessage?.contains("download failed") == true)
+    } else if result == "failed" {
+        #expect(store.errorMessage?.contains("Could not refresh gh") == true)
+    } else {
+        #expect((store.errorMessage == nil) == (result == "updated"))
+    }
+}
+
+private struct FormulaVerificationHomebrew: HomebrewManaging {
+    let result: String
+    let recorder: TransactionRecorder
+    func package(token: String, kind: HomebrewPackageKind, includePrereleases: Bool) async throws -> HomebrewPackage? {
+        await recorder.append("verify")
+        if result == "failed" { throw URLError(.cannotConnectToHost) }
+        return HomebrewPackage(
+            token: token, displayName: token, description: nil, homepage: nil, license: nil,
+            installedVersion: (result == "updated" || result == "partial") ? "2.0" : "1.0", currentVersion: "2.0",
+            kind: kind, isOutdated: result != "updated" && result != "partial", isDependency: false, dependencies: []
+        )
+    }
+    func upgrade(_ package: HomebrewPackage) async throws {
+        await recorder.append("upgrade")
+        if result == "partial" { throw HomebrewClient.BrewError.failed("download failed") }
+    }
+    func adopt(_ item: AdoptableApp) async throws {}
+    func installOrReplace(_ item: AdoptableApp) async throws {}
+    func upgradeCask(token: String) async throws {}
 }

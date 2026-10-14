@@ -3,7 +3,27 @@ import Foundation
 
 protocol UpdateScanning: Sendable {
     func scan(settings: ScanSettings) async -> ScanReport
+    func scan(settings: ScanSettings, progress: @escaping ScanProgressReporter) async -> ScanReport
     func scan(app: InstalledApp, settings: ScanSettings) async -> UpdateScanner.TargetedAppReport
+    func homebrewInventory(includePrereleases: Bool) async throws -> [HomebrewPackage]
+    func homebrewCatalog() async throws -> [CatalogCask]
+    func macOS(scope: MacOSScanScope) async throws -> MacOSUpdateClient.Report
+}
+
+extension UpdateScanning {
+    func macOS(scope: MacOSScanScope) async throws -> MacOSUpdateClient.Report { throw ScopedScanError.unavailable }
+    func homebrewCatalog() async throws -> [CatalogCask] { throw ScopedScanError.unavailable }
+    func homebrewInventory(includePrereleases: Bool) async throws -> [HomebrewPackage] {
+        throw ScopedScanError.unavailable
+    }
+    func scan(settings: ScanSettings, progress: @escaping ScanProgressReporter) async -> ScanReport {
+        await scan(settings: settings)
+    }
+}
+
+enum ScopedScanError: LocalizedError {
+    case unavailable
+    var errorDescription: String? { "This scanner does not support a scoped source check." }
 }
 
 protocol ApplicationDiscovering: Sendable {
@@ -28,6 +48,11 @@ protocol HomebrewScanning: Sendable {
 
 protocol MacOSUpdateScanning: Sendable {
     func scan(includeInstallers: Bool) async -> MacOSUpdateClient.Report
+    func scan(scope: MacOSScanScope) async throws -> MacOSUpdateClient.Report
+}
+
+extension MacOSUpdateScanning {
+    func scan(scope: MacOSScanScope) async throws -> MacOSUpdateClient.Report { throw ScopedScanError.unavailable }
 }
 
 protocol AppStoreUpdateChecking: Sendable {
@@ -47,6 +72,7 @@ protocol MozillaUpdateChecking: Sendable {
 }
 
 protocol HomebrewManaging: Sendable {
+    func services() async throws -> [HomebrewService]
     func package(
         token: String,
         kind: HomebrewPackageKind,
@@ -58,7 +84,15 @@ protocol HomebrewManaging: Sendable {
     func upgradeCask(token: String) async throws
 }
 
+extension HomebrewManaging {
+    func services() async throws -> [HomebrewService] { throw ScopedScanError.unavailable }
+}
+
+typealias DeveloperScanProgressReporter = @Sendable (DeveloperPackageClient.Report, Set<DeveloperPackageManager>) async -> Void
+
 protocol DeveloperPackageManaging: Sendable {
+    func scan(enabledManagers: Set<DeveloperPackageManager>, includePrereleases: Bool,
+              progress: @escaping DeveloperScanProgressReporter) async -> DeveloperPackageClient.Report
     func scan(
         enabledManagers: Set<DeveloperPackageManager>,
         includePrereleases: Bool
@@ -77,23 +111,63 @@ protocol PackageCleanupManaging: Sendable {
 }
 
 extension DeveloperPackageManaging {
+    func scan(enabledManagers: Set<DeveloperPackageManager>, includePrereleases: Bool,
+              progress: @escaping DeveloperScanProgressReporter) async -> DeveloperPackageClient.Report {
+        let report = await scan(enabledManagers: enabledManagers, includePrereleases: includePrereleases)
+        await progress(report, enabledManagers)
+        return report
+    }
     func uninstall(_ package: DeveloperPackage) async throws {
         throw DeveloperPackageUninstallAdapters.AdapterError.unsupportedPackage(package.name)
     }
 }
 
+typealias LocalModelScanProgressReporter = @Sendable (LocalModelClient.Report, Set<LocalModelRuntime>) async -> Void
+
 protocol LocalModelManaging: Sendable {
     func scan() async -> LocalModelClient.Report
+    func scan(progress: @escaping LocalModelScanProgressReporter) async -> LocalModelClient.Report
+    func scan(runtime: LocalModelRuntime) async -> LocalModelClient.Report
     func update(_ model: LocalLLMModel) async throws
+}
+
+extension LocalModelManaging {
+    func scan(progress: @escaping LocalModelScanProgressReporter) async -> LocalModelClient.Report {
+        let report = await scan()
+        await progress(report, Set(LocalModelRuntime.allCases))
+        return report
+    }
+    func scan(runtime: LocalModelRuntime) async -> LocalModelClient.Report {
+        let report = await scan()
+        let models = report.models.filter { $0.runtime == runtime }
+        let warnings = report.warnings.filter {
+            guard let owners = report.warningRuntimes[$0], !owners.isEmpty else { return true }
+            return owners.contains(runtime)
+        }
+        let owners = report.warningRuntimes.reduce(into: [String: Set<LocalModelRuntime>]()) { result, entry in
+            let checked = entry.value.intersection([runtime])
+            if !checked.isEmpty { result[entry.key] = checked }
+        }
+        return LocalModelClient.Report(models: models, warnings: warnings,
+            failedModelIDs: report.failedModelIDs.intersection(Set(models.map(\.id))),
+            failedRuntimes: report.failedRuntimes.intersection([runtime]), warningRuntimes: owners)
+    }
 }
 
 protocol UpdateHistoryManaging: Sendable {
     func records() async -> [UpdateRecord]
+    func maintainStorage() async
+    func recoveryStorage() async -> RecoveryStorage?
     func prepareAppBackup(app: InstalledApp, toVersion: String, kind: UpdateRecordKind) async throws -> UpdateRecord
     func add(_ record: UpdateRecord) async throws
     func discardBackup(for record: UpdateRecord) async
     func addMacOSPlan(update: MacOSUpdate) async throws
     func revert(_ record: UpdateRecord) async throws
+}
+
+extension UpdateHistoryManaging {
+    func maintainStorage() async {}
+    func recoveryStorage() async -> RecoveryStorage? { nil }
 }
 
 @MainActor
@@ -107,9 +181,18 @@ struct WorkspaceExternalOpener: ExternalOpening {
 
 extension UpdateScanner: UpdateScanning {}
 extension HomebrewClient: HomebrewManaging {}
-extension DeveloperPackageClient: DeveloperPackageManaging {}
+extension DeveloperPackageClient: DeveloperPackageManaging {
+    func scan(enabledManagers: Set<DeveloperPackageManager>, includePrereleases: Bool,
+              progress: @escaping DeveloperScanProgressReporter) async -> Report {
+        await scan(enabledManagers: enabledManagers, includePrereleases: includePrereleases, managerProgress: progress)
+    }
+}
 extension PackageCleanupClient: PackageCleanupManaging {}
-extension LocalModelClient: LocalModelManaging {}
+extension LocalModelClient: LocalModelManaging {
+    func scan(progress: @escaping LocalModelScanProgressReporter) async -> Report {
+        await scan(progress: Optional(progress))
+    }
+}
 extension HomebrewClient: HomebrewScanning {
     func adoptableApps(
         from apps: [InstalledApp],

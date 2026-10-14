@@ -1,10 +1,11 @@
 import SwiftUI
 
 struct ContentView: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     @EnvironmentObject private var settings: AppSettings
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var sidebarCollapsedForInspector = false
+    @State private var showingOperations = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -12,7 +13,7 @@ struct ContentView: View {
                 .onChange(of: inspectorPresented.wrappedValue) { _, _ in
                     adaptSidebar(to: geometry.size.width)
                 }
-                .onChange(of: geometry.size.width) { _, width in
+                .onChange(of: geometry.size.width, initial: true) { _, width in
                     adaptSidebar(to: width)
                 }
                 .onChange(of: columnVisibility) { _, visibility in
@@ -37,7 +38,7 @@ struct ContentView: View {
     private var workspace: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             UpkeepSidebarView()
-                .navigationSplitViewColumnWidth(min: 225, ideal: 245, max: 320)
+                .navigationSplitViewColumnWidth(min: 210, ideal: 225, max: 300)
                 // Keep independent alerts on separate branches. Chaining multiple
                 // alert modifiers on the split-view root causes the last alert to
                 // suppress Homebrew's authorization prompt on macOS.
@@ -57,7 +58,15 @@ struct ContentView: View {
                 }
         }
         .navigationTitle(navigationTitle)
-        .navigationSubtitle(navigationSubtitle)
+        .toolbar {
+            Button { showingOperations = true } label: {
+                Label("Operations", systemImage: "list.bullet.rectangle")
+            }
+            .help("Show update operations")
+        }
+        .sheet(isPresented: $showingOperations) {
+            OperationCentreView(execution: store.updateExecutionState).environment(\.upkeepStoreReference, store)
+        }
         .searchable(text: $store.navigation.searchText, placement: .toolbar, prompt: "Search Upkeep")
         .sheet(isPresented: Binding(
             get: { !settings.hasCompletedSetup },
@@ -81,6 +90,8 @@ struct ContentView: View {
             refreshDockBadge()
             refreshMenuBar()
         }
+        .onChange(of: store.updateCheckState) { _, _ in refreshMenuBar() }
+        .onChange(of: store.lastChecked) { _, _ in refreshMenuBar() }
         .onChange(of: settings.showMenuBarItem) { _, _ in
             refreshMenuBar()
         }
@@ -123,7 +134,9 @@ struct ContentView: View {
         MenuBarController.shared.refresh(
             updateCount: store.totalUpdateCount,
             showCount: settings.showMenuBarCount,
-            isVisible: settings.showMenuBarItem
+            isVisible: settings.showMenuBarItem,
+            state: store.updateCheckState,
+            lastChecked: store.lastChecked
         )
     }
 
@@ -273,33 +286,6 @@ struct ContentView: View {
         return store.selection == .homebrewApps ? "Homebrew Apps" : store.selection.rawValue
     }
 
-    private var navigationSubtitle: String {
-        if !store.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "Results across apps, packages, models, macOS, and history"
-        }
-        switch store.selection {
-        case .updates:
-            if store.isScanning { return "Looking for new versions…" }
-            return store.totalUpdateCount == 1 ? "1 available update" : "\(store.totalUpdateCount) available updates"
-        case .allApps:
-            return "\(store.apps.count) applications scanned"
-        case .adoptable:
-            return "\(store.adoptableApps.count) apps available for Homebrew adoption"
-        case .homebrewPackages:
-            return "\(store.homebrewPackages.count) installed · \(store.outdatedPackageCount) updates"
-        case .developerPackages:
-            return "\(store.developerPackages.count) installed · \(store.outdatedDeveloperPackageCount) updates"
-        case .localModels:
-            return "\(store.localModels.count) installed · \(store.outdatedLocalModelCount) updates"
-        case .macOSUpdates:
-            return "\(store.macOSUpdates.count) available releases"
-        case .history:
-            return "\(store.updateHistory.count) recorded updates"
-        default:
-            let count = store.count(for: store.selection)
-            return count == 1 ? "1 app" : "\(count) apps"
-        }
-    }
 }
 
 extension View {

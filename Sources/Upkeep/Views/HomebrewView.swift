@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct HomebrewView: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     @EnvironmentObject private var settings: AppSettings
     @State private var cleanupResult: PackageCleanupResult?
 
@@ -30,7 +30,6 @@ struct HomebrewView: View {
         ToolbarItemGroup(placement: .primaryAction) {
             homebrewSortMenu
             homebrewFilterMenu
-            ListDensityButton()
         }
         upkeepToolbarSpacer()
         ToolbarItem(placement: .primaryAction) {
@@ -246,6 +245,7 @@ private struct PackageRow: View, Equatable {
 
     private var rowDetail: String {
         var details = [package.kind.rawValue]
+        if package.isRevisionUpdate { details.append("Rebuild update") }
         if package.isDependency { details.append("Dependency") }
         if package.kind == .cask { details.append("May require password") }
         return details.joined(separator: " · ")
@@ -254,7 +254,7 @@ private struct PackageRow: View, Equatable {
 }
 
 struct PackageDetail: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     @EnvironmentObject private var settings: AppSettings
     @StateObject private var inspection = AppSecurityInspectionModel()
     let package: HomebrewPackage?
@@ -277,6 +277,9 @@ struct PackageDetail: View {
                 } content: {
                     if package.isOutdated { updateCard(package) }
                     detailCard(package)
+                    if package.isOutdated {
+                        HomebrewImpactView(library: store.library, package: package, inventory: store.homebrewPackages)
+                    }
                     if settings.sidebarViewMode == .advanced {
                         DisclosureGroup("Version options") {
                             versionSupport(package).padding(.top, 8)

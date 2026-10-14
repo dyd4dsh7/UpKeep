@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ScanStatusNotice: View {
-    @EnvironmentObject private var store: UpkeepStore
+    @UpkeepStoreReference private var store
     @State private var showsDetails = false
     let isMacOS: Bool
 
@@ -11,44 +11,76 @@ struct ScanStatusNotice: View {
     }
 
     var body: some View {
-        if state == .failed || state == .partial || !warnings.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Label(state == .checking ? "Checking sources again…" : "Update checks need attention",
-                          systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.primary)
-                        .symbolRenderingMode(.multicolor)
-                    Spacer()
-                    Button("Retry") { Task { await store.scan() } }
-                        .disabled(store.isScanning)
-                }
-                if !warnings.isEmpty {
-                    Button("Source details (\(warnings.count))") { showsDetails = true }
-                        .buttonStyle(.link)
-                        .popover(isPresented: $showsDetails, arrowEdge: .bottom) {
-                            ScrollView {
-                                VStack(alignment: .leading, spacing: 12) {
-                                    Text("Update source problems").font(.headline)
-                                    ForEach(warnings) { warning in
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            Text(warning.title).fontWeight(.medium)
-                                            Text(warning.detail).foregroundStyle(.secondary)
-                                        }
-                                        .font(.callout).textSelection(.enabled)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                    }
-                                }
-                                .padding(16)
-                            }
-                            .frame(width: 420, height: 240)
-                        }
-                } else {
-                    Text(state.detail).font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            .padding(12)
-            .background(Color(nsColor: .controlBackgroundColor))
+        if store.isScanning, let progress = store.scanState.progress {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Checked \(progress.completed) of \(progress.total) app sources · \(progress.lastSource.rawValue)")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+            }.padding(12)
             Divider()
+        }
+        if state == .failed || state == .partial || !warnings.isEmpty {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    warningLabel
+                    Spacer(minLength: 12)
+                    warningActions
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    warningLabel
+                    warningActions
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.quaternary.opacity(0.5))
+            Divider()
+        }
+    }
+
+    private var warningLabel: some View {
+        Label(state == .checking ? "Rechecking sources…" : "Some sources couldn’t be checked",
+              systemImage: "exclamationmark.triangle.fill")
+            .font(.callout)
+            .foregroundStyle(.primary)
+            .symbolRenderingMode(.multicolor)
+            .fixedSize(horizontal: false, vertical: true)
+            .help(state.detail)
+    }
+
+    private var warningActions: some View {
+        HStack(spacing: 12) {
+            if !warnings.isEmpty {
+                Button("Details…") { showsDetails = true }
+                    .buttonStyle(.link)
+                    .accessibilityLabel("Source details, \(warnings.count) problems")
+                    .popover(isPresented: $showsDetails, arrowEdge: .bottom) {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Source Problems").font(.headline)
+                                ForEach(warnings) { warning in
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(warning.title).fontWeight(.medium)
+                                        Text(warning.detail).foregroundStyle(.secondary)
+                                    }
+                                    .font(.callout).textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            }
+                            .padding(16)
+                        }
+                        .frame(width: 420, height: 240)
+                    }
+            } else {
+                Text(state.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Button("Retry") { Task { await store.scan() } }
+                .disabled(store.isScanning)
         }
     }
 }
