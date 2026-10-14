@@ -8,8 +8,8 @@ file.
 
 | Component | Pinned version | Licence | Source |
 | --- | --- | --- | --- |
-| Swift Testing | 6.1.3 | Apache 2.0 with Runtime Library Exception | https://github.com/swiftlang/swift-testing/tree/6.1.3 |
-| SwiftSyntax | 601.0.1 | Apache 2.0 with Runtime Library Exception | https://github.com/swiftlang/swift-syntax/tree/601.0.1 |
+| Swift Testing | 6.3.2 | Apache 2.0 with Runtime Library Exception | https://github.com/swiftlang/swift-testing/tree/6.3.2 |
+| SwiftSyntax | 603.0.2 | Apache 2.0 with Runtime Library Exception | https://github.com/swiftlang/swift-syntax/tree/603.0.2 |
 
 Swift Testing is a test-target dependency; SwiftSyntax is its transitive build
 dependency. Their unmodified licence texts are in `Support/Licenses/` and are
