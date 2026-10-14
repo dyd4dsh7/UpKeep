@@ -5,12 +5,21 @@ extension HomebrewPackage {
     func reconciled(with app: InstalledApp) -> HomebrewPackage {
         guard kind == .cask,
               let catalogVersion = currentVersion.split(separator: ",").first,
-              VersionComparator.isNewer(app.installedVersion, than: String(catalogVersion))
+              app.installedVersion.contains(where: \.isNumber),
+              catalogVersion.contains(where: \.isNumber)
+        else { return self }
+        let comparison = VersionComparator.compare(app.installedVersion, String(catalogVersion))
+        let target = currentVersion.split(separator: ",", maxSplits: 1).map(String.init)
+        let buildReached = target.count == 1 || app.buildVersion.map {
+            VersionComparator.compare($0, target[1]) != .orderedAscending
+        } == true
+        guard comparison == .orderedDescending || (comparison == .orderedSame && buildReached)
         else { return self }
         return HomebrewPackage(
             token: token, displayName: displayName, description: description, homepage: homepage,
             license: license, installedVersion: app.installedVersion, currentVersion: currentVersion,
-            kind: kind, isOutdated: false, isDependency: isDependency, dependencies: dependencies
+            kind: kind, isOutdated: false, isDependency: isDependency, dependencies: dependencies,
+            versionScheme: versionScheme
         )
     }
 }
@@ -21,23 +30,36 @@ extension InstalledApp {
 }
 
 extension UpdateCandidate {
+    // Homebrew encodes an optional bundle build as "version,build".
+    private var comparisonVersion: String {
+        guard source == .homebrew else { return availableVersion }
+        return availableVersion.split(separator: ",", maxSplits: 1).first.map(String.init) ?? availableVersion
+    }
+
+    private var comparisonBuild: String? {
+        if let availableBuildVersion { return availableBuildVersion }
+        guard source == .homebrew else { return nil }
+        let parts = availableVersion.split(separator: ",", maxSplits: 1).map(String.init)
+        return parts.count == 2 ? parts[1] : nil
+    }
+
     func isNewer(than app: InstalledApp) -> Bool {
         if !usesBuildVersionOnly {
-            let comparison = VersionComparator.compare(availableVersion, app.installedVersion)
+            let comparison = VersionComparator.compare(comparisonVersion, app.installedVersion)
             if comparison != .orderedSame { return comparison == .orderedDescending }
         }
-        guard let availableBuildVersion else { return false }
-        return VersionComparator.isNewer(availableBuildVersion, than: app.buildVersion ?? app.installedVersion)
+        guard let comparisonBuild else { return false }
+        return VersionComparator.isNewer(comparisonBuild, than: app.buildVersion ?? app.installedVersion)
     }
 
     func isInstalled(in app: InstalledApp) -> Bool {
         if !usesBuildVersionOnly {
-            let comparison = VersionComparator.compare(app.installedVersion, availableVersion)
+            let comparison = VersionComparator.compare(app.installedVersion, comparisonVersion)
             if comparison != .orderedSame { return comparison == .orderedDescending }
         }
-        guard let availableBuildVersion else { return app.installedVersion == availableVersion }
+        guard let comparisonBuild else { return app.installedVersion == comparisonVersion }
         let installedBuild = app.buildVersion ?? app.installedVersion
-        return installedBuild == availableBuildVersion || VersionComparator.isNewer(installedBuild, than: availableBuildVersion)
+        return installedBuild == comparisonBuild || VersionComparator.isNewer(installedBuild, than: comparisonBuild)
     }
 
     func matchesDownload(version: String, build: String?) -> Bool {
