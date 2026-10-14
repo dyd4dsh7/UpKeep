@@ -310,12 +310,13 @@ private enum ReviewError: Error { case historyWrite, quit }
 private struct ReviewScanner: UpdateScanning {
     var failedSources: Set<UpdateSource> = [.sparkle]
     var onScan: (@Sendable () async -> Void)?
+    var updates: [AvailableUpdate] = []
     func scan(settings: ScanSettings) async -> ScanReport {
         await onScan?()
         return .empty
     }
     func scan(app: InstalledApp, settings: ScanSettings) async -> UpdateScanner.TargetedAppReport {
-        .init(updates: [], failedSources: failedSources, warnings: [])
+        .init(updates: updates, failedSources: failedSources, warnings: [])
     }
 }
 private struct ReviewDiscovery: ApplicationDiscovering {
@@ -671,6 +672,106 @@ private struct ReviewDuplicateModels: LocalModelManaging {
     #expect(!reconciled.isOutdated)
     #expect(reconciled.installedVersion == "0.56.3")
     #expect(package.reconciled(with: reviewApp(version: "0.56.1")).isOutdated)
+}
+
+@Test(arguments: ["1.1", "1.1,11", "1.1,12"])
+func installedCaskReconcilesStaleReceiptWithoutHidingNewerBuild(target: String) {
+    let installed = reviewApp(version: "1.1", build: "11")
+    let package = HomebrewPackage(token: "fixture", displayName: installed.name, description: nil,
+        homepage: nil, license: nil, installedVersion: "1.0", currentVersion: target,
+        kind: .cask, isOutdated: true, isDependency: false, dependencies: [], versionScheme: 2)
+    let candidate = AvailableUpdate(app: installed, availableVersion: target, source: .homebrew,
+        releaseNotes: nil, actionURL: nil, homebrewToken: package.token).primaryCandidate
+    let pending = target == "1.1,12"
+    let reconciled = package.reconciled(with: installed)
+    #expect(reconciled.isOutdated == pending)
+    #expect(candidate.isNewer(than: installed) == pending)
+    #expect(candidate.isInstalled(in: installed) == !pending)
+    #expect(reconciled.versionScheme == 2)
+    if !pending { #expect(reconciled.installedVersion == installed.installedVersion) }
+}
+
+@MainActor
+@Test func refreshedInstalledAppRejectsStaleOffersAndRetainsNewerBuild() async {
+    let original = reviewApp()
+    let installed = reviewApp(version: "1.1", build: "11")
+    let stale = reviewUpdate(original, version: "1.1")
+    let newerBuild = reviewUpdate(original, version: "1.1", build: "12")
+    let f = ReviewFixture(discoveredApp: installed,
+        scanner: ReviewScanner(failedSources: [], updates: [stale, newerBuild]))
+    defer { f.cleanUp() }
+    f.store.apps = [original]
+    f.store.updates = [stale]
+    f.settings.checkHomebrew = false
+    await f.store.refresh(original)
+    #expect(f.store.updates.count == 1)
+    #expect(f.store.updates.first?.app == installed)
+    #expect(f.store.updates.first?.candidates == newerBuild.candidates)
+}
+
+@MainActor
+@Test(arguments: ["1.1", "1.1,11"])
+func refreshedCaskAtTargetLeavesUpdateListDespiteStaleReceipt(target: String) async {
+    let original = reviewApp()
+    let installed = reviewApp(version: "1.1", build: "11")
+    let receipt = HomebrewPackage(token: "fixture", displayName: original.name, description: nil,
+        homepage: nil, license: nil, installedVersion: "1.0", currentVersion: target,
+        kind: .cask, isOutdated: true, isDependency: false, dependencies: [])
+    let update = AvailableUpdate(app: original, availableVersion: target, source: .homebrew,
+        releaseNotes: nil, actionURL: nil, homebrewToken: receipt.token)
+    let f = ReviewFixture(discoveredApp: installed, scanner: ReviewScanner(failedSources: []),
+        homebrew: ReceiptReviewBrew(observed: receipt))
+    defer { f.cleanUp() }
+    f.store.apps = [original]
+    f.store.updates = [update]
+    f.store.homebrewPackages = [receipt]
+    await f.store.refresh(original)
+    #expect(f.store.updates.isEmpty)
+    #expect(f.store.visibleUpdates.isEmpty)
+    #expect(f.store.totalUpdateCount == 0)
+    #expect(f.store.availableBatchUpdateItems.isEmpty)
+    #expect(f.store.homebrewPackages.first?.isOutdated == false)
+    #expect(f.store.homebrewPackages.first?.installedVersion == installed.installedVersion)
+}
+
+@MainActor
+@Test(arguments: [false, true])
+func verifiedCaskBuildUpdateLeavesUpdateList(alreadyInstalled: Bool) async throws {
+    let original = alreadyInstalled ? reviewApp(version: "1.1", build: "11") : reviewApp()
+    let installed = reviewApp(version: "1.1", build: "11")
+    let package = HomebrewPackage(token: "fixture", displayName: original.name, description: nil,
+        homepage: nil, license: nil, installedVersion: "1.0", currentVersion: "1.1,11",
+        kind: .cask, isOutdated: true, isDependency: false, dependencies: [])
+    let update = AvailableUpdate(app: original, availableVersion: package.currentVersion, source: .homebrew,
+        releaseNotes: nil, actionURL: nil, homebrewToken: package.token)
+    let f = ReviewFixture(discoveredApp: installed)
+    defer { f.cleanUp() }
+    f.store.apps = [original]
+    f.store.homebrewPackages = [package]
+    f.store.updates = [update]
+    await f.store.performUpdate(update)
+    await f.store.confirmHomebrewAuthorization(try #require(f.store.pendingHomebrewAuthorizationConfirmation))
+    #expect(f.store.updates.isEmpty)
+    #expect(f.store.totalUpdateCount == 0)
+    #expect(f.store.availableBatchUpdateItems.isEmpty)
+    #expect(f.store.homebrewPackages.first?.isOutdated == false)
+    #expect(f.store.updateHistory.count == (alreadyInstalled ? 0 : 1))
+    #expect((f.store.errorMessage == nil) == !alreadyInstalled)
+}
+
+@MainActor
+@Test func directVerificationClearsAnAlreadyInstalledOffer() async {
+    let installed = reviewApp(version: "1.1", build: "11")
+    let update = reviewUpdate(installed, version: "1.1", build: "11")
+    let f = ReviewFixture(discoveredApp: installed)
+    defer { f.cleanUp() }
+    f.store.apps = [installed]
+    f.store.updates = [update]
+    await f.store.performUpdate(update)
+    #expect(f.store.updates.isEmpty)
+    #expect(f.store.totalUpdateCount == 0)
+    #expect(f.store.updateHistory.isEmpty)
+    #expect(f.store.errorMessage != nil)
 }
 
 @MainActor

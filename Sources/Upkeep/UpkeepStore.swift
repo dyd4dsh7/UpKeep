@@ -780,7 +780,8 @@ final class UpkeepStore: ObservableObject {
         }
 
         candidates = candidates.filter {
-            !$0.requiresHomebrewAdoption
+            guard $0.isNewer(than: refreshedApp) else { return false }
+            return !$0.requiresHomebrewAdoption
                 || (refreshedApp.allowsHomebrewAdoption
                     && !settings.isHomebrewAdoptionIgnored(key: exclusionKey(for: refreshedApp)))
         }
@@ -1269,6 +1270,11 @@ final class UpkeepStore: ObservableObject {
         }
         claimVerifiedAppState(installed)
         if let index = apps.firstIndex(where: { $0.id == update.app.id }) { apps[index] = installed }
+        updates = updates.compactMap { candidate in
+            guard candidate.app.id == update.app.id else { return candidate }
+            let remaining = candidate.candidates.filter { $0.isNewer(than: installed) }
+            return remaining.isEmpty ? nil : AvailableUpdate(app: installed, candidates: remaining)
+        }
         guard verification != .unchanged else {
             await dependencies.history.discardBackup(for: record)
             errorMessage = commandError ?? "The installer finished, but \(update.app.name) is still installed at \(installed.installedVersion)."
@@ -1278,11 +1284,6 @@ final class UpkeepStore: ObservableObject {
             fromVersion: record.fromVersion, toVersion: installed.installedVersion, kind: record.kind,
             originalAppPath: record.originalAppPath, backupPath: record.backupPath, recoveryNote: record.recoveryNote,
             fromBuildVersion: update.app.buildVersion, toBuildVersion: installed.buildVersion))
-        updates = updates.compactMap { candidate in
-            guard candidate.app.id == update.app.id else { return candidate }
-            let remaining = candidate.candidates.filter { $0.isNewer(than: installed) }
-            return remaining.isEmpty ? nil : AvailableUpdate(app: installed, candidates: remaining)
-        }
         settings.recordCheck(for: exclusionKey(for: installed), at: Date())
         errorMessage = commandError.map { "Installed \(installed.installedVersion), but the installer reported: \($0)" } ?? warning
         if verification == .changed(targetReached: false), errorMessage == nil {
@@ -1327,6 +1328,11 @@ final class UpkeepStore: ObservableObject {
         replaceHomebrewPackage(observed)
         settings.recordSourceAttempt(key, at: Date())
         settings.recordCheck(for: exclusionKey(for: observed), at: Date())
+        updates = updates.compactMap { update in
+            guard update.app.id == original.id else { return update }
+            let candidates = update.candidates.filter { $0.isNewer(than: installed) }
+            return candidates.isEmpty ? nil : AvailableUpdate(app: installed, candidates: candidates)
+        }
         guard verification != .unchanged else {
             if let record { await dependencies.history.discardBackup(for: record) }
             errorMessage = commandError ?? "Homebrew finished, but \(package.displayName) is still installed at \(installed.installedVersion)."
@@ -1338,11 +1344,6 @@ final class UpkeepStore: ObservableObject {
                 fromVersion: record.fromVersion, toVersion: installed.installedVersion, kind: record.kind,
                 originalAppPath: record.originalAppPath, backupPath: record.backupPath, recoveryNote: record.recoveryNote,
                 fromBuildVersion: original.buildVersion, toBuildVersion: installed.buildVersion))
-        }
-        updates = updates.compactMap { update in
-            guard update.app.id == original.id else { return update }
-            let candidates = update.candidates.filter { $0.isNewer(than: installed) }
-            return candidates.isEmpty ? nil : AvailableUpdate(app: installed, candidates: candidates)
         }
         errorMessage = commandError.map { "Installed \(installed.installedVersion), but Homebrew reported: \($0)" } ?? historyWarning
         if errorMessage == nil && observed.isOutdated {
