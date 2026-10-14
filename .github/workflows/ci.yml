@@ -136,7 +136,7 @@ jobs:
           test "$(sw_vers -productVersion | cut -d. -f1)" = "14"
           ditto -x -k compatibility-artifact/Upkeep.zip compatibility-app
           codesign --verify --deep --strict compatibility-app/Upkeep.app
-          lipo -verify_arch "$(uname -m)" compatibility-app/Upkeep.app/Contents/MacOS/Upkeep
+          lipo compatibility-app/Upkeep.app/Contents/MacOS/Upkeep -verify_arch "$(uname -m)"
       - name: Launch isolated fixture on the oldest supported runtime
         run: |
           open -n --stdout "$RUNNER_TEMP/upkeep-stdout.log" --stderr "$RUNNER_TEMP/upkeep-stderr.log" compatibility-app/Upkeep.app --args --ui-fixture --ui-fixture-narrow --ui-fixture-state=active
