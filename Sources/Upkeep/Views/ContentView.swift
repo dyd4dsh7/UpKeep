@@ -110,6 +110,7 @@ struct ContentView: View {
             store.selectedApp = nil
             store.updateInspectorSelection = nil
             store.searchText = ""
+            store.completeCVESoftwareNavigation()
         }
         .onChange(of: store.searchText) { _, value in
             if !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -147,12 +148,12 @@ struct ContentView: View {
     }
 
     private var basicSidebarDestinations: Set<SidebarDestination> {
-        [.updates, .allApps, .homebrewPackages, .macOSUpdates, .history]
+        [.updates, .allApps, .homebrewPackages, .macOSUpdates, .cveChecker, .history]
     }
 
     @ViewBuilder private var detail: some View {
         VStack(spacing: 0) {
-            if store.selection != .history {
+            if store.selection != .history && store.selection != .cveChecker {
                 ScanStatusNotice(isMacOS: store.selection == .macOSUpdates)
             }
             ZStack {
@@ -183,6 +184,11 @@ struct ContentView: View {
         case .adoptable: AdoptableView()
         case .homebrewPackages: HomebrewView()
         case .macOSUpdates: MacOSUpdatesView()
+        case .cveChecker: CVECheckerView(packages: store.developerPackages, apps: store.apps, homebrew: store.homebrewPackages, state: store.cveScanState, makeClient: store.makeCVEClient,
+            reviewUpdates: {
+                store.navigation.searchText = ""
+                store.navigation.selection = .updates
+            }, showSoftware: store.showCVESoftware)
         case .history: UpdateHistoryView()
         case .developerPackages: DeveloperPackagesView()
         case .localModels: LocalModelsView()

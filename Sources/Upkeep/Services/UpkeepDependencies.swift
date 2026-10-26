@@ -245,6 +245,7 @@ struct UpkeepDependencies: Sendable {
     let directAppInstaller: any DirectAppInstalling
     let applicationLifecycle: any ApplicationLifecycleManaging
     let externalVerificationInterval: Duration
+    let makeCVEClient: (@MainActor @Sendable () -> CVEInventoryClient)?
 
     init(
         scanner: any UpdateScanning,
@@ -257,7 +258,8 @@ struct UpkeepDependencies: Sendable {
         externalOpener: any ExternalOpening = WorkspaceExternalOpener(),
         directAppInstaller: any DirectAppInstalling = DirectAppInstaller(),
         applicationLifecycle: any ApplicationLifecycleManaging = WorkspaceApplicationLifecycle(),
-        externalVerificationInterval: Duration = .seconds(3)
+        externalVerificationInterval: Duration = .seconds(3),
+        makeCVEClient: (@MainActor @Sendable () -> CVEInventoryClient)? = nil
     ) {
         self.scanner = scanner
         self.applicationDiscovery = applicationDiscovery
@@ -270,6 +272,7 @@ struct UpkeepDependencies: Sendable {
         self.directAppInstaller = directAppInstaller
         self.applicationLifecycle = applicationLifecycle
         self.externalVerificationInterval = externalVerificationInterval
+        self.makeCVEClient = makeCVEClient
     }
 
     static let live = UpkeepDependencies(
@@ -281,6 +284,7 @@ struct UpkeepDependencies: Sendable {
         localModels: LocalModelClient(),
         history: UpdateHistoryStore.shared,
         externalOpener: WorkspaceExternalOpener(),
-        directAppInstaller: DirectAppInstaller()
+        directAppInstaller: DirectAppInstaller(),
+        makeCVEClient: { CVEInventoryClient() }
     )
 }

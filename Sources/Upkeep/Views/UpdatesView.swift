@@ -318,17 +318,24 @@ struct UpdatesView: View {
     }
 }
 
-private struct BatchUpdateSheet: View {
+struct BatchUpdateSheet: View {
     @Environment(\.dismiss) private var dismiss
     @UpkeepStoreReference private var store
     @EnvironmentObject private var settings: AppSettings
     let items: [BatchUpdateItem]
+    let isCVEReview: Bool
 
     @StateObject private var state: BatchUpdateSheetState
 
-    init(items: [BatchUpdateItem]) {
+    init(items: [BatchUpdateItem], isCVEReview: Bool = false) {
         self.items = items
-        _state = StateObject(wrappedValue: BatchUpdateSheetState(items: items))
+        self.isCVEReview = isCVEReview
+        let initial = BatchUpdateSheetState(items: items)
+        if isCVEReview {
+            initial.selectedIDs = Set(items.map(\.id))
+            initial.expandedGroups = Set(items.map(\.riskGroup))
+        }
+        _state = StateObject(wrappedValue: initial)
     }
 
     var body: some View {
@@ -358,7 +365,7 @@ private struct BatchUpdateSheet: View {
                     in: RoundedRectangle(cornerRadius: 12)
                 )
             VStack(alignment: .leading, spacing: 2) {
-                Text(state.summary == nil ? "Review Updates" : "Update Results")
+                Text(state.summary == nil ? (isCVEReview ? "Update Affected Software" : "Review Updates") : "Update Results")
                     .font(.title2.bold())
                 if state.summary != nil {
                     Text(headerSubtitle)
@@ -383,10 +390,14 @@ private struct BatchUpdateSheet: View {
 
     private var reviewView: some View {
         VStack(spacing: 0) {
+            if isCVEReview {
+                Text("Only affected software with available updates is included. Review version changes below. External updaters still require you to finish there; available updates may not fix every advisory.")
+                    .font(.callout).foregroundStyle(.secondary).padding(.horizontal, 20).padding(.top, 14)
+            }
             HStack(spacing: 12) {
-                Button(state.selectedIDs.isEmpty ? "Select Recommended" : "Deselect All") {
+                Button(state.selectedIDs.isEmpty ? (isCVEReview ? "Select All" : "Select Recommended") : "Deselect All") {
                     state.selectedIDs = state.selectedIDs.isEmpty
-                        ? Set(visibleItems.filter(\.isRecommendedByDefault).map(\.id))
+                        ? Set(visibleItems.filter { isCVEReview || $0.isRecommendedByDefault }.map(\.id))
                         : []
                 }
                 .buttonStyle(.plain)
@@ -489,7 +500,9 @@ private struct BatchUpdateSheet: View {
                     let selected = visibleItems.filter { state.selectedIDs.contains($0.id) }
                     state.isRunning = true
                     Task {
-                        state.summary = await store.performBatchUpdates(selected)
+                        state.summary = isCVEReview
+                            ? await store.performCVEBatchUpdates(selected)
+                            : await store.performBatchUpdates(selected)
                         state.isRunning = false
                     }
                 }
@@ -515,7 +528,7 @@ private struct BatchUpdateSheet: View {
 
     private var visibleRiskGroups: [UpdateRiskGroup] {
         UpdateRiskGroup.allCases.filter { group in
-            settings.sidebarViewMode == .advanced || ![.prerelease, .dependency, .developer].contains(group)
+            isCVEReview || settings.sidebarViewMode == .advanced || ![.prerelease, .dependency, .developer].contains(group)
         }
     }
 
@@ -688,12 +701,15 @@ private struct DeveloperUpdateCard: View {
         StandardItemRow(isSelected: store.updateInspectorSelection == .developer(package.id)) {
             PackageManagerIcon(manager: package.manager, size: 36)
         } content: {
-            ItemIdentityView(
-                title: package.name,
-                detail: [package.manager.rawValue, package.installationContext].compactMap { $0 }.joined(separator: " · "),
-                prereleaseChannel: package.prereleaseChannel,
-                prereleaseIsInstalled: package.prereleaseIsInstalled
-            )
+            VStack(alignment: .leading, spacing: 4) {
+                ItemIdentityView(
+                    title: package.name,
+                    detail: [package.manager.rawValue, package.installationContext].compactMap { $0 }.joined(separator: " · "),
+                    prereleaseChannel: package.prereleaseChannel,
+                    prereleaseIsInstalled: package.prereleaseIsInstalled
+                )
+                CVEStatusBadge(item: CVEInventoryItem(package))
+            }
         } accessories: {
             if store.isRefreshing(package) {
                 RefreshingIndicator(itemName: package.name)
@@ -765,14 +781,17 @@ struct UpdateCard: View {
         StandardItemRow(isSelected: store.selectedApp?.id == update.app.id) {
             AppIcon(url: update.app.url, size: 36)
         } content: {
-            ItemIdentityView(
-                title: update.app.name,
-                detail: appUpdateDetail,
-                isRunning: store.isRunning(update.app),
-                prereleaseChannel: update.prereleaseChannel,
-                prereleaseIsInstalled: update.prereleaseIsInstalled,
-                showsIntelWarning: update.app.needsAppleSiliconMigration
-            )
+            VStack(alignment: .leading, spacing: 4) {
+                ItemIdentityView(
+                    title: update.app.name,
+                    detail: appUpdateDetail,
+                    isRunning: store.isRunning(update.app),
+                    prereleaseChannel: update.prereleaseChannel,
+                    prereleaseIsInstalled: update.prereleaseIsInstalled,
+                    showsIntelWarning: update.app.needsAppleSiliconMigration
+                )
+                CVEStatusBadge(item: CVEInventoryItem(update.app))
+            }
         } accessories: {
             if store.isRefreshing(update.app) {
                 RefreshingIndicator(itemName: update.app.name)
@@ -833,15 +852,18 @@ private struct HomebrewUpdateCard: View {
         StandardItemRow(isSelected: store.updateInspectorSelection == .homebrew(package.id)) {
             PackageSourceIcon(name: "homebrew", size: 36)
         } content: {
-            ItemIdentityView(
-                title: package.displayName,
-                detail: package.kind.rawValue
-                    + (package.isRevisionUpdate ? " · Rebuild update" : "")
-                    + (package.isDependency ? " · Dependency" : "")
-                    + (package.kind == .cask ? " · May require password" : ""),
-                prereleaseChannel: package.prereleaseChannel,
-                prereleaseIsInstalled: package.prereleaseIsInstalled
-            )
+            VStack(alignment: .leading, spacing: 4) {
+                ItemIdentityView(
+                    title: package.displayName,
+                    detail: package.kind.rawValue
+                        + (package.isRevisionUpdate ? " · Rebuild update" : "")
+                        + (package.isDependency ? " · Dependency" : "")
+                        + (package.kind == .cask ? " · May require password" : ""),
+                    prereleaseChannel: package.prereleaseChannel,
+                    prereleaseIsInstalled: package.prereleaseIsInstalled
+                )
+                CVEStatusBadge(item: CVEInventoryItem(package))
+            }
         } accessories: {
             if store.isRefreshing(package) {
                 RefreshingIndicator(itemName: package.displayName)

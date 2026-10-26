@@ -30,6 +30,18 @@ struct UpkeepApp: App {
                 .environmentObject(settings)
                 .environmentObject(updateViewState)
                 .frame(minWidth: 760, minHeight: 500)
+                .onAppear {
+                    #if DEBUG
+                    // Isolated visual QA; never changes the user's system appearance.
+                    if UIFixture.enabled {
+                        if ProcessInfo.processInfo.arguments.contains("--ui-fixture-light") {
+                            NSApp.appearance = NSAppearance(named: .aqua)
+                        } else if ProcessInfo.processInfo.arguments.contains("--ui-fixture-dark") {
+                            NSApp.appearance = NSAppearance(named: .darkAqua)
+                        }
+                    }
+                    #endif
+                }
         }
         .windowToolbarStyle(.unified(showsTitle: true))
         .defaultSize(width: initialWindowSize.width, height: initialWindowSize.height)

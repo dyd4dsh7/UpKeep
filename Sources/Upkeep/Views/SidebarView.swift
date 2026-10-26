@@ -25,6 +25,7 @@ struct UpkeepSidebarView: View {
 
             Section("System") {
                 if settings.checkMacOS { item(.macOSUpdates) }
+                item(.cveChecker)
                 item(.history)
             }
 

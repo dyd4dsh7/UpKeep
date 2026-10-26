@@ -215,6 +215,7 @@ struct ScanSettings: Sendable {
 final class AppSettings: ObservableObject {
     private let defaults: UserDefaults
 
+    @Published var automaticallyCheckCVEs: Bool { didSet { save(automaticallyCheckCVEs, "automaticallyCheckCVEs") } }
     @Published var checkOnLaunch: Bool { didSet { save(checkOnLaunch, "checkOnLaunch") } }
     @Published var refreshInterval: RefreshInterval { didSet { save(refreshInterval.rawValue, "refreshInterval") } }
     @Published var dailyRefreshTimeMinutes: Int { didSet { save(dailyRefreshTimeMinutes, "dailyRefreshTimeMinutes") } }
@@ -256,6 +257,7 @@ final class AppSettings: ObservableObject {
         self.defaults = defaults
         defaults.register(defaults: [
             "checkOnLaunch": true,
+            "automaticallyCheckCVEs": true,
             "refreshInterval": RefreshInterval.everySixHours.rawValue,
             "dailyRefreshTimeMinutes": 9 * 60,
             "showMenuBarItem": true,
@@ -281,6 +283,7 @@ final class AppSettings: ObservableObject {
             defaults.set(true, forKey: "showMenuBarItem")
             defaults.set(true, forKey: "didRestoreSwiftUIMenuBarItem")
         }
+        automaticallyCheckCVEs = defaults.bool(forKey: "automaticallyCheckCVEs")
         checkOnLaunch = defaults.bool(forKey: "checkOnLaunch")
         refreshInterval = RefreshInterval(rawValue: defaults.integer(forKey: "refreshInterval")) ?? .everySixHours
         dailyRefreshTimeMinutes = defaults.integer(forKey: "dailyRefreshTimeMinutes")

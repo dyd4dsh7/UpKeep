@@ -124,6 +124,17 @@ struct SettingsView: View {
                 }
 
                 SettingsOptionRow(
+                    title: "Automatically check CVEs",
+                    detail: "Check installed software after launch, scheduled, and manual inventory refreshes using OSV, Homebrew, and NVD.",
+                    systemImage: "shield.lefthalf.filled"
+                ) {
+                    Toggle("Automatically check CVEs", isOn: Binding(
+                        get: { settings.automaticallyCheckCVEs },
+                        set: { store.setAutomaticCVEChecking($0) }
+                    )).labelsHidden()
+                }
+
+                SettingsOptionRow(
                     title: "Background checks",
                     detail: backgroundCheckDetail,
                     systemImage: "clock.arrow.circlepath"
