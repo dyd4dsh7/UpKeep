@@ -194,15 +194,13 @@ private struct DeveloperPackageRow: View, Equatable {
         StandardItemRow(isSelected: isSelected) {
             PackageManagerIcon(manager: package.manager)
         } content: {
-            VStack(alignment: .leading, spacing: 4) {
-                ItemIdentityView(
-                    title: package.name,
-                    detail: rowDetail,
-                    prereleaseChannel: package.prereleaseChannel,
-                    prereleaseIsInstalled: package.prereleaseIsInstalled
-                )
-                CVEStatusBadge(item: CVEInventoryItem(package))
-            }
+            ItemIdentityView(
+                title: package.name,
+                detail: rowDetail,
+                prereleaseChannel: package.prereleaseChannel,
+                prereleaseIsInstalled: package.prereleaseIsInstalled,
+                cveItem: CVEInventoryItem(package)
+            )
         } accessories: {
             if isRefreshing {
                 RefreshingIndicator(itemName: package.name)

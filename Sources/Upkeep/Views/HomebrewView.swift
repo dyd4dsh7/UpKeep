@@ -195,15 +195,13 @@ private struct PackageRow: View, Equatable {
         StandardItemRow(isSelected: isSelected) {
             PackageSourceIcon(name: "homebrew", size: 36)
         } content: {
-            VStack(alignment: .leading, spacing: 4) {
-                ItemIdentityView(
-                    title: package.displayName,
-                    detail: rowDetail,
-                    prereleaseChannel: package.prereleaseChannel,
-                    prereleaseIsInstalled: package.prereleaseIsInstalled
-                )
-                CVEStatusBadge(item: CVEInventoryItem(package))
-            }
+            ItemIdentityView(
+                title: package.displayName,
+                detail: rowDetail,
+                prereleaseChannel: package.prereleaseChannel,
+                prereleaseIsInstalled: package.prereleaseIsInstalled,
+                cveItem: CVEInventoryItem(package)
+            )
         } accessories: {
             if isRefreshing {
                 RefreshingIndicator(itemName: package.displayName)

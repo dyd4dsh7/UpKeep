@@ -206,7 +206,9 @@ final class UpkeepStore: ObservableObject {
         let value = UpdatePlan.primaryUpdateCount(
             applicationUpdates: visibleUpdates,
             homebrewUpdates: visibleHomebrewUpdates,
-            macOSUpdates: macOSUpdates
+            macOSUpdates: macOSUpdates,
+            developerUpdates: developerPackages.filter { $0.isOutdated && !isExcluded($0) },
+            modelUpdates: visibleOutdatedLocalModels
         )
         primaryCountProjection = (inventory, exclusions, settings.nextExclusionExpiration, value)
         return value

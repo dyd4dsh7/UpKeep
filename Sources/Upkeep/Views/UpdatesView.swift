@@ -220,7 +220,6 @@ struct UpdatesView: View {
         let packages = viewState.filter == .all ? store.updatePlan.unrepresentedHomebrewUpdates : store.homebrewPackages
         return packages.filter {
             $0.isOutdated && !store.isExcluded($0)
-                && (viewState.filter == .homebrew || !$0.isDependency)
                 && (store.searchText.isEmpty || $0.displayName.localizedCaseInsensitiveContains(store.searchText))
         }.sorted { comparePackage($0.displayName, $0.installedVersion, $0.currentVersion, "Homebrew", $1.displayName, $1.installedVersion, $1.currentVersion, "Homebrew") }
     }
@@ -232,13 +231,13 @@ struct UpdatesView: View {
     }
 
     private var filteredDeveloperPackages: [DeveloperPackage] {
-        guard viewState.filter == .developer else { return [] }
+        guard viewState.filter == .all || viewState.filter == .developer else { return [] }
         return store.developerPackages.filter { $0.isOutdated && !store.isExcluded($0) && (store.searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(store.searchText)) }
             .sorted { comparePackage($0.name, $0.currentVersion, $0.latestVersion, $0.manager.rawValue, $1.name, $1.currentVersion, $1.latestVersion, $1.manager.rawValue) }
     }
 
     private var filteredModels: [LocalLLMModel] {
-        guard viewState.filter == .models else { return [] }
+        guard viewState.filter == .all || viewState.filter == .models else { return [] }
         return store.visibleOutdatedLocalModels.filter { store.searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(store.searchText) }
             .sorted { comparePackage($0.name, $0.installedRevision, $0.latestRevision, $0.runtime.rawValue, $1.name, $1.installedRevision, $1.latestRevision, $1.runtime.rawValue) }
     }
@@ -701,15 +700,13 @@ private struct DeveloperUpdateCard: View {
         StandardItemRow(isSelected: store.updateInspectorSelection == .developer(package.id)) {
             PackageManagerIcon(manager: package.manager, size: 36)
         } content: {
-            VStack(alignment: .leading, spacing: 4) {
-                ItemIdentityView(
-                    title: package.name,
-                    detail: [package.manager.rawValue, package.installationContext].compactMap { $0 }.joined(separator: " · "),
-                    prereleaseChannel: package.prereleaseChannel,
-                    prereleaseIsInstalled: package.prereleaseIsInstalled
-                )
-                CVEStatusBadge(item: CVEInventoryItem(package))
-            }
+            ItemIdentityView(
+                title: package.name,
+                detail: [package.manager.rawValue, package.installationContext].compactMap { $0 }.joined(separator: " · "),
+                prereleaseChannel: package.prereleaseChannel,
+                prereleaseIsInstalled: package.prereleaseIsInstalled,
+                cveItem: CVEInventoryItem(package)
+            )
         } accessories: {
             if store.isRefreshing(package) {
                 RefreshingIndicator(itemName: package.name)
@@ -781,17 +778,15 @@ struct UpdateCard: View {
         StandardItemRow(isSelected: store.selectedApp?.id == update.app.id) {
             AppIcon(url: update.app.url, size: 36)
         } content: {
-            VStack(alignment: .leading, spacing: 4) {
-                ItemIdentityView(
-                    title: update.app.name,
-                    detail: appUpdateDetail,
-                    isRunning: store.isRunning(update.app),
-                    prereleaseChannel: update.prereleaseChannel,
-                    prereleaseIsInstalled: update.prereleaseIsInstalled,
-                    showsIntelWarning: update.app.needsAppleSiliconMigration
-                )
-                CVEStatusBadge(item: CVEInventoryItem(update.app))
-            }
+            ItemIdentityView(
+                title: update.app.name,
+                detail: appUpdateDetail,
+                isRunning: store.isRunning(update.app),
+                prereleaseChannel: update.prereleaseChannel,
+                prereleaseIsInstalled: update.prereleaseIsInstalled,
+                showsIntelWarning: update.app.needsAppleSiliconMigration,
+                cveItem: CVEInventoryItem(update.app)
+            )
         } accessories: {
             if store.isRefreshing(update.app) {
                 RefreshingIndicator(itemName: update.app.name)
@@ -852,18 +847,16 @@ private struct HomebrewUpdateCard: View {
         StandardItemRow(isSelected: store.updateInspectorSelection == .homebrew(package.id)) {
             PackageSourceIcon(name: "homebrew", size: 36)
         } content: {
-            VStack(alignment: .leading, spacing: 4) {
-                ItemIdentityView(
-                    title: package.displayName,
-                    detail: package.kind.rawValue
-                        + (package.isRevisionUpdate ? " · Rebuild update" : "")
-                        + (package.isDependency ? " · Dependency" : "")
-                        + (package.kind == .cask ? " · May require password" : ""),
-                    prereleaseChannel: package.prereleaseChannel,
-                    prereleaseIsInstalled: package.prereleaseIsInstalled
-                )
-                CVEStatusBadge(item: CVEInventoryItem(package))
-            }
+            ItemIdentityView(
+                title: package.displayName,
+                detail: package.kind.rawValue
+                    + (package.isRevisionUpdate ? " · Rebuild update" : "")
+                    + (package.isDependency ? " · Dependency" : "")
+                    + (package.kind == .cask ? " · May require password" : ""),
+                prereleaseChannel: package.prereleaseChannel,
+                prereleaseIsInstalled: package.prereleaseIsInstalled,
+                cveItem: CVEInventoryItem(package)
+            )
         } accessories: {
             if store.isRefreshing(package) {
                 RefreshingIndicator(itemName: package.displayName)

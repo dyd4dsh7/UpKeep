@@ -23,17 +23,15 @@ struct AllAppsView: View {
                     StandardItemRow(isSelected: store.selectedApp?.id == app.id) {
                         AppIcon(url: app.url, size: 36)
                     } content: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            ItemIdentityView(
-                                title: app.name,
-                                detail: sourceSummary(for: app) + (store.apps.contains { $0.id != app.id && $0.bundleIdentifier != nil && $0.bundleIdentifier == app.bundleIdentifier } ? " · " + app.url.deletingLastPathComponent().path : ""),
-                                isRunning: store.isRunning(app),
-                                prereleaseChannel: update?.prereleaseChannel ?? app.prereleaseChannel,
-                                prereleaseIsInstalled: update?.prereleaseIsInstalled ?? (app.prereleaseChannel != nil),
-                                showsIntelWarning: app.needsAppleSiliconMigration
-                            )
-                            CVEStatusBadge(item: CVEInventoryItem(app))
-                        }
+                        ItemIdentityView(
+                            title: app.name,
+                            detail: sourceSummary(for: app) + (store.apps.contains { $0.id != app.id && $0.bundleIdentifier != nil && $0.bundleIdentifier == app.bundleIdentifier } ? " · " + app.url.deletingLastPathComponent().path : ""),
+                            isRunning: store.isRunning(app),
+                            prereleaseChannel: update?.prereleaseChannel ?? app.prereleaseChannel,
+                            prereleaseIsInstalled: update?.prereleaseIsInstalled ?? (app.prereleaseChannel != nil),
+                            showsIntelWarning: app.needsAppleSiliconMigration,
+                            cveItem: CVEInventoryItem(app)
+                        )
                     } accessories: {
                         if store.isRefreshing(app) {
                             RefreshingIndicator(itemName: app.name)

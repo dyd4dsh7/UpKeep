@@ -72,6 +72,10 @@ struct StandardItemRow<Icon: View, Content: View, Accessories: View>: View {
         .padding(.horizontal, settings.listDensity == .compact ? 2 : 4)
         .padding(.vertical, settings.listDensity == .compact ? 4 : 6)
         .contentShape(Rectangle())
+        .alignmentGuide(.listRowSeparatorLeading) { _ in
+            (settings.listDensity == .compact ? 2 : 4)
+                + (settings.listDensity == .compact ? 30 : 38) + rowSpacing
+        }
         .listRowSeparator(.visible)
         .animation(reduceMotion ? nil : UpkeepMotion.quick, value: settings.listDensity)
         .upkeepAnimated(for: isSelected, animation: UpkeepMotion.quick)
@@ -104,6 +108,7 @@ struct ItemIdentityView: View {
     var prereleaseChannel: PrereleaseChannel?
     var prereleaseIsInstalled = false
     var showsIntelWarning = false
+    var cveItem: CVEInventoryItem?
 
     var body: some View {
         VStack(alignment: .leading, spacing: settings.listDensity == .compact ? 1 : 4) {
@@ -121,6 +126,10 @@ struct ItemIdentityView: View {
                 }
                 if let prereleaseChannel {
                     PrereleaseBadge(channel: prereleaseChannel, isInstalled: prereleaseIsInstalled)
+                }
+                if let cveItem {
+                    CVEStatusBadge(item: cveItem)
+                        .fixedSize()
                 }
             }
             Text(detail)

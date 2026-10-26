@@ -49,9 +49,9 @@ final class UpkeepLibraryState: ObservableObject {
     var adoptableApps: [AdoptableApp] = [] { willSet { objectWillChange.send() } didSet { adoptableGeneration &+= 1; changed(); rebuildAdoptableLookups() } }
     var macOSUpdates: [MacOSUpdate] = [] { willSet { objectWillChange.send() } didSet { primaryUpdateGeneration &+= 1; changed() } }
     var updateHistory: [UpdateRecord] = [] { willSet { objectWillChange.send() } didSet { changed() } }
-    var developerPackages: [DeveloperPackage] = [] { willSet { objectWillChange.send() } didSet { developerGeneration &+= 1; changed(); rebuildDeveloperPackageLookup() } }
+    var developerPackages: [DeveloperPackage] = [] { willSet { objectWillChange.send() } didSet { developerGeneration &+= 1; primaryUpdateGeneration &+= 1; changed(); rebuildDeveloperPackageLookup() } }
     var installedDeveloperManagers: [DeveloperPackageManager] = [] { willSet { objectWillChange.send() } }
-    var localModels: [LocalLLMModel] = [] { willSet { objectWillChange.send() } didSet { changed(); rebuildLocalModelLookup() } }
+    var localModels: [LocalLLMModel] = [] { willSet { objectWillChange.send() } didSet { primaryUpdateGeneration &+= 1; changed(); rebuildLocalModelLookup() } }
 
     private var appByID: [String: InstalledApp] = [:]
     private var appIndexByProductName: [String: Int] = [:]

@@ -47,7 +47,7 @@ enum HomebrewSortOrder: String, CaseIterable, Identifiable {
 }
 
 enum UpdateListFilter: String, CaseIterable, Identifiable {
-    case all = "Primary Updates"
+    case all = "All Updates"
     case applications = "Applications"
     case homebrew = "Homebrew"
     case macOS = "macOS"
