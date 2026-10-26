@@ -95,6 +95,11 @@ struct AllAppsView: View {
             }
         }
         .upkeepAnimated(for: visibleApps.map(\.id))
+        .safeAreaInset(edge: .top, spacing: 0) {
+            WorkspaceSummary(title: WorkspaceSummary.count(visibleApps.count, "application", "applications"),
+                detail: "Updates available in this view: \(visibleApps.filter { store.visibleUpdate(for: $0) != nil }.count)",
+                systemImage: systemImage)
+        }
         .toolbar { listToolbar }
     }
 
@@ -356,6 +361,7 @@ struct AppDetailView: View {
         InfoPanel {
             header
         } content: {
+                    CVESecuritySummary(item: CVEInventoryItem(app))
                     if app.needsAppleSiliconMigration {
                         AppleSiliconMigrationWarning { detailState.showsAppleSiliconMigration = true }
                     }
@@ -557,10 +563,10 @@ struct AppDetailView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 14) {
                 Image(systemName: statusIcon)
-                    .font(.system(size: 24, weight: .medium))
+                    .font(.system(size: 22, weight: .medium))
                     .foregroundStyle(statusColor)
                     .symbolRenderingMode(.hierarchical)
-                    .frame(width: 38)
+                    .frame(width: 32)
                 VStack(alignment: .leading, spacing: 5) {
                     Text(statusTitle).font(.headline)
                     if let update {
@@ -587,10 +593,11 @@ struct AppDetailView: View {
                             )
                     }
                 }
-                Spacer()
+                .fixedSize(horizontal: false, vertical: true)
+                .layoutPriority(1)
+                Spacer(minLength: 0)
                 updateOptionsMenu
             }
-            Divider()
             if let progress = app.managedUpdateStatus?.progress {
                 ProgressView(value: progress)
                     .accessibilityLabel(app.managedUpdateStatus?.state.rawValue ?? "Update progress")
@@ -758,8 +765,7 @@ struct AppDetailView: View {
                 .buttonStyle(.bordered)
             }
         }
-        .controlSize(.large)
-        .buttonBorderShape(.capsule)
+        .controlSize(.regular)
     }
 
     private var primaryActionTitle: String {
@@ -768,8 +774,11 @@ struct AppDetailView: View {
 
     @ViewBuilder
     private var updateOptionsMenu: some View {
-        Menu { updateOptionCommands } label: { Text("Options") }
+        Menu { updateOptionCommands } label: {
+            Image(systemName: "ellipsis.circle").font(.body).frame(width: 24, height: 24)
+        }
             .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
             .fixedSize()
             .help("Refresh, update, exclusion, and app options")
             .accessibilityLabel("App options")

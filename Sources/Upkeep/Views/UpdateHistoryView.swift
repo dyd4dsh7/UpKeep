@@ -55,6 +55,11 @@ struct UpdateHistoryView: View {
             }
         }
         .upkeepAnimated(for: snapshot.records.map(\.id))
+        .safeAreaInset(edge: .top, spacing: 0) {
+            WorkspaceSummary(title: WorkspaceSummary.count(snapshot.records.count, "update record", "update records"),
+                detail: "\(kindFilter?.rawValue ?? "All update types") · Review past updates and recovery options",
+                systemImage: "clock.arrow.circlepath")
+        }
         .toolbar {
             ToolbarItem {
                 Button("Recovery Storage", systemImage: "externaldrive") {

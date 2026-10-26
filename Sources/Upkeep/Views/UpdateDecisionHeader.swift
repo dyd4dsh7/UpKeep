@@ -9,21 +9,32 @@ struct UpdateDecisionHeader: View {
     var body: some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 20) {
-                heading.fixedSize(horizontal: true, vertical: false)
+                summary.fixedSize(horizontal: true, vertical: false)
                 Spacer(minLength: 24)
                 actions
             }
             VStack(alignment: .leading, spacing: 12) {
-                heading
+                summary
                 actions
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
+        .padding(.horizontal, UpkeepLayout.pageInset)
+        .padding(.vertical, 16)
         .accessibilityElement(children: .contain)
         .upkeepAnimated(for: recommendedCount)
         .upkeepAnimated(for: attentionCount)
+    }
+
+    private var summary: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "arrow.down.circle")
+                .font(.system(size: 22, weight: .regular))
+                .foregroundStyle(.tint)
+                .frame(width: 28, height: 28)
+                .accessibilityHidden(true)
+            heading
+        }
     }
 
     private var heading: some View {

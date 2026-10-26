@@ -101,10 +101,6 @@ struct SettingsView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                Text(settings.sidebarViewMode.detail)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-
                 Picker("List density", selection: $settings.listDensity) {
                     ForEach(ListDensity.allCases) { density in
                         Text(density.title).tag(density)
@@ -113,6 +109,8 @@ struct SettingsView: View {
                 .pickerStyle(.segmented)
             } header: {
                 Text("Appearance")
+            } footer: {
+                Text(settings.sidebarViewMode.detail)
             }
             Section {
                 SettingsOptionRow(

@@ -18,6 +18,11 @@ struct LocalModelsView: View {
             }
         }
         .upkeepAnimated(for: models.map(\.id))
+        .safeAreaInset(edge: .top, spacing: 0) {
+            WorkspaceSummary(title: WorkspaceSummary.count(models.count, "local model", "local models"),
+                detail: "Updates available: \(models.filter(\.isOutdated).count) · Ollama and LM Studio",
+                systemImage: "brain.head.profile")
+        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 AsyncToolbarButton(

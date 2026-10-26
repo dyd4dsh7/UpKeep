@@ -76,7 +76,7 @@ enum CVEColors {
         case .critical, .high:
             scheme == .light ? Color(.sRGB, red: 0.72, green: 0.13, blue: 0.13) : .red
         case .medium:
-            scheme == .light ? Color(.sRGB, red: 0.58, green: 0.30, blue: 0.02) : .orange
+            UpkeepColors.warning(in: scheme)
         case .low:
             scheme == .light ? Color(.sRGB, red: 0.08, green: 0.32, blue: 0.68) : .blue
         default: .secondary

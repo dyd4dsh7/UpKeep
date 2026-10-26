@@ -19,6 +19,11 @@ struct DeveloperPackagesView: View {
                     .upkeepStateTransition()
             }
         }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            WorkspaceSummary(title: WorkspaceSummary.count(packages.count, "developer package", "developer packages"),
+                detail: "Updates available: \(packages.filter(\.isOutdated).count) · \(store.developerManagerFilter.title)",
+                systemImage: "curlybraces.square")
+        }
         .toolbar { packageToolbar }
     }
 
@@ -189,12 +194,15 @@ private struct DeveloperPackageRow: View, Equatable {
         StandardItemRow(isSelected: isSelected) {
             PackageManagerIcon(manager: package.manager)
         } content: {
-            ItemIdentityView(
-                title: package.name,
-                detail: rowDetail,
-                prereleaseChannel: package.prereleaseChannel,
-                prereleaseIsInstalled: package.prereleaseIsInstalled
-            )
+            VStack(alignment: .leading, spacing: 4) {
+                ItemIdentityView(
+                    title: package.name,
+                    detail: rowDetail,
+                    prereleaseChannel: package.prereleaseChannel,
+                    prereleaseIsInstalled: package.prereleaseIsInstalled
+                )
+                CVEStatusBadge(item: CVEInventoryItem(package))
+            }
         } accessories: {
             if isRefreshing {
                 RefreshingIndicator(itemName: package.name)
@@ -280,9 +288,9 @@ private struct DeveloperPackageDetailContent: View {
                             isRefreshing: store.isRefreshing(package),
                             lastChecked: store.lastChecked(for: package)
                         )
-
                     }
                 } content: {
+                CVESecuritySummary(item: CVEInventoryItem(package))
                 if package.isOutdated { updateCard }
 
                 Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
@@ -413,8 +421,7 @@ private struct DeveloperPackageDetailContent: View {
                 .disabled(store.isWorking(.developerPackage(package.id)))
             }
         }
-        .controlSize(.large)
-        .buttonBorderShape(.capsule)
+        .controlSize(.regular)
     }
 
     private var uninstallConfirmationMessage: String {

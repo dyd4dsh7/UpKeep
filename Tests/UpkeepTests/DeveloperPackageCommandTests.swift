@@ -2,6 +2,45 @@ import Foundation
 import Testing
 @testable import Upkeep
 
+@Test func commandsSupplyHomeWhenLaunchedWithoutAShellEnvironment() throws {
+    let expectedHome = FileManager.default.homeDirectoryForCurrentUser.path
+    for base: [String: String] in [[:], ["HOME": ""], ["HOME": "  "]] {
+        let result = try CommandRunner.capture(URL(fileURLWithPath: "/bin/sh"),
+            ["-c", "printf '%s' \"$HOME\""], environment: base)
+        #expect(result.status == 0)
+        #expect(String(decoding: result.output, as: UTF8.self) == expectedHome)
+        let developerEnvironment = developerCommandEnvironment(for: URL(fileURLWithPath: "/usr/bin/true"), base: base)
+        #expect(developerEnvironment["HOME"] == expectedHome)
+    }
+}
+
+@Test func commandEnvironmentPreservesExplicitHomeAndOtherVariables() {
+    let base = ["HOME": "/custom/home", "PATH": "/custom/bin", "CUSTOM_SETTING": "preserved"]
+    #expect(CommandRunner.commandEnvironment(base) == base)
+    #expect(developerCommandEnvironment(for: URL(fileURLWithPath: "/usr/bin/true"), base: base)["HOME"] == "/custom/home")
+}
+
+@Test func nvmDiscoveryIgnoresFinderMetadataAndIncompleteInstallations() throws {
+    let manager = FileManager.default
+    let root = manager.temporaryDirectory.appendingPathComponent("UpkeepNVMDiscovery-\(UUID())")
+    try manager.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? manager.removeItem(at: root) }
+    try Data("Finder metadata".utf8).write(to: root.appendingPathComponent(".DS_Store"))
+    for version in ["v24.1.0", "v22.1.0", "v20.1.0"] {
+        try manager.createDirectory(at: root.appendingPathComponent("\(version)/bin"), withIntermediateDirectories: true)
+    }
+    let valid = root.appendingPathComponent("v24.1.0/bin/node")
+    try Data("#!/bin/sh\nexit 0\n".utf8).write(to: valid)
+    try manager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: valid.path)
+    let notExecutable = root.appendingPathComponent("v22.1.0/bin/node")
+    try Data().write(to: notExecutable)
+    try manager.setAttributes([.posixPermissions: 0o644], ofItemAtPath: notExecutable.path)
+    let discovered = nvmExecutables(named: "node", root: root)
+    #expect(discovered.count == 1)
+    #expect(discovered.first?.hasSuffix("/v24.1.0/bin/node") == true)
+    #expect(nvmExecutables(named: "npm", root: root).isEmpty)
+}
+
 @Test func globalDeveloperCommandsProbeWritableHomeInsteadOfLaunchDirectory() throws {
     let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent("UpkeepCommandCWDTests-\(UUID().uuidString)", isDirectory: true)

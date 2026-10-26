@@ -4,6 +4,7 @@ struct OperationCentreView: View {
     @UpkeepStoreReference private var store
     let execution: UpkeepUpdateExecutionState
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
     @State private var checking = Set<OperationID>()
 
     var body: some View {
@@ -55,11 +56,11 @@ struct OperationCentreView: View {
                             Text("Requested: \(verification.requested) · Installed: \(verification.observed)")
                                 .font(.caption).textSelection(.enabled)
                             Text(verification.targetReached ? "Requested version reached" : "Requested version not reached")
-                                .font(.caption).foregroundStyle(verification.targetReached ? Color.secondary : Color.orange)
+                                .font(.caption).foregroundStyle(verification.targetReached ? Color.secondary : UpkeepColors.warning(in: colorScheme))
                         }
                         if let commandError = completed.commandError {
                             Text("Command reported: \(commandError)")
-                                .font(.caption).foregroundStyle(.orange).textSelection(.enabled)
+                                .font(.caption).foregroundStyle(UpkeepColors.warning(in: colorScheme)).textSelection(.enabled)
                         }
                         DisclosureGroup("Command log") {
                             Text(completed.commandLog.isEmpty ? "No command output was captured for this operation." : completed.commandLog)
@@ -88,14 +89,13 @@ struct OperationCentreView: View {
                     .padding(.vertical, 4)
                     .accessibilityElement(children: .contain)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
-                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                    .upkeepOutlinedInspectorCard()
                    }
                   }
                 }
             }
         }
-        .padding(20)
+        .padding(UpkeepLayout.pageInset)
         .frame(minWidth: 420, idealWidth: 560, minHeight: 300, idealHeight: 420)
     }
 

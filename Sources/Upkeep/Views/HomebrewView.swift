@@ -11,10 +11,21 @@ struct HomebrewView: View {
             if HomebrewClient.brewURL == nil {
                 ContentUnavailableView("Homebrew not installed", systemImage: "terminal", description: Text("Install Homebrew to manage packages here."))
                     .upkeepStateTransition()
+            } else if packages.isEmpty {
+                ContentUnavailableView("No packages to show", systemImage: "shippingbox",
+                    description: Text(store.homebrewPackages.isEmpty
+                        ? "Check for updates to refresh your Homebrew inventory."
+                        : "Try another filter to see your installed packages."))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 packageList(packages)
                     .upkeepStateTransition()
             }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            WorkspaceSummary(title: WorkspaceSummary.count(packages.count, "Homebrew package", "Homebrew packages"),
+                detail: "Updates available in this view: \(packages.filter(\.isOutdated).count)",
+                systemImage: "shippingbox")
         }
         .toolbar { packageToolbar }
     }
@@ -184,12 +195,15 @@ private struct PackageRow: View, Equatable {
         StandardItemRow(isSelected: isSelected) {
             PackageSourceIcon(name: "homebrew", size: 36)
         } content: {
-            ItemIdentityView(
-                title: package.displayName,
-                detail: rowDetail,
-                prereleaseChannel: package.prereleaseChannel,
-                prereleaseIsInstalled: package.prereleaseIsInstalled
-            )
+            VStack(alignment: .leading, spacing: 4) {
+                ItemIdentityView(
+                    title: package.displayName,
+                    detail: rowDetail,
+                    prereleaseChannel: package.prereleaseChannel,
+                    prereleaseIsInstalled: package.prereleaseIsInstalled
+                )
+                CVEStatusBadge(item: CVEInventoryItem(package))
+            }
         } accessories: {
             if isRefreshing {
                 RefreshingIndicator(itemName: package.displayName)
@@ -275,6 +289,7 @@ struct PackageDetail: View {
 
                     }
                 } content: {
+                    CVESecuritySummary(item: CVEInventoryItem(package))
                     if package.isOutdated { updateCard(package) }
                     detailCard(package)
                     if package.isOutdated {

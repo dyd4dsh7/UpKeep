@@ -17,7 +17,7 @@ struct ScanStatusNotice: View {
                 Text("Checked \(progress.completed) of \(progress.total) app sources · \(progress.lastSource.rawValue)")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
-            }.padding(12)
+            }.padding(.horizontal, UpkeepLayout.pageInset).padding(.vertical, 8)
             Divider()
         }
         if state == .failed || state == .partial || !warnings.isEmpty {
@@ -33,9 +33,9 @@ struct ScanStatusNotice: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(.quaternary.opacity(0.5))
+            .padding(.horizontal, UpkeepLayout.pageInset)
+            .padding(.vertical, 8)
+            .background(.quaternary.opacity(0.25))
             Divider()
         }
     }
@@ -43,7 +43,7 @@ struct ScanStatusNotice: View {
     private var warningLabel: some View {
         Label(state == .checking ? "Rechecking sources…" : "Some sources couldn’t be checked",
               systemImage: "exclamationmark.triangle.fill")
-            .font(.callout)
+            .font(.callout.weight(.medium))
             .foregroundStyle(.primary)
             .symbolRenderingMode(.multicolor)
             .fixedSize(horizontal: false, vertical: true)
