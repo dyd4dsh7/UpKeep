@@ -29,7 +29,10 @@ struct ContentView: View {
         if inspectorPresented.wrappedValue && width < 1_000 {
             sidebarCollapsedForInspector = true
             columnVisibility = .detailOnly
-        } else if sidebarCollapsedForInspector {
+        } else if sidebarCollapsedForInspector && width >= 1_000 {
+            // At narrow widths, reopening the native sidebar preserves the
+            // detail width by growing the window. Keep navigation collapsed
+            // until there is room, or the user explicitly shows it.
             sidebarCollapsedForInspector = false
             columnVisibility = .all
         }

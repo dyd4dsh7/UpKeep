@@ -78,7 +78,7 @@ struct StandardItemRow<Icon: View, Content: View, Accessories: View>: View {
         }
         .listRowSeparator(.visible)
         .animation(reduceMotion ? nil : UpkeepMotion.quick, value: settings.listDensity)
-        .upkeepAnimated(for: isSelected, animation: UpkeepMotion.quick)
+        // Selection changes color only; native row geometry should not animate.
         .upkeepRowTransition()
     }
 

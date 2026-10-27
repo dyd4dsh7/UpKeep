@@ -26,6 +26,7 @@ private struct UpdateListSnapshot {
 struct UpdatesView: View {
     @UpkeepStoreReference private var store
     @EnvironmentObject private var viewState: UpdateViewState
+    @FocusState private var updatesFocused: Bool
 
     var body: some View {
         let snapshot = listSnapshot
@@ -45,34 +46,56 @@ struct UpdatesView: View {
                         review: { store.isShowingBatchReview = true }
                     )
                     Divider()
-                    List(selection: selectedUpdateItemID) {
-                        if !snapshot.applications.isEmpty {
-                            Section("Applications") {
-                                ForEach(snapshot.applications) { UpdateCard(update: $0) }
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            // Eager measurement keeps selection from correcting
+                            // estimated heights above the current scroll position.
+                            VStack(spacing: 0) {
+                                if !snapshot.applications.isEmpty {
+                                    updateSectionHeader("Applications")
+                                    ForEach(snapshot.applications) { update in
+                                        selectionRow(id: "app:\(update.app.id)") { UpdateCard(update: update) }
+                                    }
+                                }
+                                if !snapshot.homebrewPackages.isEmpty {
+                                    updateSectionHeader("Homebrew Packages")
+                                    ForEach(snapshot.homebrewPackages) { package in
+                                        selectionRow(id: UpdateInspectorSelection.homebrew(package.id).listID) {
+                                            HomebrewUpdateCard(package: package)
+                                        }
+                                    }
+                                }
+                                if !snapshot.macOSUpdates.isEmpty {
+                                    updateSectionHeader("macOS")
+                                    ForEach(snapshot.macOSUpdates) { MacOSUpdateCard(update: $0).padding(.horizontal, 12) }
+                                }
+                                if !snapshot.developerPackages.isEmpty {
+                                    updateSectionHeader("Developer Packages")
+                                    ForEach(snapshot.developerPackages) { package in
+                                        selectionRow(id: UpdateInspectorSelection.developer(package.id).listID) {
+                                            DeveloperUpdateCard(package: package)
+                                        }
+                                    }
+                                }
+                                if !snapshot.models.isEmpty {
+                                    updateSectionHeader("AI Models")
+                                    ForEach(snapshot.models) { model in
+                                        selectionRow(id: UpdateInspectorSelection.model(model.id).listID) {
+                                            LocalModelUpdateCard(model: model)
+                                        }
+                                    }
+                                }
                             }
+                            .padding(.horizontal, 10)
+                            .padding(.bottom, 8)
                         }
-                        if !snapshot.homebrewPackages.isEmpty {
-                            Section("Homebrew Packages") {
-                                ForEach(snapshot.homebrewPackages) { HomebrewUpdateCard(package: $0) }
-                            }
-                        }
-                        if !snapshot.macOSUpdates.isEmpty {
-                            Section("macOS") {
-                                ForEach(snapshot.macOSUpdates) { MacOSUpdateCard(update: $0) }
-                            }
-                        }
-                        if !snapshot.developerPackages.isEmpty {
-                            Section("Developer Packages") {
-                                ForEach(snapshot.developerPackages) { DeveloperUpdateCard(package: $0) }
-                            }
-                        }
-                        if !snapshot.models.isEmpty {
-                            Section("AI Models") {
-                                ForEach(snapshot.models) { LocalModelUpdateCard(model: $0) }
-                            }
+                        .focusable()
+                        .focused($updatesFocused)
+                        .focusEffectDisabled()
+                        .onMoveCommand { direction in
+                            moveSelection(direction, snapshot: snapshot, proxy: proxy)
                         }
                     }
-                    .upkeepContentList()
                 }
                 .upkeepStateTransition()
             }
@@ -84,6 +107,53 @@ struct UpdatesView: View {
                 .environment(\.upkeepStoreReference, store)
         }
         .toolbar { listToolbar }
+    }
+
+    private func updateSectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 8)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
+    }
+
+    private func selectionRow<Row: View>(id: String, @ViewBuilder content: () -> Row) -> some View {
+        let isSelected = selectedUpdateItemID.wrappedValue == id
+        return VStack(spacing: 0) {
+            content()
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(isSelected ? Color.accentColor.opacity(0.2) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    selectedUpdateItemID.wrappedValue = id
+                    updatesFocused = true
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                .accessibilityAction {
+                    selectedUpdateItemID.wrappedValue = id
+                    updatesFocused = true
+                }
+            Divider().padding(.leading, 58)
+        }
+        .id(id)
+    }
+
+    private func moveSelection(_ direction: MoveCommandDirection, snapshot: UpdateListSnapshot, proxy: ScrollViewProxy) {
+        guard direction == .up || direction == .down else { return }
+        let ids = snapshot.applications.map { "app:\($0.app.id)" }
+            + snapshot.homebrewPackages.map { UpdateInspectorSelection.homebrew($0.id).listID }
+            + snapshot.developerPackages.map { UpdateInspectorSelection.developer($0.id).listID }
+            + snapshot.models.map { UpdateInspectorSelection.model($0.id).listID }
+        guard !ids.isEmpty else { return }
+        let current = selectedUpdateItemID.wrappedValue.flatMap { ids.firstIndex(of: $0) }
+        let next = current.map { min(max(0, $0 + (direction == .down ? 1 : -1)), ids.count - 1) }
+            ?? (direction == .down ? 0 : ids.count - 1)
+        selectedUpdateItemID.wrappedValue = ids[next]
+        proxy.scrollTo(ids[next])
     }
 
     @ToolbarContentBuilder private var listToolbar: some ToolbarContent {
