@@ -26,6 +26,7 @@ private struct UpdateListSnapshot {
 struct UpdatesView: View {
     @UpkeepStoreReference private var store
     @EnvironmentObject private var viewState: UpdateViewState
+    @FocusState private var updatesFocused: Bool
 
     var body: some View {
         let snapshot = listSnapshot
@@ -45,34 +46,56 @@ struct UpdatesView: View {
                         review: { store.isShowingBatchReview = true }
                     )
                     Divider()
-                    List(selection: selectedUpdateItemID) {
-                        if !snapshot.applications.isEmpty {
-                            Section("Applications") {
-                                ForEach(snapshot.applications) { UpdateCard(update: $0) }
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            // Eager measurement keeps selection from correcting
+                            // estimated heights above the current scroll position.
+                            VStack(spacing: 0) {
+                                if !snapshot.applications.isEmpty {
+                                    updateSectionHeader("Applications")
+                                    ForEach(snapshot.applications) { update in
+                                        selectionRow(id: "app:\(update.app.id)") { UpdateCard(update: update) }
+                                    }
+                                }
+                                if !snapshot.homebrewPackages.isEmpty {
+                                    updateSectionHeader("Homebrew Packages")
+                                    ForEach(snapshot.homebrewPackages) { package in
+                                        selectionRow(id: UpdateInspectorSelection.homebrew(package.id).listID) {
+                                            HomebrewUpdateCard(package: package)
+                                        }
+                                    }
+                                }
+                                if !snapshot.macOSUpdates.isEmpty {
+                                    updateSectionHeader("macOS")
+                                    ForEach(snapshot.macOSUpdates) { MacOSUpdateCard(update: $0).padding(.horizontal, 12) }
+                                }
+                                if !snapshot.developerPackages.isEmpty {
+                                    updateSectionHeader("Developer Packages")
+                                    ForEach(snapshot.developerPackages) { package in
+                                        selectionRow(id: UpdateInspectorSelection.developer(package.id).listID) {
+                                            DeveloperUpdateCard(package: package)
+                                        }
+                                    }
+                                }
+                                if !snapshot.models.isEmpty {
+                                    updateSectionHeader("AI Models")
+                                    ForEach(snapshot.models) { model in
+                                        selectionRow(id: UpdateInspectorSelection.model(model.id).listID) {
+                                            LocalModelUpdateCard(model: model)
+                                        }
+                                    }
+                                }
                             }
+                            .padding(.horizontal, 10)
+                            .padding(.bottom, 8)
                         }
-                        if !snapshot.homebrewPackages.isEmpty {
-                            Section("Homebrew Packages") {
-                                ForEach(snapshot.homebrewPackages) { HomebrewUpdateCard(package: $0) }
-                            }
-                        }
-                        if !snapshot.macOSUpdates.isEmpty {
-                            Section("macOS") {
-                                ForEach(snapshot.macOSUpdates) { MacOSUpdateCard(update: $0) }
-                            }
-                        }
-                        if !snapshot.developerPackages.isEmpty {
-                            Section("Developer Packages") {
-                                ForEach(snapshot.developerPackages) { DeveloperUpdateCard(package: $0) }
-                            }
-                        }
-                        if !snapshot.models.isEmpty {
-                            Section("AI Models") {
-                                ForEach(snapshot.models) { LocalModelUpdateCard(model: $0) }
-                            }
+                        .focusable()
+                        .focused($updatesFocused)
+                        .focusEffectDisabled()
+                        .onMoveCommand { direction in
+                            moveSelection(direction, snapshot: snapshot, proxy: proxy)
                         }
                     }
-                    .upkeepContentList()
                 }
                 .upkeepStateTransition()
             }
@@ -84,6 +107,53 @@ struct UpdatesView: View {
                 .environment(\.upkeepStoreReference, store)
         }
         .toolbar { listToolbar }
+    }
+
+    private func updateSectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 8)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
+    }
+
+    private func selectionRow<Row: View>(id: String, @ViewBuilder content: () -> Row) -> some View {
+        let isSelected = selectedUpdateItemID.wrappedValue == id
+        return VStack(spacing: 0) {
+            content()
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(isSelected ? Color.accentColor.opacity(0.2) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    selectedUpdateItemID.wrappedValue = id
+                    updatesFocused = true
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                .accessibilityAction {
+                    selectedUpdateItemID.wrappedValue = id
+                    updatesFocused = true
+                }
+            Divider().padding(.leading, 58)
+        }
+        .id(id)
+    }
+
+    private func moveSelection(_ direction: MoveCommandDirection, snapshot: UpdateListSnapshot, proxy: ScrollViewProxy) {
+        guard direction == .up || direction == .down else { return }
+        let ids = snapshot.applications.map { "app:\($0.app.id)" }
+            + snapshot.homebrewPackages.map { UpdateInspectorSelection.homebrew($0.id).listID }
+            + snapshot.developerPackages.map { UpdateInspectorSelection.developer($0.id).listID }
+            + snapshot.models.map { UpdateInspectorSelection.model($0.id).listID }
+        guard !ids.isEmpty else { return }
+        let current = selectedUpdateItemID.wrappedValue.flatMap { ids.firstIndex(of: $0) }
+        let next = current.map { min(max(0, $0 + (direction == .down ? 1 : -1)), ids.count - 1) }
+            ?? (direction == .down ? 0 : ids.count - 1)
+        selectedUpdateItemID.wrappedValue = ids[next]
+        proxy.scrollTo(ids[next])
     }
 
     @ToolbarContentBuilder private var listToolbar: some ToolbarContent {
@@ -220,7 +290,6 @@ struct UpdatesView: View {
         let packages = viewState.filter == .all ? store.updatePlan.unrepresentedHomebrewUpdates : store.homebrewPackages
         return packages.filter {
             $0.isOutdated && !store.isExcluded($0)
-                && (viewState.filter == .homebrew || !$0.isDependency)
                 && (store.searchText.isEmpty || $0.displayName.localizedCaseInsensitiveContains(store.searchText))
         }.sorted { comparePackage($0.displayName, $0.installedVersion, $0.currentVersion, "Homebrew", $1.displayName, $1.installedVersion, $1.currentVersion, "Homebrew") }
     }
@@ -232,13 +301,13 @@ struct UpdatesView: View {
     }
 
     private var filteredDeveloperPackages: [DeveloperPackage] {
-        guard viewState.filter == .developer else { return [] }
+        guard viewState.filter == .all || viewState.filter == .developer else { return [] }
         return store.developerPackages.filter { $0.isOutdated && !store.isExcluded($0) && (store.searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(store.searchText)) }
             .sorted { comparePackage($0.name, $0.currentVersion, $0.latestVersion, $0.manager.rawValue, $1.name, $1.currentVersion, $1.latestVersion, $1.manager.rawValue) }
     }
 
     private var filteredModels: [LocalLLMModel] {
-        guard viewState.filter == .models else { return [] }
+        guard viewState.filter == .all || viewState.filter == .models else { return [] }
         return store.visibleOutdatedLocalModels.filter { store.searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(store.searchText) }
             .sorted { comparePackage($0.name, $0.installedRevision, $0.latestRevision, $0.runtime.rawValue, $1.name, $1.installedRevision, $1.latestRevision, $1.runtime.rawValue) }
     }
@@ -318,17 +387,24 @@ struct UpdatesView: View {
     }
 }
 
-private struct BatchUpdateSheet: View {
+struct BatchUpdateSheet: View {
     @Environment(\.dismiss) private var dismiss
     @UpkeepStoreReference private var store
     @EnvironmentObject private var settings: AppSettings
     let items: [BatchUpdateItem]
+    let isCVEReview: Bool
 
     @StateObject private var state: BatchUpdateSheetState
 
-    init(items: [BatchUpdateItem]) {
+    init(items: [BatchUpdateItem], isCVEReview: Bool = false) {
         self.items = items
-        _state = StateObject(wrappedValue: BatchUpdateSheetState(items: items))
+        self.isCVEReview = isCVEReview
+        let initial = BatchUpdateSheetState(items: items)
+        if isCVEReview {
+            initial.selectedIDs = Set(items.map(\.id))
+            initial.expandedGroups = Set(items.map(\.riskGroup))
+        }
+        _state = StateObject(wrappedValue: initial)
     }
 
     var body: some View {
@@ -358,7 +434,7 @@ private struct BatchUpdateSheet: View {
                     in: RoundedRectangle(cornerRadius: 12)
                 )
             VStack(alignment: .leading, spacing: 2) {
-                Text(state.summary == nil ? "Review Updates" : "Update Results")
+                Text(state.summary == nil ? (isCVEReview ? "Update Affected Software" : "Review Updates") : "Update Results")
                     .font(.title2.bold())
                 if state.summary != nil {
                     Text(headerSubtitle)
@@ -383,10 +459,14 @@ private struct BatchUpdateSheet: View {
 
     private var reviewView: some View {
         VStack(spacing: 0) {
+            if isCVEReview {
+                Text("Only affected software with available updates is included. Review version changes below. External updaters still require you to finish there; available updates may not fix every advisory.")
+                    .font(.callout).foregroundStyle(.secondary).padding(.horizontal, 20).padding(.top, 14)
+            }
             HStack(spacing: 12) {
-                Button(state.selectedIDs.isEmpty ? "Select Recommended" : "Deselect All") {
+                Button(state.selectedIDs.isEmpty ? (isCVEReview ? "Select All" : "Select Recommended") : "Deselect All") {
                     state.selectedIDs = state.selectedIDs.isEmpty
-                        ? Set(visibleItems.filter(\.isRecommendedByDefault).map(\.id))
+                        ? Set(visibleItems.filter { isCVEReview || $0.isRecommendedByDefault }.map(\.id))
                         : []
                 }
                 .buttonStyle(.plain)
@@ -489,7 +569,9 @@ private struct BatchUpdateSheet: View {
                     let selected = visibleItems.filter { state.selectedIDs.contains($0.id) }
                     state.isRunning = true
                     Task {
-                        state.summary = await store.performBatchUpdates(selected)
+                        state.summary = isCVEReview
+                            ? await store.performCVEBatchUpdates(selected)
+                            : await store.performBatchUpdates(selected)
                         state.isRunning = false
                     }
                 }
@@ -515,7 +597,7 @@ private struct BatchUpdateSheet: View {
 
     private var visibleRiskGroups: [UpdateRiskGroup] {
         UpdateRiskGroup.allCases.filter { group in
-            settings.sidebarViewMode == .advanced || ![.prerelease, .dependency, .developer].contains(group)
+            isCVEReview || settings.sidebarViewMode == .advanced || ![.prerelease, .dependency, .developer].contains(group)
         }
     }
 
@@ -692,7 +774,8 @@ private struct DeveloperUpdateCard: View {
                 title: package.name,
                 detail: [package.manager.rawValue, package.installationContext].compactMap { $0 }.joined(separator: " · "),
                 prereleaseChannel: package.prereleaseChannel,
-                prereleaseIsInstalled: package.prereleaseIsInstalled
+                prereleaseIsInstalled: package.prereleaseIsInstalled,
+                cveItem: CVEInventoryItem(package)
             )
         } accessories: {
             if store.isRefreshing(package) {
@@ -771,7 +854,8 @@ struct UpdateCard: View {
                 isRunning: store.isRunning(update.app),
                 prereleaseChannel: update.prereleaseChannel,
                 prereleaseIsInstalled: update.prereleaseIsInstalled,
-                showsIntelWarning: update.app.needsAppleSiliconMigration
+                showsIntelWarning: update.app.needsAppleSiliconMigration,
+                cveItem: CVEInventoryItem(update.app)
             )
         } accessories: {
             if store.isRefreshing(update.app) {
@@ -840,7 +924,8 @@ private struct HomebrewUpdateCard: View {
                     + (package.isDependency ? " · Dependency" : "")
                     + (package.kind == .cask ? " · May require password" : ""),
                 prereleaseChannel: package.prereleaseChannel,
-                prereleaseIsInstalled: package.prereleaseIsInstalled
+                prereleaseIsInstalled: package.prereleaseIsInstalled,
+                cveItem: CVEInventoryItem(package)
             )
         } accessories: {
             if store.isRefreshing(package) {

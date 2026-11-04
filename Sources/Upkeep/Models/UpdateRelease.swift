@@ -19,7 +19,7 @@ extension HomebrewPackage {
             token: token, displayName: displayName, description: description, homepage: homepage,
             license: license, installedVersion: app.installedVersion, currentVersion: currentVersion,
             kind: kind, isOutdated: false, isDependency: isDependency, dependencies: dependencies,
-            versionScheme: versionScheme
+            versionScheme: versionScheme, tap: tap
         )
     }
 }

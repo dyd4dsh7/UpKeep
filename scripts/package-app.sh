@@ -16,7 +16,7 @@ SDK_NAME=${UPKEEP_SDK:-macosx}
 SDK_PATH=$(xcrun --sdk "${SDK_NAME}" --show-sdk-path)
 SDK_VERSION=$(xcrun --sdk "${SDK_NAME}" --show-sdk-version)
 if (( ${SDK_VERSION%%.*} < 26 )); then
-    echo "Upkeep requires the macOS 26 SDK or newer (Xcode 26.3+ recommended)." >&2
+    echo "Upkeep requires the macOS 26 SDK or newer (Xcode 26.6+ recommended)." >&2
     exit 1
 fi
 LINKER_PLATFORM_FLAGS=(

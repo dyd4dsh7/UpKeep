@@ -2,17 +2,25 @@ import AppKit
 import SwiftUI
 
 enum UpkeepLayout {
+    static let pageInset: CGFloat = 20
+    static let sectionSpacing: CGFloat = 16
     static let listActionWidth: CGFloat = 108
     static let inspectorMinimumWidth: CGFloat = 320
     static let inspectorIdealWidth: CGFloat = 380
     static let inspectorMaximumWidth: CGFloat = 500
 }
 
+enum UpkeepColors {
+    static func warning(in scheme: ColorScheme) -> Color {
+        scheme == .light ? Color(.sRGB, red: 0.58, green: 0.30, blue: 0.02) : .orange
+    }
+}
+
 private struct ItemRowSelectionKey: EnvironmentKey {
     static let defaultValue = false
 }
 
-private extension EnvironmentValues {
+extension EnvironmentValues {
     var upkeepItemRowSelected: Bool {
         get { self[ItemRowSelectionKey.self] }
         set { self[ItemRowSelectionKey.self] = newValue }
@@ -40,7 +48,12 @@ struct StandardItemRow<Icon: View, Content: View, Accessories: View>: View {
     }
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
+        // Alignment guides run in a Sendable closure; read actor-isolated
+        // settings here and capture only the calculated offset.
+        let separatorLeading: CGFloat = (settings.listDensity == .compact ? 2 : 4)
+            + (settings.listDensity == .compact ? 30 : 38) + rowSpacing
+
+        return ViewThatFits(in: .horizontal) {
             HStack(spacing: rowSpacing) {
                 rowIcon
                 content
@@ -61,22 +74,25 @@ struct StandardItemRow<Icon: View, Content: View, Accessories: View>: View {
         .fixedSize(horizontal: false, vertical: true)
         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         .environment(\.upkeepItemRowSelected, isSelected)
-        .padding(.horizontal, settings.listDensity == .compact ? 2 : 6)
-        .padding(.vertical, settings.listDensity == .compact ? 5 : 8)
+        .padding(.horizontal, settings.listDensity == .compact ? 2 : 4)
+        .padding(.vertical, settings.listDensity == .compact ? 4 : 6)
         .contentShape(Rectangle())
+        .alignmentGuide(.listRowSeparatorLeading) { _ in
+            separatorLeading
+        }
         .listRowSeparator(.visible)
         .animation(reduceMotion ? nil : UpkeepMotion.quick, value: settings.listDensity)
-        .upkeepAnimated(for: isSelected, animation: UpkeepMotion.quick)
+        // Selection changes color only; native row geometry should not animate.
         .upkeepRowTransition()
     }
 
-    private var rowSpacing: CGFloat { settings.listDensity == .compact ? 10 : 14 }
+    private var rowSpacing: CGFloat { settings.listDensity == .compact ? 10 : 12 }
 
     private var rowIcon: some View {
         icon
             .scaleEffect(settings.listDensity == .compact ? 0.82 : 1)
-            .frame(width: settings.listDensity == .compact ? 32 : 42,
-                   height: settings.listDensity == .compact ? 32 : 42)
+            .frame(width: settings.listDensity == .compact ? 30 : 38,
+                   height: settings.listDensity == .compact ? 30 : 38)
     }
 
     private var rowAccessories: some View {
@@ -96,6 +112,7 @@ struct ItemIdentityView: View {
     var prereleaseChannel: PrereleaseChannel?
     var prereleaseIsInstalled = false
     var showsIntelWarning = false
+    var cveItem: CVEInventoryItem?
 
     var body: some View {
         VStack(alignment: .leading, spacing: settings.listDensity == .compact ? 1 : 4) {
@@ -113,6 +130,10 @@ struct ItemIdentityView: View {
                 }
                 if let prereleaseChannel {
                     PrereleaseBadge(channel: prereleaseChannel, isInstalled: prereleaseIsInstalled)
+                }
+                if let cveItem {
+                    CVEStatusBadge(item: cveItem)
+                        .fixedSize()
                 }
             }
             Text(detail)
@@ -300,7 +321,7 @@ struct VersionTransitionView: View {
                         .foregroundStyle(.tertiary)
                     Text(latest)
                         .fontWeight(.semibold)
-                        .foregroundStyle(isSelected ? Color(nsColor: .alternateSelectedControlTextColor) : .accentColor)
+                        .foregroundStyle(isSelected ? Color.primary : .accentColor)
                 }
             } else {
                 HStack(spacing: 5) {
@@ -427,24 +448,30 @@ struct InspectorUpdateStatusCard<Actions: View, Options: View>: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 14) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 24, weight: .medium))
+                    .font(.system(size: 22, weight: .medium))
                     .foregroundStyle(color)
                     .symbolRenderingMode(.hierarchical)
-                    .frame(width: 38)
+                    .frame(width: 32)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title).font(.headline)
                     Text(subtitle).font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 0)
                 Menu { options } label: {
-                    Text("Options")
+                    Image(systemName: "ellipsis.circle")
+                        .font(.body)
+                        .frame(width: 24, height: 24)
                 }
                 .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
                 .fixedSize()
                 .accessibilityLabel("Update options")
             }
-            Divider()
-            HStack(spacing: 10) { actions }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) { actions }
+                VStack(alignment: .leading, spacing: 10) { actions }
+            }
         }
         .upkeepOutlinedInspectorCard()
         .upkeepAnimated(for: title)
@@ -510,7 +537,7 @@ private struct ContentListStyle: ViewModifier {
     func body(content: Content) -> some View {
         content
             .listStyle(.inset)
-            .environment(\.defaultMinListRowHeight, settings.listDensity == .compact ? 36 : 52)
+            .environment(\.defaultMinListRowHeight, settings.listDensity == .compact ? 34 : 46)
     }
 }
 

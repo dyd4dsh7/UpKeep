@@ -27,7 +27,7 @@ when you need them.
 
 Upkeep is a native SwiftUI macOS application that scans installed apps and checks publisher and package-manager update sources. First-run setup starts with focused application management; Homebrew and the broader developer environment are explicit opt-ins.
 
-The app includes a standard unified macOS toolbar with a prominent live update counter, a menu-bar status item, and a Dock icon badge using the same focused count. The primary count covers application updates, requested Homebrew packages, and macOS updates; global developer packages and Homebrew dependencies remain available in their dedicated workspaces without overwhelming the main queue. It also provides native Settings for every source and supported developer manager, configurable launch/background checks, beta visibility, and notifications.
+The app includes a standard unified macOS toolbar with a prominent live update counter, a menu-bar status item, and a Dock icon badge using the same available-update count. All Updates shows application updates, Homebrew packages including dependencies, macOS updates, global developer packages, and local AI models. Homebrew casks already represented by an application update appear once, and full macOS installers remain in the macOS workspace. It also provides native Settings for every source and supported developer manager, configurable launch/background checks, beta visibility, and notifications.
 
 Individual app, package, and local-model releases can be skipped without hiding later versions, or ignored until restored from Settings. Skipped and ignored updates are excluded from the update list, sidebar badge, menu-bar count, and notifications. Batch review groups recommended updates separately from manual actions, major releases, prereleases, dependencies, and developer-environment changes; only stable updates Upkeep can complete directly are selected by default.
 
@@ -69,6 +69,20 @@ Developer package details load available releases from the package manager or re
 
 The Homebrew and Developer toolbars also expose supported cleanup operations for Homebrew, npm, pnpm, and uv. Upkeep first performs a non-destructive check, shows Homebrew's dry-run estimate or clearly labels when a manager cannot predict its cleanup size, and asks for confirmation before cleaning. It then reports the disk space reclaimed.
 
+## CVE checker
+
+Refresh the app and package inventories, then open **CVE Checker** in the System sidebar and choose **Check CVEs**. Checks run automatically after launch and scheduled inventory refreshes when **Automatically check CVEs** is enabled in Settings (on by default), as well as after manual inventory refreshes. The existing launch and background schedule controls determine those automatic refresh times. You can also run a check manually. Coverage includes:
+
+- Developer packages through [OSV](https://osv.dev), using registry identities and installed versions.
+- Homebrew core formulae through [Homebrew's advisory feed](https://formulae.brew.sh/api/advisories.json), comparing installed versions including `_N` revisions. The feed has limited coverage; third-party taps, nonzero version schemes, and unsupported version formats are labeled not covered.
+- Installed apps and official Homebrew casks through [NVD](https://nvd.nist.gov/developers/vulnerabilities), using curated product mappings and installed versions. Initial mappings cover stable Chrome, Firefox, Thunderbird, Safari, VLC, and Visual Studio Code; Safari is matched through its app bundle. Unknown identities and prerelease versions remain not covered. NVD matches are potential CVEs whose platform and configuration applicability should be reviewed in the linked record. Cask results use Homebrew's receipt version, which can lag an app's own updater.
+
+The overview summarizes findings, completed checks, incomplete checks, and uncovered software. Filter by result type or search for software and CVE identifiers. Select software in the compact list to review advisories, severity, fixed releases, source links and update actions in a separate detail pane. The list and details scroll independently. Records that share CVE/GHSA aliases are grouped as one issue while preserving their source links. The Homebrew advisory index downloads once per check; duplicate NVD product/version queries share results within that check. NVD requests are paced at least 6.1 seconds apart across windows. Unavailable, rate-limited, or partially retrieved sources produce incomplete checks. No API key is required.
+
+CVE advisory details show the highest available source severity (CVSS base scores where supported) and explicit fixed releases for the matched package. Missing ratings are marked Unrated; missing fix metadata is not treated as proof that no fix exists. Fix lists may span multiple release branches. NVD affected-range boundaries are not presented as verified fixes. Update All opens a review limited to affected software with current update offers, with all items selected, including developer packages in Basic mode. It ignores checker search/filter state, deduplicates app/cask actions, and revalidates reviewed offers before execution. Existing batch progress, app-quit review, Homebrew authorization notice and per-item results are retained. External updater actions still require completion in the source app. An Update button appears when current inventory offers an update for the affected installed version, preserving the existing update confirmations and progress. External update sources retain their normal Open App Store, View Release, or similar action. Excluded updates and changed installed versions are not offered from an old CVE result. Review Updates and Show Software open the existing inventory/update workflows; advisory links provide publisher guidance before choosing an update.
+
+Results and running checks are shared across the app session. Applications and Updates rows show a CVE badge only when advisories are found for the installed version; click a badge to open its results. Pending, failed, uncovered, and empty checks remain visible in the CVE Checker. Changed identities or installed versions, and results older than 24 hours, need a new check. A badge does not claim that the available update fixes the advisory. Checks do not install updates or scan project lockfiles, embedded libraries, unlisted transitive dependencies, or macOS itself. An empty result means the selected source returned no known advisories for that identity/version, not that the software is guaranteed safe.
+
 ## Local AI models
 
 Upkeep detects locally installed Ollama and LM Studio models without showing empty runtime sections. Ollama models are checked by comparing their local and registry manifest digests. LM Studio model files are checked against their originating Hugging Face repository. Supported updates run through `ollama pull` or `lms get`, so credentials, storage, and model management remain with the installed runtime.
@@ -83,19 +97,19 @@ Upkeep never downloads executables from its own servers. App Store updates open 
 
 ## Build
 
-Use **Xcode 26.3 or newer**, or matching Apple Command Line Tools, with the
-**macOS 26 SDK or newer**. CI explicitly selects Xcode 26.3. The build SDK is newer
-than the macOS 14 deployment target because the source uses newer SwiftUI APIs
-behind availability checks. A complete stable toolchain is recommended; beta
-Command Line Tools may omit SwiftUI macro plugins.
-If tests fail to link `_TestingInterop`, select a full Xcode installation;
-changing only the SDK does not supply that test runtime library.
+Use **Xcode 26.6 or newer (Swift 6.3+)**, or matching Apple Command Line Tools,
+with the **macOS 26 SDK or newer**. CI explicitly selects Xcode 26.6. The build
+SDK is newer than the macOS 14 deployment target because the source uses newer SwiftUI APIs
+behind availability checks. Tests use the Swift Testing bundled with that
+selected toolchain; no external test package, backend override or extra linker
+paths are required. `UpkeepState` selects SwiftUI's native State property wrapper
+without the macOS 27 SDK's separate macro plugin.
 
 No Apple Developer membership or signing secrets are needed for local debug builds.
 Clone this repository, then:
 
 ```sh
-swift test -Xswiftc -warnings-as-errors
+swift test
 ./script/build_and_run.sh
 ```
 

@@ -483,9 +483,9 @@ private func shellQuote(_ value: String) -> String {
 private struct InfoResponse: Decodable { let formulae: [FormulaDTO]; let casks: [CaskDTO] }
 private struct FormulaDTO: Decodable {
     let name: String; let desc: String?; let license: String?; let homepage: String?
-    let revision: Int?; let versionScheme: Int?
+    let revision: Int?; let versionScheme: Int?; let tap: String?
     enum CodingKeys: String, CodingKey {
-        case name, desc, license, homepage, versions, dependencies, installed, outdated, revision
+        case name, desc, license, homepage, versions, dependencies, installed, outdated, revision, tap
         case versionScheme = "version_scheme"
     }
     let versions: Versions; let dependencies: [String]; let installed: [Installed]; let outdated: Bool
@@ -497,6 +497,7 @@ private struct FormulaDTO: Decodable {
 }
 private struct CaskDTO: Decodable {
     let token: String; let name: [String]; let desc: String?; let homepage: String?; let version: String; let outdated: Bool
+    let tap: String?
     private let installed: FlexibleString?
     var installedVersion: String? { installed?.value }
 }
@@ -579,7 +580,7 @@ private func packages(from response: InfoResponse, includePrereleases: Bool) -> 
             isOutdated: formula.outdated && (includePrereleases || !VersionComparator.isPrerelease(current)),
             isDependency: !installed.installedOnRequest,
             dependencies: formula.dependencies,
-            versionScheme: formula.versionScheme ?? 0
+            versionScheme: formula.versionScheme ?? 0, tap: formula.tap
         )
     }
     let casks = response.casks.compactMap { cask -> HomebrewPackage? in
@@ -595,7 +596,7 @@ private func packages(from response: InfoResponse, includePrereleases: Bool) -> 
             kind: .cask,
             isOutdated: cask.outdated && (includePrereleases || !VersionComparator.isPrerelease(cask.version)),
             isDependency: false,
-            dependencies: []
+            dependencies: [], tap: cask.tap
         )
     }
     return formulae + casks

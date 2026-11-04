@@ -19,6 +19,17 @@ and Hugging Face. Opening an external updater or a project page invokes that
 service's own privacy policy. Package managers and model runtimes continue to
 manage their own authentication and storage.
 
+CVE checks run after launch, scheduled, and manual inventory refreshes when
+**Automatically check CVEs** is enabled in Settings (enabled by default). They
+also run when you choose **Check CVEs**. Turning off automatic CVE checks leaves
+manual checks available. Registry package names, ecosystems, and installed versions go to
+`api.osv.dev`. Curated application product/vendor identities, installed versions,
+and a macOS CPE target go to `services.nvd.nist.gov`. Homebrew formula matching
+downloads the shared advisory index from `formulae.brew.sh`; individual formula
+names are matched locally. Local paths, bundle identifiers, and installation
+contexts are not sent. The index stays in memory during a check; displayed results remain in memory
+for the app session, shared by the CVE Checker and list badges. Opening advisory links contacts OSV, NVD, or GitHub.
+
 ## What stays on the Mac
 
 Preferences, source selections, exclusions, and repository mappings use macOS

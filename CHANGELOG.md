@@ -4,6 +4,13 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+- Fixed optimized CVE tests to use test-owned offline fixtures and updated responsiveness benchmark expectations for the unified update count.
+
+- Switched tests to toolchain-bundled Swift Testing, removing the duplicate Swift Testing/SwiftSyntax package builds and custom runtime linker paths; CI and releases select Xcode 26.6 with Swift 6.3 or newer.
+- Kept default-backend builds compatible with Command Line Tools and the macOS 27 SDK by explicitly selecting SwiftUI's State property wrapper, updating a TaskLocal call, and simplifying fixed-version type inference.
+- Fixed newer Swift compiler isolation warnings by calculating list separator offsets before entering alignment-guide closures.
+- Updated commit-pinned artifact upload/download actions to 7.0.2/8.0.2, including retry fixes and download digest enforcement.
+
 - Prevented a SwiftUI navigation crash by avoiding animation of outgoing native list and toolbar hierarchies.
 - Kept item names visible in narrow inspectors by moving version/action controls below the name when space is limited.
 - Made packaged resource loading independent of temporary SwiftPM build directories.
@@ -11,7 +18,7 @@ All notable changes to Upkeep are documented here.
 - Prepared the project for open-source contribution with an MIT licence, privacy and security guidance, contribution instructions, and issue templates.
 - Added dependency notices to app packages and replaced bundled third-party logos with native system symbols.
 - Fixed main-actor isolation of app icon images and optional signature-status matching.
-- Selected Xcode 26.3 for CI, added secret scanning, and prepared protected, signed draft GitHub Releases with checksums.
+- Added CI secret scanning and prepared protected, signed draft GitHub Releases with checksums.
 - Kept the previous packaged archive intact when a new packaging or notarization attempt fails.
 
 ## 0.24.0 — 2026-09-02

@@ -5,18 +5,18 @@ struct PackageCleanupSheet: View {
     @Environment(\.dismiss) private var dismiss
     let targets: [PackageCleanupTarget]
     @Binding var result: PackageCleanupResult?
-    @State private var selectedID: String
-    @State private var estimate: PackageCleanupEstimate?
-    @State private var completed: PackageCleanupResult?
-    @State private var failure: String?
-    @State private var isChecking = false
-    @State private var isCleaning = false
-    @State private var showsConfirmation = false
+    @UpkeepState private var selectedID: String
+    @UpkeepState private var estimate: PackageCleanupEstimate?
+    @UpkeepState private var completed: PackageCleanupResult?
+    @UpkeepState private var failure: String?
+    @UpkeepState private var isChecking = false
+    @UpkeepState private var isCleaning = false
+    @UpkeepState private var showsConfirmation = false
 
     init(targets: [PackageCleanupTarget], result: Binding<PackageCleanupResult?>) {
         self.targets = targets
         _result = result
-        _selectedID = State(initialValue: targets.first?.id ?? "")
+        _selectedID = UpkeepState(initialValue: targets.first?.id ?? "")
     }
 
     private var target: PackageCleanupTarget? { targets.first { $0.id == selectedID } }

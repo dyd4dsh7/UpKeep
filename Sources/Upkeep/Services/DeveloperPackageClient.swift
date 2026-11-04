@@ -183,10 +183,10 @@ struct DeveloperPackageClient: Sendable {
             discovered = await nodeReleaseVersions()
         case .bun:
             discovered = package.name == "Bun"
-                ? await latestGitHubReleaseVersions(repository: "oven-sh/bun")
+                ? await latestPublisherReleaseVersions(repository: "oven-sh/bun")
                 : await npmRegistryVersions(package: package.registryIdentifier ?? package.name)
         case .deno:
-            discovered = await latestGitHubReleaseVersions(repository: "denoland/deno")
+            discovered = await latestPublisherReleaseVersions(repository: "denoland/deno")
         case .npm, .pnpm:
             let result = await captureDeveloperCommandAsync(
                 URL(fileURLWithPath: package.executablePath),
@@ -228,7 +228,7 @@ struct DeveloperPackageClient: Sendable {
         case .rustup, .macPorts, .nix, .mise, .asdf, .volta, .fnm:
             discovered = [package.currentVersion, package.latestVersion]
         case .githubCLI:
-            discovered = await latestGitHubReleaseVersions(repository: package.registryIdentifier ?? package.name)
+            discovered = await latestPublisherReleaseVersions(repository: package.registryIdentifier ?? package.name)
         case .go where package.registryIdentifier == "go-runtime":
             discovered = [package.currentVersion, await latestGoReleaseVersion() ?? package.latestVersion]
         case .go:
@@ -415,7 +415,7 @@ func scanJavaScriptRuntime(
         return failedManagerScan(manager, command: "version check", result: installedResult)
     }
     let installed = normalizedJavaScriptRuntimeVersion(output)
-    guard let latest = await latestGitHubReleaseVersions(repository: repository).first else {
+    guard let latest = await latestPublisherReleaseVersions(repository: repository).first else {
         return ManagerScanResult(
             manager: manager,
             packages: [DeveloperPackage(name: name, currentVersion: installed, latestVersion: installed, manager: manager, executablePath: path)],
@@ -1087,11 +1087,13 @@ private func executable(named name: String, extra: [String]) -> String? {
         .first { FileManager.default.isExecutableFile(atPath: $0) }
 }
 
-private func nvmExecutables(named name: String) -> [String] {
-    let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".nvm/versions/node", isDirectory: true)
-    let versions = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
+func nvmExecutables(named name: String,
+                    root: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".nvm/versions/node", isDirectory: true)) -> [String] {
+    let versions = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil,
+                                                                options: .skipsHiddenFiles)) ?? []
     return versions.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedDescending }
         .map { $0.appendingPathComponent("bin/\(name)").path }
+        .filter { FileManager.default.isExecutableFile(atPath: $0) }
 }
 
 private func nvmDefaultExecutable(named name: String) -> String? {
@@ -1243,7 +1245,7 @@ func developerCommandEnvironment(
     for executable: URL,
     base: [String: String] = ProcessInfo.processInfo.environment
 ) -> [String: String] {
-    var environment = base
+    var environment = CommandRunner.commandEnvironment(base)
     let executableDirectory = executable.deletingLastPathComponent().standardizedFileURL.path
     let homeDirectory = environment["HOME"] ?? FileManager.default.homeDirectoryForCurrentUser.path
     let pnpmHome = environment["PNPM_HOME"] ?? "\(homeDirectory)/Library/pnpm"
@@ -1448,7 +1450,10 @@ private func nodeReleaseVersions() async -> [String] {
     )
 }
 
-private func latestGitHubReleaseVersions(repository: String) async -> [String] {
+private func latestPublisherReleaseVersions(repository: String) async -> [String] {
+    if repository == "oven-sh/bun" {
+        return await BunReleaseLookup.latest { await registryData(from: $0) }
+    }
     guard let url = URL(string: "https://api.github.com/repos/\(repository)/releases/latest"),
           let data = await registryData(from: url),
           let release = try? JSONDecoder().decode(GitHubReleaseVersion.self, from: data)

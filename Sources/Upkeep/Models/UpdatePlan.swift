@@ -100,22 +100,28 @@ struct UpdatePlan: Sendable {
         Self.primaryUpdateCount(
             applicationUpdates: applicationUpdates,
             homebrewUpdates: homebrewUpdates,
-            macOSUpdates: macOSUpdates
+            macOSUpdates: macOSUpdates,
+            developerUpdates: developerUpdates,
+            modelUpdates: modelUpdates
         )
     }
 
     static func primaryUpdateCount(
         applicationUpdates: [AvailableUpdate],
         homebrewUpdates: [HomebrewPackage],
-        macOSUpdates: [MacOSUpdate]
+        macOSUpdates: [MacOSUpdate],
+        developerUpdates: [DeveloperPackage] = [],
+        modelUpdates: [LocalLLMModel] = []
     ) -> Int {
         let representedCaskTokens = Set(applicationUpdates.flatMap { $0.candidates.compactMap(\.homebrewToken) })
-        let requestedHomebrewCount = homebrewUpdates.count {
-            !$0.isDependency && ($0.kind != .cask || !representedCaskTokens.contains($0.token))
+        let homebrewCount = homebrewUpdates.count {
+            $0.kind != .cask || !representedCaskTokens.contains($0.token)
         }
         return applicationUpdates.count
-            + requestedHomebrewCount
+            + homebrewCount
             + macOSUpdates.count(where: { !$0.isFullInstaller })
+            + developerUpdates.count
+            + modelUpdates.count
     }
 
     static func isMajorVersionChange(from current: String, to available: String) -> Bool {

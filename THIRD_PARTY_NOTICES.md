@@ -4,16 +4,17 @@ Upkeep's original code and artwork are covered by [LICENSE](LICENSE). Third-part
 software, operating-system resources, and trademarks are not relicensed by that
 file.
 
-## Build and test dependencies
+## Build and test tools
 
-| Component | Pinned version | Licence | Source |
-| --- | --- | --- | --- |
-| Swift Testing | 6.3.2 | Apache 2.0 with Runtime Library Exception | https://github.com/swiftlang/swift-testing/tree/6.3.2 |
-| SwiftSyntax | 603.0.2 | Apache 2.0 with Runtime Library Exception | https://github.com/swiftlang/swift-syntax/tree/603.0.2 |
+Tests use the Swift Testing framework, macro plugin and runtime supplied by the
+selected Swift toolchain. Upkeep has no external Swift package dependencies and
+no independently pinned Swift Testing or SwiftSyntax build. Swift Testing is
+licensed under Apache 2.0 with Runtime Library Exception; see its
+[distribution guidance](https://github.com/swiftlang/swift-testing/blob/swift-6.4.2-RELEASE/Documentation/Distributions.md).
 
-Swift Testing is a test-target dependency; SwiftSyntax is its transitive build
-dependency. Their unmodified licence texts are in `Support/Licenses/` and are
-included in packaged apps. See `Package.resolved` for exact revisions.
+The unmodified Swift Testing and SwiftSyntax licence texts in `Support/Licenses/`
+are retained from earlier package-based test builds and included in app packages
+for historical attribution. These testing libraries are not bundled in the app.
 
 ## System images and installed application icons
 

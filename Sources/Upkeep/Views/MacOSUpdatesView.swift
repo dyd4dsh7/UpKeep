@@ -64,6 +64,11 @@ struct MacOSUpdatesView: View {
             }
         }
         .upkeepAnimated(for: groups.identity)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            WorkspaceSummary(title: "Software Update",
+                detail: "\(WorkspaceSummary.count(groups.updates.count, "update", "updates")) · \(WorkspaceSummary.count(groups.installers.count, "full installer", "full installers")) available from Apple",
+                systemImage: "desktopcomputer")
+        }
         .toolbar {
             if settings.sidebarViewMode == .advanced {
                 ToolbarItem(placement: .primaryAction) {

@@ -6,16 +6,16 @@ so its scope and safety expectations can be agreed.
 
 ## Build and run
 
-Use macOS with Xcode 26.3 or newer, or the matching Apple Command Line Tools.
-The SDK must be macOS 26 or newer; the deployment target remains macOS 14.
-CI selects Xcode 26.3 explicitly. Homebrew and other package managers are optional
+Use macOS with Xcode 26.6 or newer (Swift 6.3+), or matching Apple Command Line
+Tools. The SDK must be macOS 26 or newer; the deployment target remains macOS 14.
+CI selects Xcode 26.6 explicitly. Homebrew and other package managers are optional
 integrations, not build dependencies. You do not need signing credentials to
 contribute.
 
-Some newer Command Line Tools omit the `_TestingInterop` library required by
-Swift Testing 6.3.2. If test linking reports that library missing, select a full
-Xcode installation through `DEVELOPER_DIR`; selecting another SDK alone is
-insufficient. CI verifies the dependency with Xcode 26.3.
+Tests use the Swift Testing bundled with the selected toolchain. A separate
+`swift-testing` package, backend override and custom linker paths are unnecessary.
+The app selects SwiftUI's native State property wrapper through `UpkeepState`,
+so Command Line Tools do not need the macOS 27 SwiftUIMacros plugin.
 
 ```sh
 git clone https://github.com/dyd4dsh7/UpKeep.git
@@ -28,14 +28,6 @@ The run script stops a running Upkeep process, packages a debug app, and launche
 `dist/Upkeep.app`. It uses the normal app preferences and local data. Only confirm
 updates, restores, package adoption, or cleanup when you intend those changes.
 Debug packages are ad-hoc signed and are not official distribution builds.
-
-If your default Command Line Tools points to an incomplete beta SDK, select an
-installed stable SDK for both commands rather than weakening compiler checks:
-
-```sh
-swift test --sdk /path/to/MacOSX26.sdk -Xswiftc -warnings-as-errors
-UPKEEP_SDK=/path/to/MacOSX26.sdk ./script/build_and_run.sh
-```
 
 ## Where to work
 

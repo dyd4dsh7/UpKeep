@@ -94,6 +94,35 @@ private final class ObservationProbe: @unchecked Sendable {
 }
 
 @MainActor
+@Test func nestedMutationOwnershipSurvivesSuspensionAndReleasesReservations() async {
+    let coordinator = MutationCoordinator()
+    let targets: Set<MutationTarget> = [.packageEnvironment("fixture")]
+    #expect(MutationContext.owner == nil)
+
+    let completed = await coordinator.withAccess(to: targets, otherwise: false) {
+        let owner = MutationContext.owner
+        #expect(owner != nil)
+        await Task.yield()
+        #expect(MutationContext.owner == owner)
+
+        let nested = await coordinator.withAccess(to: targets, otherwise: false) {
+            await Task.yield()
+            #expect(MutationContext.owner == owner)
+            return true
+        }
+        #expect(nested)
+        #expect(MutationContext.owner == owner)
+        // Finishing a nested step must not release its parent's reservation.
+        #expect(MutationContext.$owner.withValue(UUID()) { coordinator.isBusy(targets) })
+        return true
+    }
+
+    #expect(completed)
+    #expect(MutationContext.owner == nil)
+    #expect(!coordinator.isBusy(targets))
+}
+
+@MainActor
 @Test func sceneCommandReadsTrackRequiredChildStateWithoutRootSubscription() {
     let suite = "ScopedScene.\(UUID())"
     let defaults = UserDefaults(suiteName: suite)!

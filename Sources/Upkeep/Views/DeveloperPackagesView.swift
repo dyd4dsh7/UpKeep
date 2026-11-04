@@ -3,7 +3,7 @@ import SwiftUI
 
 struct DeveloperPackagesView: View {
     @UpkeepStoreReference private var store
-    @State private var cleanupResult: PackageCleanupResult?
+    @UpkeepState private var cleanupResult: PackageCleanupResult?
 
     var body: some View {
         let packages = sortedPackages
@@ -18,6 +18,11 @@ struct DeveloperPackagesView: View {
                 packageList(packages)
                     .upkeepStateTransition()
             }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            WorkspaceSummary(title: WorkspaceSummary.count(packages.count, "developer package", "developer packages"),
+                detail: "Updates available: \(packages.filter(\.isOutdated).count) · \(store.developerManagerFilter.title)",
+                systemImage: "curlybraces.square")
         }
         .toolbar { packageToolbar }
     }
@@ -193,7 +198,8 @@ private struct DeveloperPackageRow: View, Equatable {
                 title: package.name,
                 detail: rowDetail,
                 prereleaseChannel: package.prereleaseChannel,
-                prereleaseIsInstalled: package.prereleaseIsInstalled
+                prereleaseIsInstalled: package.prereleaseIsInstalled,
+                cveItem: CVEInventoryItem(package)
             )
         } accessories: {
             if isRefreshing {
@@ -280,9 +286,9 @@ private struct DeveloperPackageDetailContent: View {
                             isRefreshing: store.isRefreshing(package),
                             lastChecked: store.lastChecked(for: package)
                         )
-
                     }
                 } content: {
+                CVESecuritySummary(item: CVEInventoryItem(package))
                 if package.isOutdated { updateCard }
 
                 Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
@@ -413,8 +419,7 @@ private struct DeveloperPackageDetailContent: View {
                 .disabled(store.isWorking(.developerPackage(package.id)))
             }
         }
-        .controlSize(.large)
-        .buttonBorderShape(.capsule)
+        .controlSize(.regular)
     }
 
     private var uninstallConfirmationMessage: String {

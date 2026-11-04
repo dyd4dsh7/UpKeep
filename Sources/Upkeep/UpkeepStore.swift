@@ -77,6 +77,10 @@ final class UpkeepStore: ObservableObject {
             library.homebrewServicesFailure = error.localizedDescription
         }
     }
+    let cveScanState = CVEScanState()
+    private var automaticCVETask: Task<Void, Never>?
+    private var automaticCVEGeneration: UUID?
+    private var automaticCVEOwnsScan = false
     let library = UpkeepLibraryState()
     var navigation = UpkeepNavigationState()
     let scanState: UpkeepScanState
@@ -202,7 +206,9 @@ final class UpkeepStore: ObservableObject {
         let value = UpdatePlan.primaryUpdateCount(
             applicationUpdates: visibleUpdates,
             homebrewUpdates: visibleHomebrewUpdates,
-            macOSUpdates: macOSUpdates
+            macOSUpdates: macOSUpdates,
+            developerUpdates: developerPackages.filter { $0.isOutdated && !isExcluded($0) },
+            modelUpdates: visibleOutdatedLocalModels
         )
         primaryCountProjection = (inventory, exclusions, settings.nextExclusionExpiration, value)
         return value
@@ -452,7 +458,95 @@ final class UpkeepStore: ObservableObject {
         let ownedRun = await fullScanCoordinator.run {
             await scanOnce()
         } runningChanged: { isScanning = $0 }
+        if ownedRun { refreshCVEsAutomatically() }
         if ownedRun && didStart { scheduleNextRefresh() }
+    }
+
+    var cveInventory: [CVEInventoryItem] {
+        apps.map(CVEInventoryItem.init) + homebrewPackages.map(CVEInventoryItem.init)
+            + developerPackages.map(CVEInventoryItem.init)
+    }
+
+    func makeCVEClient() -> CVEInventoryClient {
+        dependencies.makeCVEClient?() ?? CVEInventoryClient()
+    }
+
+    /// Coalesces inventory changes while a manual or automatic check is active.
+    /// A CVE request never holds up the updater's own scan or operation queue.
+    func refreshCVEsAutomatically() {
+        guard settings.automaticallyCheckCVEs, dependencies.makeCVEClient != nil,
+              automaticCVETask == nil, !cveInventory.isEmpty else { return }
+        let generation = UUID()
+        automaticCVEGeneration = generation
+        automaticCVETask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if automaticCVEGeneration == generation {
+                    automaticCVETask = nil; automaticCVEGeneration = nil; automaticCVEOwnsScan = false
+                }
+            }
+            if cveScanState.running {
+                await cveScanState.waitForCompletion()
+                if cveScanState.inventory == cveInventory && !cveScanState.results.contains(where: { $0.failure != nil }) { return }
+            }
+            repeat {
+                guard settings.automaticallyCheckCVEs, !Task.isCancelled else { return }
+                let inventory = cveInventory
+                automaticCVEOwnsScan = cveScanState.start(inventory: inventory, client: makeCVEClient())
+                await cveScanState.waitForCompletion()
+                if inventory == cveInventory { return }
+            } while settings.automaticallyCheckCVEs
+        }
+    }
+
+    func setAutomaticCVEChecking(_ enabled: Bool) {
+        settings.automaticallyCheckCVEs = enabled
+        if enabled { refreshCVEsAutomatically() }
+        else {
+            if automaticCVEOwnsScan { cveScanState.cancel() }
+            automaticCVETask?.cancel()
+            automaticCVETask = nil
+            automaticCVEGeneration = nil
+            automaticCVEOwnsScan = false
+        }
+    }
+
+    func waitForAutomaticCVECheck() async { await automaticCVETask?.value }
+
+    private var pendingCVESoftware: CVEInventoryItem?
+
+    func showCVESoftware(_ item: CVEInventoryItem) {
+        pendingCVESoftware = item
+        navigation.searchText = ""
+        if item.id.hasPrefix("app|") {
+            navigation.selection = .allApps
+        } else if item.id.hasPrefix("brew|") {
+            homebrewFilter = .all
+            navigation.selection = .homebrewPackages
+        } else {
+            developerManagerFilter = .all
+            settings.showCurrentDeveloperPackages = true
+            navigation.selection = .developerPackages
+        }
+    }
+
+    /// Apply focus after the destination change clears the previous inspector selection.
+    func completeCVESoftwareNavigation() {
+        guard let item = pendingCVESoftware else { return }
+        pendingCVESoftware = nil
+        if navigation.selection == .allApps {
+            selectedApp = apps.first { "app|\($0.id)" == item.id }
+        } else if navigation.selection == .homebrewPackages {
+            selectedPackageID = homebrewPackages.first { "brew|\($0.id)" == item.id }?.id
+        } else if navigation.selection == .developerPackages {
+            selectedDeveloperPackageID = developerPackages.first { "developer|\($0.id)" == item.id }?.id
+        }
+    }
+
+    func showCVEInfo(for item: CVEInventoryItem) {
+        cveScanState.filter = .all
+        cveScanState.searchText = item.name
+        navigation.selection = .cveChecker
     }
 
     private func publishScanProgress(_ event: ScanProgressEvent, generation: UUID, revision: UInt64, started: Date) {
@@ -718,6 +812,7 @@ final class UpkeepStore: ObservableObject {
     }
 
     func refresh(_ app: InstalledApp, sources sourceFilter: Set<UpdateSource>? = nil) async {
+        defer { refreshCVEsAutomatically() }
         let operationID = OperationID.applicationRefresh(app.id)
         guard !isWorking(operationID) else { return }
         updateExecutionState.activeOperations.insert(operationID)
@@ -868,6 +963,7 @@ final class UpkeepStore: ObservableObject {
     }
 
     func scanHomebrewInventory() async {
+        defer { refreshCVEsAutomatically() }
         await mutationCoordinator.withAccess(to: [.packageEnvironment("homebrew")], otherwise: ()) {
             guard !self.isScanning, !self.isWorking(.homebrewInventoryScan) else { return }
             self.updateExecutionState.activeOperations.insert(.homebrewInventoryScan)
@@ -913,6 +1009,7 @@ final class UpkeepStore: ObservableObject {
     }
 
     func refresh(_ package: HomebrewPackage) async {
+        defer { refreshCVEsAutomatically() }
         let operationID = OperationID.homebrewRefresh(package.id)
         guard !isWorking(operationID) else { return }
         updateExecutionState.activeOperations.insert(operationID)
@@ -941,6 +1038,7 @@ final class UpkeepStore: ObservableObject {
     }
 
     func refresh(_ package: DeveloperPackage) async {
+        defer { refreshCVEsAutomatically() }
         let operationID = OperationID.developerRefresh(package.id)
         guard !isWorking(operationID) else { return }
         updateExecutionState.activeOperations.insert(operationID)
@@ -992,6 +1090,7 @@ final class UpkeepStore: ObservableObject {
     }
 
     func scanDeveloperPackages(manager: DeveloperPackageManager?) async {
+        defer { refreshCVEsAutomatically() }
         let identifier = OperationID.developerScan(manager)
         guard !isWorking(identifier) else { return }
         updateExecutionState.activeOperations.insert(identifier)
@@ -1084,6 +1183,7 @@ final class UpkeepStore: ObservableObject {
     }
 
     func performUpdate(_ update: AvailableUpdate) async {
+        defer { refreshCVEsAutomatically() }
         guard !isUpdating(update) else { return }
         if update.homebrewToken != nil {
             pendingHomebrewAuthorizationConfirmation = HomebrewAuthorizationConfirmation(
@@ -1191,6 +1291,7 @@ final class UpkeepStore: ObservableObject {
     }
 
     func updatePackage(_ package: HomebrewPackage) async {
+        defer { refreshCVEsAutomatically() }
         if package.kind == .cask {
             pendingHomebrewAuthorizationConfirmation = HomebrewAuthorizationConfirmation(
                 itemName: package.displayName,
@@ -1324,7 +1425,7 @@ final class UpkeepStore: ObservableObject {
             description: package.description, homepage: package.homepage, license: package.license,
             installedVersion: installed.installedVersion, currentVersion: package.currentVersion, kind: .cask,
             isOutdated: versionComparison == .orderedAscending || buildPending,
-            isDependency: package.isDependency, dependencies: package.dependencies)
+            isDependency: package.isDependency, dependencies: package.dependencies, tap: package.tap)
         replaceHomebrewPackage(observed)
         settings.recordSourceAttempt(key, at: Date())
         settings.recordCheck(for: exclusionKey(for: observed), at: Date())
@@ -1706,6 +1807,7 @@ final class UpkeepStore: ObservableObject {
     }
 
     func updateDeveloperPackage(_ package: DeveloperPackage) async {
+        defer { refreshCVEsAutomatically() }
         guard package.canUpdateAutomatically else {
             if let url = package.manager.homepage { _ = dependencies.externalOpener.open(url) }
             else { errorMessage = "\(package.name) must be updated with \(package.manager.rawValue)." }
@@ -2065,6 +2167,13 @@ final class UpkeepStore: ObservableObject {
                 historyWarning = try await upgradeBatchPackage(package, progressID: progressID)
 
             case let .developer(package):
+                if !package.canUpdateAutomatically {
+                    guard let url = package.manager.homepage, dependencies.externalOpener.open(url) else {
+                        throw BatchUpdateError.couldNotOpen(package.manager.rawValue)
+                    }
+                    return BatchUpdateResult(item: item, outcome: .opened,
+                        detail: "Opened \(package.manager.rawValue). Complete the update there.")
+                }
                 guard await installDeveloperPackageUnlocked(package, version: package.latestVersion) else {
                     throw BatchUpdateError.verification(errorMessage ?? "Could not verify \(package.name).")
                 }

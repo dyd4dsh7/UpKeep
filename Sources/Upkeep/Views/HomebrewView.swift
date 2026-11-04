@@ -3,7 +3,7 @@ import SwiftUI
 struct HomebrewView: View {
     @UpkeepStoreReference private var store
     @EnvironmentObject private var settings: AppSettings
-    @State private var cleanupResult: PackageCleanupResult?
+    @UpkeepState private var cleanupResult: PackageCleanupResult?
 
     var body: some View {
         let packages = sortedPackages
@@ -11,10 +11,21 @@ struct HomebrewView: View {
             if HomebrewClient.brewURL == nil {
                 ContentUnavailableView("Homebrew not installed", systemImage: "terminal", description: Text("Install Homebrew to manage packages here."))
                     .upkeepStateTransition()
+            } else if packages.isEmpty {
+                ContentUnavailableView("No packages to show", systemImage: "shippingbox",
+                    description: Text(store.homebrewPackages.isEmpty
+                        ? "Check for updates to refresh your Homebrew inventory."
+                        : "Try another filter to see your installed packages."))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 packageList(packages)
                     .upkeepStateTransition()
             }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            WorkspaceSummary(title: WorkspaceSummary.count(packages.count, "Homebrew package", "Homebrew packages"),
+                detail: "Updates available in this view: \(packages.filter(\.isOutdated).count)",
+                systemImage: "shippingbox")
         }
         .toolbar { packageToolbar }
     }
@@ -188,7 +199,8 @@ private struct PackageRow: View, Equatable {
                 title: package.displayName,
                 detail: rowDetail,
                 prereleaseChannel: package.prereleaseChannel,
-                prereleaseIsInstalled: package.prereleaseIsInstalled
+                prereleaseIsInstalled: package.prereleaseIsInstalled,
+                cveItem: CVEInventoryItem(package)
             )
         } accessories: {
             if isRefreshing {
@@ -275,6 +287,7 @@ struct PackageDetail: View {
 
                     }
                 } content: {
+                    CVESecuritySummary(item: CVEInventoryItem(package))
                     if package.isOutdated { updateCard(package) }
                     detailCard(package)
                     if package.isOutdated {

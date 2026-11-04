@@ -3,9 +3,9 @@ import SwiftUI
 struct ContentView: View {
     @UpkeepStoreReference private var store
     @EnvironmentObject private var settings: AppSettings
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
-    @State private var sidebarCollapsedForInspector = false
-    @State private var showingOperations = false
+    @UpkeepState private var columnVisibility: NavigationSplitViewVisibility = .all
+    @UpkeepState private var sidebarCollapsedForInspector = false
+    @UpkeepState private var showingOperations = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -29,7 +29,10 @@ struct ContentView: View {
         if inspectorPresented.wrappedValue && width < 1_000 {
             sidebarCollapsedForInspector = true
             columnVisibility = .detailOnly
-        } else if sidebarCollapsedForInspector {
+        } else if sidebarCollapsedForInspector && width >= 1_000 {
+            // At narrow widths, reopening the native sidebar preserves the
+            // detail width by growing the window. Keep navigation collapsed
+            // until there is room, or the user explicitly shows it.
             sidebarCollapsedForInspector = false
             columnVisibility = .all
         }
@@ -110,6 +113,7 @@ struct ContentView: View {
             store.selectedApp = nil
             store.updateInspectorSelection = nil
             store.searchText = ""
+            store.completeCVESoftwareNavigation()
         }
         .onChange(of: store.searchText) { _, value in
             if !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -147,12 +151,12 @@ struct ContentView: View {
     }
 
     private var basicSidebarDestinations: Set<SidebarDestination> {
-        [.updates, .allApps, .homebrewPackages, .macOSUpdates, .history]
+        [.updates, .allApps, .homebrewPackages, .macOSUpdates, .cveChecker, .history]
     }
 
     @ViewBuilder private var detail: some View {
         VStack(spacing: 0) {
-            if store.selection != .history {
+            if store.selection != .history && store.selection != .cveChecker {
                 ScanStatusNotice(isMacOS: store.selection == .macOSUpdates)
             }
             ZStack {
@@ -183,6 +187,11 @@ struct ContentView: View {
         case .adoptable: AdoptableView()
         case .homebrewPackages: HomebrewView()
         case .macOSUpdates: MacOSUpdatesView()
+        case .cveChecker: CVECheckerView(packages: store.developerPackages, apps: store.apps, homebrew: store.homebrewPackages, state: store.cveScanState, makeClient: store.makeCVEClient,
+            reviewUpdates: {
+                store.navigation.searchText = ""
+                store.navigation.selection = .updates
+            }, showSoftware: store.showCVESoftware)
         case .history: UpdateHistoryView()
         case .developerPackages: DeveloperPackagesView()
         case .localModels: LocalModelsView()

@@ -42,20 +42,43 @@ import Testing
         modifiedAt: nil, homepage: nil, executablePath: nil,
         updateReference: "widget:latest", isOutdated: true
     )]
-    #expect(store.totalUpdateCount == 3)
+    #expect(store.totalUpdateCount == 6)
     #expect(store.totalUpdateCount == store.updatePlan.primaryUpdateCount)
     #expect(store.availableBatchUpdateItems.count == 5)
     settings.ignore(key: app.updateExclusionKey, name: app.name, category: "App")
     // The cask becomes unrepresented when its app update is excluded.
-    #expect(store.totalUpdateCount == 3)
+    #expect(store.totalUpdateCount == 6)
     #expect(store.totalUpdateCount == store.updatePlan.primaryUpdateCount)
     store.homebrewPackages = []
+    #expect(store.totalUpdateCount == 3)
+    settings.restoreAllExclusions()
+    #expect(store.totalUpdateCount == 4)
+    store.macOSUpdates = []
+    #expect(store.totalUpdateCount == 3)
+    #expect(store.totalUpdateCount == store.updatePlan.primaryUpdateCount)
+
+    // Refreshing just these inventories must invalidate the sidebar/dock count.
+    store.developerPackages = []
+    #expect(store.totalUpdateCount == 2)
+    let model = store.localModels[0]
+    store.ignore(model)
     #expect(store.totalUpdateCount == 1)
     settings.restoreAllExclusions()
     #expect(store.totalUpdateCount == 2)
-    store.macOSUpdates = []
+    store.localModels = []
     #expect(store.totalUpdateCount == 1)
-    #expect(store.totalUpdateCount == store.updatePlan.primaryUpdateCount)
+
+    // A manual developer update is visible even though batch install cannot run it.
+    store.developerPackages = [DeveloperPackage(
+        name: "manual-tool", currentVersion: "1.0", latestVersion: "1.1",
+        manager: .npm, executablePath: "/not-executed/npm",
+        canUpdateAutomatically: false
+    )]
+    #expect(store.totalUpdateCount == 2)
+    #expect(store.availableBatchUpdateItems.count == 1)
+    let package = store.developerPackages[0]
+    store.ignore(package)
+    #expect(store.totalUpdateCount == 1)
 }
 
 @MainActor

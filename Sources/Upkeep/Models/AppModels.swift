@@ -699,6 +699,7 @@ enum SidebarDestination: String, CaseIterable, Identifiable {
     case homebrewPackages = "Homebrew"
     case macOSUpdates = "macOS"
     case history = "History"
+    case cveChecker = "CVE Checker"
     case developerPackages = "Developer"
     case localModels = "AI Models"
 
@@ -721,6 +722,7 @@ enum SidebarDestination: String, CaseIterable, Identifiable {
         case .noSource: "questionmark.app"
         case .homebrewPackages: "terminal"
         case .macOSUpdates: "apple.logo"
+        case .cveChecker: "shield.lefthalf.filled"
         case .history: "clock.arrow.circlepath"
         case .developerPackages: "curlybraces.square"
         case .localModels: "brain.head.profile"
@@ -744,6 +746,7 @@ enum SidebarDestination: String, CaseIterable, Identifiable {
         case .noSource: "questionmark.app.fill"
         case .homebrewPackages: "terminal.fill"
         case .macOSUpdates: "apple.logo"
+        case .cveChecker: "shield.lefthalf.filled"
         case .history: "clock.arrow.circlepath"
         case .developerPackages: "curlybraces.square.fill"
         case .localModels: "brain.head.profile.fill"
@@ -806,6 +809,7 @@ struct HomebrewPackage: Identifiable, Hashable, Sendable {
     let isDependency: Bool
     let dependencies: [String]
     var versionScheme: Int = 0
+    var tap: String? = nil
     var exclusionVersion: String {
         versionScheme == 0 ? currentVersion : "scheme:\(versionScheme)|\(currentVersion)"
     }

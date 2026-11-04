@@ -5,7 +5,7 @@ struct GlobalSearchView: View {
     // AppKit can update List selection while SwiftUI reconciles its rows.
     // Keep this view-local value in State so it does not synchronously publish
     // an ObservableObject change from inside that update.
-    @State private var selection: SearchResultSelection?
+    @UpkeepState private var selection: SearchResultSelection?
 
     var body: some View {
         let results = store.globalSearchResults

@@ -22,21 +22,21 @@ struct InfoPanel<Header: View, Content: View>: View {
                         .frame(width: 24, height: 24)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
                 .help("Close details")
                 .accessibilityLabel("Close details")
                 .keyboardShortcut(.cancelAction)
             }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(20)
+                .padding(UpkeepLayout.pageInset)
             Divider()
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: UpkeepLayout.sectionSpacing) {
                     content
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(20)
+                .padding(UpkeepLayout.pageInset)
             }
         }
         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
@@ -52,9 +52,9 @@ struct InfoPanelHeader<Icon: View, Detail: View>: View {
         HStack(alignment: .top, spacing: 12) {
             icon.frame(width: 44, height: 44)
             VStack(alignment: .leading, spacing: 6) {
-                Text(title).font(.title2.weight(.semibold)).lineLimit(2)
+                Text(title).font(.title3.weight(.semibold)).lineLimit(2)
                     .textSelection(.enabled)
-                detail
+                detail.font(.callout)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }

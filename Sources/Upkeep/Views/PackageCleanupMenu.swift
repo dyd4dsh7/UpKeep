@@ -34,7 +34,7 @@ struct PackageCleanupMenu: View {
     @UpkeepStoreReference private var store
     let targets: [PackageCleanupTarget]
     @Binding var result: PackageCleanupResult?
-    @State private var showsCleanup = false
+    @UpkeepState private var showsCleanup = false
 
     var body: some View {
         Button { showsCleanup = true } label: {

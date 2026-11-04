@@ -2,6 +2,15 @@ import Darwin
 import Foundation
 
 enum CommandRunner {
+    /// Finder and login-item launches need not inherit a shell's HOME variable.
+    static func commandEnvironment(_ base: [String: String]) -> [String: String] {
+        var environment = base
+        if environment["HOME"]?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+            environment["HOME"] = FileManager.default.homeDirectoryForCurrentUser.path
+        }
+        return environment
+    }
+
     private static let processGate = SourceRequestGate(globalLimit: 8, perHostLimit: 2, caseInsensitiveKeys: false)
     enum Purpose {
         case automatic, inventory, mutation
@@ -120,7 +129,7 @@ enum CommandRunner {
         let process = Process(), stdout = Pipe(), stderr = Pipe()
         process.executableURL = executable
         process.arguments = arguments
-        process.environment = environment
+        process.environment = commandEnvironment(environment ?? ProcessInfo.processInfo.environment)
         process.currentDirectoryURL = directory
         process.standardOutput = stdout
         process.standardError = stderr

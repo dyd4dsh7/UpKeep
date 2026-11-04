@@ -25,9 +25,9 @@ private struct HistorySnapshot {
 
 struct UpdateHistoryView: View {
     @UpkeepStoreReference private var store
-    @State private var kindFilter: UpdateRecordKind?
-    @State private var showingStorage = false
-    @State private var storage: RecoveryStorage?
+    @UpkeepState private var kindFilter: UpdateRecordKind?
+    @UpkeepState private var showingStorage = false
+    @UpkeepState private var storage: RecoveryStorage?
 
     var body: some View {
         let snapshot = HistorySnapshot(records: store.updateHistory, kind: kindFilter)
@@ -55,6 +55,11 @@ struct UpdateHistoryView: View {
             }
         }
         .upkeepAnimated(for: snapshot.records.map(\.id))
+        .safeAreaInset(edge: .top, spacing: 0) {
+            WorkspaceSummary(title: WorkspaceSummary.count(snapshot.records.count, "update record", "update records"),
+                detail: "\(kindFilter?.rawValue ?? "All update types") · Review past updates and recovery options",
+                systemImage: "clock.arrow.circlepath")
+        }
         .toolbar {
             ToolbarItem {
                 Button("Recovery Storage", systemImage: "externaldrive") {

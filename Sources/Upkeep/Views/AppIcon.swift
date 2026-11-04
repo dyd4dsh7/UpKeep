@@ -4,7 +4,7 @@ import SwiftUI
 struct AppIcon: View {
     let url: URL
     let size: CGFloat
-    @State private var image: NSImage?
+    @UpkeepState private var image: NSImage?
 
     var body: some View {
         let identity = AppIconIdentity(url: url)
