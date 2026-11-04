@@ -348,7 +348,7 @@ private let cveBrewFeed = #"{"advisories":{"zip":[{"id":"BREW-zip-example","upst
     let settings = AppSettings(defaults: defaults)
     settings.refreshInterval = .never
     settings.checkOnLaunch = false
-    let store = UIFixture.makeStore(settings: settings, operationState: .cve)
+    let store = CVEStoreFixture.makeStore(settings: settings, includeCVEInventory: true)
     #expect(settings.automaticallyCheckCVEs)
     await store.scan()
     await store.waitForAutomaticCVECheck()
@@ -396,7 +396,7 @@ private actor CVEHeldFeed {
     let settings = AppSettings(defaults: defaults)
     settings.checkOnLaunch = false; settings.refreshInterval = .never
     let feed = CVEHeldFeed()
-    let store = UIFixture.makeStore(settings: settings, makeCVEClient: {
+    let store = CVEStoreFixture.makeStore(settings: settings, makeCVEClient: {
         CVEInventoryClient(transport: { await feed.send($0) })
     })
     store.apps = []; store.developerPackages = []; store.homebrewPackages = [cveBrew()]
@@ -420,7 +420,7 @@ private actor CVEHeldFeed {
     let settings = AppSettings(defaults: defaults)
     settings.checkOnLaunch = false; settings.refreshInterval = .never
     let feed = CVEHeldFeed()
-    let store = UIFixture.makeStore(settings: settings, makeCVEClient: {
+    let store = CVEStoreFixture.makeStore(settings: settings, makeCVEClient: {
         CVEInventoryClient(transport: { await feed.send($0) })
     })
     store.apps = []; store.developerPackages = []; store.homebrewPackages = [cveBrew()]
@@ -497,7 +497,7 @@ private actor CVEHeldFeed {
     settings.refreshInterval = .never
     settings.checkOnLaunch = false
     settings.automaticallyCheckCVEs = false
-    let store = UIFixture.makeStore(settings: settings, operationState: .cve)
+    let store = CVEStoreFixture.makeStore(settings: settings, includeCVEInventory: true)
     await store.scan()
     settings.showCurrentDeveloperPackages = false
     let current = try #require(store.developerPackages.first { !$0.isOutdated && CVEPackageQuery($0) != nil })
@@ -539,26 +539,26 @@ private actor CVEHeldFeed {
     defer { defaults.removePersistentDomain(forName: suite) }
     let settings = AppSettings(defaults: defaults)
     settings.automaticallyCheckCVEs = false
-    let store = UIFixture.makeStore(settings: settings, operationState: .cve)
-    store.cveScanState.start(inventory: store.cveInventory, client: UIFixture.cveInventoryClient)
+    let store = CVEStoreFixture.makeStore(settings: settings, includeCVEInventory: true)
+    store.cveScanState.start(inventory: store.cveInventory, client: CVEStoreFixture.cveInventoryClient)
     await store.cveScanState.waitForCompletion()
-    let app = CVEInventoryItem(UIFixture.cveApp)
-    let brew = CVEInventoryItem(UIFixture.cveFormula)
-    let developer = CVEInventoryItem(UIFixture.cvePackages[0])
-    #expect(store.cveUpdateAction(for: app)?.title == UIFixture.cveUpdate.actionTitle)
+    let app = CVEInventoryItem(CVEStoreFixture.cveApp)
+    let brew = CVEInventoryItem(CVEStoreFixture.cveFormula)
+    let developer = CVEInventoryItem(CVEStoreFixture.cvePackages[0])
+    #expect(store.cveUpdateAction(for: app)?.title == CVEStoreFixture.cveUpdate.actionTitle)
     #expect(store.cveUpdateAction(for: brew)?.title == "Update")
     #expect(store.cveUpdateAction(for: brew)?.version == "1.0_2")
     #expect(store.cveUpdateAction(for: developer)?.title == "Update")
     #expect(store.cveUpdateAction(for: developer)?.version == "2.0.0")
-    #expect(store.cveUpdateAction(for: CVEInventoryItem(UIFixture.cvePackages[1])) == nil)
-    store.skip(UIFixture.cveFormula)
-    store.skip(UIFixture.cveUpdate)
-    store.skip(UIFixture.cvePackages[0])
+    #expect(store.cveUpdateAction(for: CVEInventoryItem(CVEStoreFixture.cvePackages[1])) == nil)
+    store.skip(CVEStoreFixture.cveFormula)
+    store.skip(CVEStoreFixture.cveUpdate)
+    store.skip(CVEStoreFixture.cvePackages[0])
     #expect(store.cveUpdateAction(for: app) == nil)
     #expect(store.cveUpdateAction(for: brew) == nil)
     #expect(store.cveUpdateAction(for: developer) == nil)
     store.restoreAllExclusions()
-    store.developerPackages = [UIFixture.cvePackages[0].replacingLatestVersion(with: "1.0.0")]
+    store.developerPackages = [CVEStoreFixture.cvePackages[0].replacingLatestVersion(with: "1.0.0")]
     #expect(store.cveUpdateAction(for: developer) == nil)
     store.homebrewPackages = []
     store.apps = []
@@ -572,10 +572,10 @@ private actor CVEHeldFeed {
     defer { defaults.removePersistentDomain(forName: suite) }
     let settings = AppSettings(defaults: defaults)
     settings.automaticallyCheckCVEs = false
-    let store = UIFixture.makeStore(settings: settings, operationState: .cve)
-    store.cveScanState.start(inventory: store.cveInventory, client: UIFixture.cveInventoryClient)
+    let store = CVEStoreFixture.makeStore(settings: settings, includeCVEInventory: true)
+    store.cveScanState.start(inventory: store.cveInventory, client: CVEStoreFixture.cveInventoryClient)
     await store.cveScanState.waitForCompletion()
-    let item = CVEInventoryItem(UIFixture.cvePackages[0])
+    let item = CVEInventoryItem(CVEStoreFixture.cvePackages[0])
     let action = try #require(store.cveUpdateAction(for: item))
     store.updateExecutionState.activeOperations.insert(action.operation)
     #expect(store.isUpdatingCVESoftware(action))
@@ -586,7 +586,7 @@ private actor CVEHeldFeed {
     // The injected fixture rejects every mutation; reaching its error proves normal execution was used.
     #expect(store.errorMessage != nil)
     store.errorMessage = nil
-    let changed = DeveloperPackage(name: UIFixture.cvePackages[0].name, currentVersion: "1.0.1", latestVersion: "2.0.0",
+    let changed = DeveloperPackage(name: CVEStoreFixture.cvePackages[0].name, currentVersion: "1.0.1", latestVersion: "2.0.0",
                                    manager: .npm, executablePath: "/fixture/npm")
     store.developerPackages = [changed]
     #expect(store.cveUpdateAction(for: item) == nil)
@@ -600,8 +600,8 @@ private actor CVEHeldFeed {
     defer { defaults.removePersistentDomain(forName: suite) }
     let settings = AppSettings(defaults: defaults)
     settings.automaticallyCheckCVEs = false
-    let store = UIFixture.makeStore(settings: settings, operationState: .cve)
-    store.cveScanState.start(inventory: store.cveInventory, client: UIFixture.cveInventoryClient)
+    let store = CVEStoreFixture.makeStore(settings: settings, includeCVEInventory: true)
+    store.cveScanState.start(inventory: store.cveInventory, client: CVEStoreFixture.cveInventoryClient)
     await store.cveScanState.waitForCompletion()
     store.cveScanState.searchText = "nothing matches"
     store.cveScanState.filter = .incomplete
@@ -612,11 +612,11 @@ private actor CVEHeldFeed {
     store.updateExecutionState.activeOperations.insert(developer.updateOperationID)
     #expect(store.cveBatchUpdateItems.count == 2)
     store.updateExecutionState.activeOperations.remove(developer.updateOperationID)
-    store.skip(UIFixture.cveFormula)
+    store.skip(CVEStoreFixture.cveFormula)
     #expect(!store.cveBatchUpdateItems.contains { $0.name == "zip" })
     store.restoreAllExclusions()
     // A reviewed offer must still match when execution begins; no stale mutation is attempted.
-    store.developerPackages = [UIFixture.cvePackages[0].replacingLatestVersion(with: "3.0.0")]
+    store.developerPackages = [CVEStoreFixture.cvePackages[0].replacingLatestVersion(with: "3.0.0")]
     let summary = await store.performCVEBatchUpdates([developer, developer])
     #expect(summary.results.count == 1)
     #expect(summary.failedCount == 1)
@@ -630,15 +630,15 @@ private actor CVEHeldFeed {
     defer { defaults.removePersistentDomain(forName: suite) }
     let settings = AppSettings(defaults: defaults)
     settings.automaticallyCheckCVEs = false
-    let store = UIFixture.makeStore(settings: settings, operationState: .cve)
+    let store = CVEStoreFixture.makeStore(settings: settings, includeCVEInventory: true)
     let cask = HomebrewPackage(token: "firefox", displayName: "Firefox", description: nil, homepage: nil, license: nil,
         installedVersion: "100.0", currentVersion: "101.0", kind: .cask, isOutdated: true,
         isDependency: false, dependencies: [], tap: "homebrew/cask")
     store.homebrewPackages = [cask]
-    let appUpdate = AvailableUpdate(app: UIFixture.cveApp, availableVersion: "101.0", source: .homebrew,
+    let appUpdate = AvailableUpdate(app: CVEStoreFixture.cveApp, availableVersion: "101.0", source: .homebrew,
                                    releaseNotes: nil, actionURL: nil, homebrewToken: "firefox")
     store.updates = [appUpdate]
-    store.cveScanState.start(inventory: store.cveInventory, client: UIFixture.cveInventoryClient)
+    store.cveScanState.start(inventory: store.cveInventory, client: CVEStoreFixture.cveInventoryClient)
     await store.cveScanState.waitForCompletion()
     #expect(store.cveBatchUpdateItems.filter { if case .application = $0 { true } else { false } }.count == 1)
     #expect(store.cveBatchUpdateItems.filter { if case .homebrew = $0 { true } else { false } }.isEmpty)
@@ -653,8 +653,8 @@ private actor CVEHeldFeed {
     defer { defaults.removePersistentDomain(forName: suite) }
     let settings = AppSettings(defaults: defaults)
     settings.automaticallyCheckCVEs = false
-    let store = UIFixture.makeStore(settings: settings, operationState: .cve)
-    store.cveScanState.start(inventory: store.cveInventory, client: UIFixture.cveInventoryClient)
+    let store = CVEStoreFixture.makeStore(settings: settings, includeCVEInventory: true)
+    store.cveScanState.start(inventory: store.cveInventory, client: CVEStoreFixture.cveInventoryClient)
     await store.cveScanState.waitForCompletion()
     let developer = try #require(store.cveBatchUpdateItems.first { if case .developer = $0 { true } else { false } })
     let summary = await store.performCVEBatchUpdates([developer])

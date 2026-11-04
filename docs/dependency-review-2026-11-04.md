@@ -103,3 +103,22 @@ their shared gates would distort other process deadline fixtures.
 
 Hosted Actions execution, commits, pushes and release publication are separate
 from local validation.
+
+## Hosted CI follow-up
+
+The [first branch CI run](https://github.com/dyd4dsh7/UpKeep/actions/runs/41749080605)
+passed debug tests, process isolation, packaging, signature checks and the narrow
+launch smoke test. Its release build exposed CVE tests referring to the app's
+debug-only UIFixture. Those tests now use an offline CVEStoreFixture owned by
+the test target in both configurations; the app fixture remains debug-only.
+
+Running the enabled release benchmark also found an outdated expected update
+count. Its fixture now counts non-excluded app offers, all Homebrew packages
+(including dependencies), and developer offers, consistent with the current
+unified update count. All benchmark assertions remain enabled.
+
+Local follow-up checks passed all eight release benchmark modes, all 437
+optimized tests, and 34 targeted debug CVE tests with compiler warnings treated
+as errors. The four UI-fixture tests are intentionally debug-only. The remaining
+benchmark modes reused the compiled release test binary to avoid repeated builds;
+the CI workflow continues to run its complete benchmark commands.

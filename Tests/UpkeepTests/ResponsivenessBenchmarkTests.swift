@@ -58,6 +58,10 @@ import Testing
         store.developerPackages = developers
         store.updates = updates
         let keys = apps.map(\.updateExclusionKey)
+        // GitHub offers do not represent Homebrew casks in this fixture. The
+        // unified count includes all package and developer updates, including
+        // dependency formulae, as well as the non-excluded application offers.
+        let expectedUpdateCount = updates.count - exclusions.count + packages.count + developers.count
 
         for sample in 0...7 {
             let clock = ContinuousClock()
@@ -79,7 +83,7 @@ import Testing
             var count = 0
             for _ in 0..<20 { count += store.totalUpdateCount }
             let countTime = started.duration(to: clock.now)
-            #expect(count == (size - exclusions.count + size / 2) * 20)
+            #expect(count == expectedUpdateCount * 20)
 
             started = clock.now
             var excluded = 0

@@ -4,6 +4,8 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+- Fixed optimized CVE tests to use test-owned offline fixtures and updated responsiveness benchmark expectations for the unified update count.
+
 - Switched tests to toolchain-bundled Swift Testing, removing the duplicate Swift Testing/SwiftSyntax package builds and custom runtime linker paths; CI and releases select Xcode 26.6 with Swift 6.3 or newer.
 - Kept default-backend builds compatible with Command Line Tools and the macOS 27 SDK by explicitly selecting SwiftUI's State property wrapper, updating a TaskLocal call, and simplifying fixed-version type inference.
 - Fixed newer Swift compiler isolation warnings by calculating list separator offsets before entering alignment-guide closures.
