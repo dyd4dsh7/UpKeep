@@ -3,9 +3,9 @@ import SwiftUI
 struct ContentView: View {
     @UpkeepStoreReference private var store
     @EnvironmentObject private var settings: AppSettings
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
-    @State private var sidebarCollapsedForInspector = false
-    @State private var showingOperations = false
+    @UpkeepState private var columnVisibility: NavigationSplitViewVisibility = .all
+    @UpkeepState private var sidebarCollapsedForInspector = false
+    @UpkeepState private var showingOperations = false
 
     var body: some View {
         GeometryReader { geometry in

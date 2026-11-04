@@ -48,7 +48,12 @@ struct StandardItemRow<Icon: View, Content: View, Accessories: View>: View {
     }
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
+        // Alignment guides run in a Sendable closure; read actor-isolated
+        // settings here and capture only the calculated offset.
+        let separatorLeading: CGFloat = (settings.listDensity == .compact ? 2 : 4)
+            + (settings.listDensity == .compact ? 30 : 38) + rowSpacing
+
+        return ViewThatFits(in: .horizontal) {
             HStack(spacing: rowSpacing) {
                 rowIcon
                 content
@@ -73,8 +78,7 @@ struct StandardItemRow<Icon: View, Content: View, Accessories: View>: View {
         .padding(.vertical, settings.listDensity == .compact ? 4 : 6)
         .contentShape(Rectangle())
         .alignmentGuide(.listRowSeparatorLeading) { _ in
-            (settings.listDensity == .compact ? 2 : 4)
-                + (settings.listDensity == .compact ? 30 : 38) + rowSpacing
+            separatorLeading
         }
         .listRowSeparator(.visible)
         .animation(reduceMotion ? nil : UpkeepMotion.quick, value: settings.listDensity)

@@ -340,7 +340,7 @@ struct AppDetailView: View {
     @EnvironmentObject private var settings: AppSettings
     @StateObject private var inspection = AppSecurityInspectionModel()
     @StateObject private var detailState = AppDetailState()
-    @State private var showsFullReleaseNotes = false
+    @UpkeepState private var showsFullReleaseNotes = false
     let app: InstalledApp
 
     private var update: AvailableUpdate? { store.update(for: app) }

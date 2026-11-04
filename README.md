@@ -97,19 +97,19 @@ Upkeep never downloads executables from its own servers. App Store updates open 
 
 ## Build
 
-Use **Xcode 26.3 or newer**, or matching Apple Command Line Tools, with the
-**macOS 26 SDK or newer**. CI explicitly selects Xcode 26.3. The build SDK is newer
-than the macOS 14 deployment target because the source uses newer SwiftUI APIs
-behind availability checks. A complete stable toolchain is recommended; beta
-Command Line Tools may omit SwiftUI macro plugins.
-If tests fail to link `_TestingInterop`, select a full Xcode installation;
-changing only the SDK does not supply that test runtime library.
+Use **Xcode 26.6 or newer (Swift 6.3+)**, or matching Apple Command Line Tools,
+with the **macOS 26 SDK or newer**. CI explicitly selects Xcode 26.6. The build
+SDK is newer than the macOS 14 deployment target because the source uses newer SwiftUI APIs
+behind availability checks. Tests use the Swift Testing bundled with that
+selected toolchain; no external test package, backend override or extra linker
+paths are required. `UpkeepState` selects SwiftUI's native State property wrapper
+without the macOS 27 SDK's separate macro plugin.
 
 No Apple Developer membership or signing secrets are needed for local debug builds.
 Clone this repository, then:
 
 ```sh
-swift test -Xswiftc -warnings-as-errors
+swift test
 ./script/build_and_run.sh
 ```
 

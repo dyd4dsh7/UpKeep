@@ -3,7 +3,7 @@ import SwiftUI
 
 struct DeveloperPackagesView: View {
     @UpkeepStoreReference private var store
-    @State private var cleanupResult: PackageCleanupResult?
+    @UpkeepState private var cleanupResult: PackageCleanupResult?
 
     var body: some View {
         let packages = sortedPackages

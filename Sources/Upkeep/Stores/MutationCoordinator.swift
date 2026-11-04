@@ -49,6 +49,8 @@ final class MutationCoordinator: ObservableObject {
                 depths[owner] = nil
             }
         }
-        return await MutationContext.$owner.withValue(owner, operation: operation)
+        return await MutationContext.$owner.withValue(owner) {
+            await operation()
+        }
     }
 }

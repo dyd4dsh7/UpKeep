@@ -5,7 +5,7 @@ struct OperationCentreView: View {
     let execution: UpkeepUpdateExecutionState
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
-    @State private var checking = Set<OperationID>()
+    @UpkeepState private var checking = Set<OperationID>()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {

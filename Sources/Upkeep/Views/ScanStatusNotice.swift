@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ScanStatusNotice: View {
     @UpkeepStoreReference private var store
-    @State private var showsDetails = false
+    @UpkeepState private var showsDetails = false
     let isMacOS: Bool
 
     private var state: UpdateCheckState { isMacOS ? store.macOSCheckState : store.updateCheckState }

@@ -64,10 +64,13 @@ struct CVEAdvisory: Decodable, Identifiable, Sendable {
                 .compactMap { label in label.map { CVESeverityRating(score: nil, label: $0, method: "Publisher rating") } }
     }
     var fixedVersions: [String] {
-        Set((affected ?? []).flatMap { $0.ranges ?? [] }
+        let ranges = (affected ?? []).flatMap { $0.ranges ?? [] }
             .filter { ["SEMVER", "ECOSYSTEM"].contains($0.type) }
-            .flatMap(\.events).compactMap { $0.count == 1 ? $0["fixed"] : nil }
-            .filter { !$0.isEmpty && $0 != "0" }).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        let versions: [String] = ranges.flatMap(\.events).compactMap { event in
+            event.count == 1 ? event["fixed"] : nil
+        }
+        return Set(versions.filter { !$0.isEmpty && $0 != "0" })
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
     /// OSV records can cover multiple packages. Never show another package's rating or fixes.
     func scoped(to query: CVEPackageQuery) -> Self {

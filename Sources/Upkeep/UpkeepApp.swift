@@ -4,7 +4,7 @@ import SwiftUI
 @main
 struct UpkeepApp: App {
     @StateObject private var settings: AppSettings
-    @State private var store: UpkeepStore
+    @UpkeepState private var store: UpkeepStore
     @StateObject private var updateViewState = UpdateViewState()
 
     init() {
@@ -14,13 +14,13 @@ struct UpkeepApp: App {
             defaults.set(true, forKey: "hasCompletedSetup")
             let appSettings = AppSettings(defaults: defaults)
             _settings = StateObject(wrappedValue: appSettings)
-            _store = State(initialValue: UIFixture.makeStore(settings: appSettings, operationState: UIFixture.operationState))
+            _store = UpkeepState(initialValue: UIFixture.makeStore(settings: appSettings, operationState: UIFixture.operationState))
             return
         }
         #endif
         let appSettings = AppSettings()
         _settings = StateObject(wrappedValue: appSettings)
-        _store = State(initialValue: UpkeepStore(settings: appSettings))
+        _store = UpkeepState(initialValue: UpkeepStore(settings: appSettings))
     }
 
     var body: some Scene {

@@ -3,7 +3,7 @@ import SwiftUI
 struct SourceHealthView: View {
     @UpkeepStoreReference private var store
     @ObservedObject var settings: AppSettings
-    @State private var showingSuccessfulChecks = false
+    @UpkeepState private var showingSuccessfulChecks = false
 
     var body: some View {
         Section("Check Health") {

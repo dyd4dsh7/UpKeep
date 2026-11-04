@@ -10,9 +10,9 @@ struct CVECheckerView: View {
     var makeClient: () -> CVEInventoryClient = { CVEInventoryClient() }
     var reviewUpdates: () -> Void
     var showSoftware: (CVEInventoryItem) -> Void
-    @State private var selectedID: String?
-    @State private var showingCoverage = false
-    @State private var batchReview: CVEBatchReview?
+    @UpkeepState private var selectedID: String?
+    @UpkeepState private var showingCoverage = false
+    @UpkeepState private var batchReview: CVEBatchReview?
     private struct CVEBatchReview: Identifiable {
         let id = UUID()
         let items: [BatchUpdateItem]

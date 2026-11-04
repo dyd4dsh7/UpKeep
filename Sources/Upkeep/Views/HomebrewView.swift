@@ -3,7 +3,7 @@ import SwiftUI
 struct HomebrewView: View {
     @UpkeepStoreReference private var store
     @EnvironmentObject private var settings: AppSettings
-    @State private var cleanupResult: PackageCleanupResult?
+    @UpkeepState private var cleanupResult: PackageCleanupResult?
 
     var body: some View {
         let packages = sortedPackages
