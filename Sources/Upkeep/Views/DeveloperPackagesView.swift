@@ -9,7 +9,7 @@ struct DeveloperPackagesView: View {
         let packages = sortedPackages
         PackageCleanupContainer(result: $cleanupResult, contentIdentity: packages.map(\.id)) {
             if packages.isEmpty {
-                ContentUnavailableView(
+                WorkspaceEmptyState(
                     "No packages found", systemImage: "checkmark.seal.fill",
                     description: Text("Installed package managers are checked automatically.")
                 ).frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -20,8 +20,8 @@ struct DeveloperPackagesView: View {
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            WorkspaceSummary(title: WorkspaceSummary.count(packages.count, "developer package", "developer packages"),
-                detail: "Updates available: \(packages.filter(\.isOutdated).count) · \(store.developerManagerFilter.title)",
+            WorkspaceSummary(title: "Developer Packages",
+                detail: "\(WorkspaceSummary.count(packages.count, "package", "packages")) · \(WorkspaceSummary.count(packages.filter(\.isOutdated).count, "update", "updates")) available · \(store.developerManagerFilter.title)",
                 systemImage: "curlybraces.square")
         }
         .toolbar { packageToolbar }
@@ -266,7 +266,7 @@ struct DeveloperPackageDetail: View {
         if let package {
             DeveloperPackageDetailContent(package: package)
         } else {
-            ContentUnavailableView("Select a package", systemImage: "shippingbox")
+            WorkspaceEmptyState("Select a package", systemImage: "shippingbox")
         }
     }
 }
@@ -291,16 +291,16 @@ private struct DeveloperPackageDetailContent: View {
                 CVESecuritySummary(item: CVEInventoryItem(package))
                 if package.isOutdated { updateCard }
 
-                Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
-                    GridRow { label("Installed"); Text(package.currentVersion).monospacedDigit() }
-                    GridRow { label("Latest"); Text(package.latestVersion).monospacedDigit().foregroundStyle(package.isOutdated ? .blue : .primary) }
-                    GridRow { label("Manager"); Text(package.manager.rawValue) }
-                    if let context = package.installationContext { GridRow { label("Installation"); Text(context) } }
-                    GridRow { label("Executable"); Text(package.executablePath).lineLimit(2).textSelection(.enabled) }
-                    if let homepage = package.manager.homepage { GridRow { label("Registry"); Link(homepage.host() ?? homepage.absoluteString, destination: packageURL ?? homepage) } }
+                InspectorSection(title: "Installation") {
+                    Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
+                        GridRow { label("Installed"); Text(package.currentVersion).monospacedDigit() }
+                        GridRow { label("Latest"); Text(package.latestVersion).monospacedDigit().foregroundStyle(package.isOutdated ? .blue : .primary) }
+                        GridRow { label("Manager"); Text(package.manager.rawValue) }
+                        if let context = package.installationContext { GridRow { label("Installation"); Text(context) } }
+                        GridRow { label("Executable"); Text(package.executablePath).lineLimit(2).textSelection(.enabled) }
+                        if let homepage = package.manager.homepage { GridRow { label("Registry"); Link(homepage.host() ?? homepage.absoluteString, destination: packageURL ?? homepage) } }
+                    }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .upkeepOutlinedInspectorCard()
 
                 RelatedInstallations(package: package)
                 actionGrid
@@ -365,7 +365,7 @@ private struct DeveloperPackageDetailContent: View {
             isPresented: $detailState.isConfirmingUninstall,
             titleVisibility: .visible
         ) {
-            Button("Uninstall", role: .destructive) {
+            Button("Uninstall Package", role: .destructive) {
                 Task { await store.uninstallDeveloperPackage(package) }
             }
             Button("Cancel", role: .cancel) {}

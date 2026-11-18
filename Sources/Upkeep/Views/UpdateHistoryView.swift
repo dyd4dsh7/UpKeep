@@ -26,14 +26,14 @@ private struct HistorySnapshot {
 struct UpdateHistoryView: View {
     @UpkeepStoreReference private var store
     @UpkeepState private var kindFilter: UpdateRecordKind?
+    @UpkeepState private var selectedRecordID: UUID?
     @UpkeepState private var showingStorage = false
-    @UpkeepState private var storage: RecoveryStorage?
 
     var body: some View {
         let snapshot = HistorySnapshot(records: store.updateHistory, kind: kindFilter)
         VStack(spacing: 0) {
             if snapshot.records.isEmpty {
-                ContentUnavailableView(
+                WorkspaceEmptyState(
                     kindFilter == nil ? "No update history" : "No matching updates",
                     systemImage: kindFilter == nil ? "clock" : "line.3.horizontal.decrease.circle",
                     description: Text(kindFilter == nil
@@ -42,22 +42,14 @@ struct UpdateHistoryView: View {
                 ).frame(maxWidth: .infinity, maxHeight: .infinity)
                     .upkeepStateTransition()
             } else {
-                List {
-                    ForEach(snapshot.days) { group in
-                        Section(dayTitle(group.day)) {
-                            ForEach(group.records) { record in
-                                historyRow(record)
-                            }
-                        }
-                    }
-                }.upkeepContentList()
+                historyList(snapshot)
                     .upkeepStateTransition()
             }
         }
         .upkeepAnimated(for: snapshot.records.map(\.id))
         .safeAreaInset(edge: .top, spacing: 0) {
-            WorkspaceSummary(title: WorkspaceSummary.count(snapshot.records.count, "update record", "update records"),
-                detail: "\(kindFilter?.rawValue ?? "All update types") · Review past updates and recovery options",
+            WorkspaceSummary(title: "Update History",
+                detail: "\(WorkspaceSummary.count(snapshot.records.count, "record", "records")) · \(kindFilter?.rawValue ?? "All update types")",
                 systemImage: "clock.arrow.circlepath")
         }
         .toolbar {
@@ -89,41 +81,10 @@ struct UpdateHistoryView: View {
             }
         }
         .sheet(isPresented: $showingStorage) {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Recovery Storage").font(.title2.bold())
-                if let storage {
-                    if storage.unknownSizes {
-                        Text("Total backup size unavailable. Retention budget: \(ByteCountFormatter.string(fromByteCount: storage.byteLimit, countStyle: .file)).")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("\(ByteCountFormatter.string(fromByteCount: storage.measuredBytes, countStyle: .file)) of \(ByteCountFormatter.string(fromByteCount: storage.byteLimit, countStyle: .file)) retention budget")
-                    }
-                    if storage.metadataUnavailable {
-                        Text("Recovery metadata could not be read. Backups are protected until that metadata can be verified.")
-                            .foregroundStyle(.orange)
-                    }
-                    Text("Keeps up to three backups per app and twenty in total, within the byte budget. Recovery backups from interrupted updates are protected and can exceed that budget.")
-                        .font(.callout).foregroundStyle(.secondary)
-                    List(storage.backups) { backup in
-                        VStack(alignment: .leading) {
-                            Text(URL(fileURLWithPath: backup.path).lastPathComponent)
-                            Text((backup.bytes.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "Size unavailable")
-                                + (backup.protected ? " · Recovery protected" : " · Retained backup"))
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                    Text(storage.directory.path).font(.caption).textSelection(.enabled)
-                    Button("Show in Finder") { NSWorkspace.shared.open(storage.directory) }
-                } else {
-                    Text("Storage information is unavailable.").foregroundStyle(.secondary)
-                }
-                Button("Done") { showingStorage = false }.frame(maxWidth: .infinity, alignment: .trailing)
-            }
-            .padding(24).frame(minWidth: 420, minHeight: 350)
-            .task { storage = await store.recoveryStorage() }
+            RecoveryStorageSheet()
         }
         .confirmationDialog(
-            "Revert \(store.pendingRevert?.name ?? "this app")?",
+            "Restore \(store.pendingRevert?.name ?? "this app")?",
             isPresented: Binding(get: { store.pendingRevert != nil }, set: { if !$0 { store.pendingRevert = nil } }),
             titleVisibility: .visible
         ) {
@@ -135,16 +96,41 @@ struct UpdateHistoryView: View {
             }
             Button("Cancel", role: .cancel) { store.pendingRevert = nil }
         } message: {
-            Text("Upkeep will prepare and validate the backup before replacing the current app. If the app is running, you will be asked to quit it. The replaced app will be moved to Trash after the restore succeeds.")
+            Text("Upkeep verifies the backup before replacing the current app. If the app is open, Upkeep will ask you to quit it. The replaced copy moves to Trash after the restore succeeds.")
+        }
+    }
+
+    private var revealedRecordID: UUID? {
+        guard case let .history(id) = store.navigation.inventoryReveal else { return nil }
+        return id
+    }
+
+    private func historyList(_ snapshot: HistorySnapshot) -> some View {
+        ScrollViewReader { proxy in
+            List(selection: $selectedRecordID) {
+                ForEach(snapshot.days) { group in
+                    Section(dayTitle(group.day)) {
+                        ForEach(group.records) { record in
+                            historyRow(record)
+                                .tag(record.id)
+                                .id(record.id)
+                        }
+                    }
+                }
+            }
+            .upkeepContentList()
+            .onChange(of: revealedRecordID, initial: true) { _, id in
+                guard let id, snapshot.records.contains(where: { $0.id == id }) else { return }
+                selectedRecordID = id
+                proxy.scrollTo(id, anchor: .center)
+            }
         }
     }
 
     @ViewBuilder
     private func historyRow(_ record: UpdateRecord) -> some View {
-        StandardItemRow {
-            Image(systemName: icon(for: record.kind))
-                .font(.title3)
-                .foregroundStyle(color(for: record.kind))
+        StandardItemRow(isSelected: selectedRecordID == record.id) {
+            WorkspaceGlyph(systemImage: record.kind.systemImage, size: 34)
         } content: {
             ItemIdentityView(
                 title: record.name,
@@ -163,7 +149,7 @@ struct UpdateHistoryView: View {
             Button { store.pendingRevert = record } label: {
                 WorkingActionLabel(
                     isWorking: store.isWorking(.historyRestore(record.id)),
-                    idleTitle: "Revert",
+                    idleTitle: "Restore…",
                     workingTitle: "Restoring…"
                 )
             }
@@ -184,12 +170,5 @@ struct UpdateHistoryView: View {
         if calendar.isDateInToday(day) { return "Today" }
         if calendar.isDateInYesterday(day) { return "Yesterday" }
         return day.formatted(date: .long, time: .omitted)
-    }
-
-    private func icon(for kind: UpdateRecordKind) -> String {
-        switch kind { case .app: "app.fill"; case .homebrew: "shippingbox.fill"; case .macOS: "apple.logo"; case .developer: "chevron.left.forwardslash.chevron.right"; case .model: "brain.head.profile.fill" }
-    }
-    private func color(for kind: UpdateRecordKind) -> Color {
-        switch kind { case .app: .blue; case .homebrew: .orange; case .macOS: .primary; case .developer: .purple; case .model: .indigo }
     }
 }

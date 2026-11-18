@@ -6,6 +6,7 @@ import Observation
 final class CVEScanState {
     var filter: CVEResultFilter = .all
     var searchText = ""
+    var requestedItemID: String?
     private(set) var results: [CVEInventoryResult] = []
     private(set) var inventory: [CVEInventoryItem] = []
     private(set) var checkedAt: Date?

@@ -858,6 +858,17 @@ enum UpdateRecordKind: String, Codable, Sendable {
     case macOS = "macOS"
     case developer = "Developer"
     case model = "AI Model"
+
+    var systemImage: String {
+        switch self {
+        case .app: "app"
+        case .homebrew: "shippingbox"
+        case .macOS: "apple.logo"
+        case .developer: "chevron.left.forwardslash.chevron.right"
+        case .model: "brain.head.profile"
+        }
+    }
+
 }
 
 struct UpdateRecord: Identifiable, Codable, Hashable, Sendable {

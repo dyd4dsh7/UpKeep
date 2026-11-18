@@ -11,13 +11,8 @@ struct ScanStatusNotice: View {
     }
 
     var body: some View {
-        if store.isScanning, let progress = store.scanState.progress {
-            HStack(spacing: 8) {
-                ProgressView().controlSize(.small)
-                Text("Checked \(progress.completed) of \(progress.total) app sources · \(progress.lastSource.rawValue)")
-                    .font(.caption).foregroundStyle(.secondary)
-                Spacer()
-            }.padding(.horizontal, UpkeepLayout.pageInset).padding(.vertical, 8)
+        if store.isScanning {
+            scanProgress
             Divider()
         }
         if state == .failed || state == .partial || !warnings.isEmpty {
@@ -40,8 +35,47 @@ struct ScanStatusNotice: View {
         }
     }
 
+    private var scanProgress: some View {
+        let appProgress = isMacOS ? nil : store.scanState.progress
+        return VStack(alignment: .leading, spacing: 6) {
+            if let appProgress, appProgress.total > 0 {
+                HStack(spacing: 8) {
+                    Text("App source checks")
+                        .fontWeight(.medium)
+                    Text(appProgress.lastSource.rawValue)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    Text("\(appProgress.completed) of \(appProgress.total)")
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .contentTransition(.numericText())
+                        .upkeepAnimated(for: appProgress.completed, animation: UpkeepMotion.quick)
+                }
+                ProgressView(
+                    value: Double(appProgress.completed),
+                    total: Double(appProgress.total)
+                )
+                .controlSize(.small)
+                .accessibilityLabel("App source checks")
+            } else {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                        .accessibilityHidden(true)
+                    Text("Checking enabled sources…")
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(.secondary)
+            }
+        }
+        .font(.caption)
+        .padding(.horizontal, UpkeepLayout.pageInset)
+        .padding(.vertical, 8)
+        .background(.bar)
+    }
+
     private var warningLabel: some View {
-        Label(state == .checking ? "Rechecking sources…" : "Some sources couldn’t be checked",
+        Label(state == .checking ? "Previous check incomplete" : "Some sources couldn’t be checked",
               systemImage: "exclamationmark.triangle.fill")
             .font(.callout.weight(.medium))
             .foregroundStyle(.primary)
@@ -55,23 +89,28 @@ struct ScanStatusNotice: View {
             if !warnings.isEmpty {
                 Button("Details…") { showsDetails = true }
                     .buttonStyle(.link)
-                    .accessibilityLabel("Source details, \(warnings.count) problems")
+                    .accessibilityLabel("Source details, \(WorkspaceSummary.count(warnings.count, "problem", "problems"))")
                     .popover(isPresented: $showsDetails, arrowEdge: .bottom) {
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("Source Problems").font(.headline)
-                                ForEach(warnings) { warning in
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(warning.title).fontWeight(.medium)
-                                        Text(warning.detail).foregroundStyle(.secondary)
+                        VStack(spacing: 0) {
+                            WorkspaceSummary(title: "Source Problems",
+                                detail: WorkspaceSummary.count(warnings.count, "problem", "problems"),
+                                systemImage: "exclamationmark.triangle")
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    ForEach(warnings) { warning in
+                                        VStack(alignment: .leading, spacing: 5) {
+                                            Text(warning.title).font(.callout.weight(.semibold))
+                                            Text(warning.detail).font(.callout).foregroundStyle(.secondary)
+                                        }
+                                        .textSelection(.enabled)
+                                        .upkeepOutlinedInspectorCard()
                                     }
-                                    .font(.callout).textSelection(.enabled)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
                                 }
+                                .padding(UpkeepLayout.pageInset)
                             }
-                            .padding(16)
                         }
-                        .frame(width: 420, height: 240)
+                        .frame(width: 420, height: 285)
+                        .upkeepWorkspaceAppearance()
                     }
             } else {
                 Text(state.detail)

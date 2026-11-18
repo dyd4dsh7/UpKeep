@@ -11,8 +11,12 @@ struct UpkeepApp: App {
         #if DEBUG
         if UIFixture.enabled {
             let defaults = UserDefaults(suiteName: "test.upkeep.ui-fixture.\(UUID().uuidString)")!
-            defaults.set(true, forKey: "hasCompletedSetup")
+            let showSetup = ProcessInfo.processInfo.arguments.contains("--ui-fixture-setup")
+            defaults.set(!showSetup, forKey: "hasCompletedSetup")
             let appSettings = AppSettings(defaults: defaults)
+            if !showSetup, UIFixture.operationState == .workspace {
+                appSettings.completeSetup(.advanced, sidebarViewMode: .advanced)
+            }
             _settings = StateObject(wrappedValue: appSettings)
             _store = UpkeepState(initialValue: UIFixture.makeStore(settings: appSettings, operationState: UIFixture.operationState))
             return

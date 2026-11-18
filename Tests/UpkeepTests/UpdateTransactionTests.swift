@@ -461,12 +461,19 @@ func formulaUpdateVerifiesItsTokenWithoutScanningUnrelatedSources(result: String
         history: TransactionHistory(recorder: recorder), externalOpener: TransactionExternalOpener()
     ))
     store.homebrewPackages = [package]
+    let reportedError: String?
     switch mode {
     case "batch":
         let summary = await store.performBatchUpdates([.homebrew(package)])
+        reportedError = summary.results.first(where: { $0.outcome == .failed })?.detail
+        #expect(store.errorMessage == nil)
         #expect(summary.results.first?.outcome == (result == "updated" ? .updated : .failed))
-    case "all": await store.updateAllPackages()
-    default: await store.updatePackage(package)
+    case "all":
+        await store.updateAllPackages()
+        reportedError = store.errorMessage
+    default:
+        await store.updatePackage(package)
+        reportedError = store.errorMessage
     }
     #expect(await recorder.events() == ((result == "updated" || result == "partial") ? ["upgrade", "verify", "history"] : ["upgrade", "verify"]))
     #expect(store.totalUpdateCount == ((result == "updated" || result == "partial") ? 0 : 1))
@@ -478,11 +485,11 @@ func formulaUpdateVerifiesItsTokenWithoutScanningUnrelatedSources(result: String
         #expect(store.updateHistory.first?.toVersion == "2.0")
     }
     if result == "partial" {
-        #expect(store.errorMessage?.contains("download failed") == true)
+        #expect(reportedError?.contains("download failed") == true)
     } else if result == "failed" {
-        #expect(store.errorMessage?.contains("Could not refresh gh") == true)
+        #expect(reportedError?.contains("Could not refresh gh") == true)
     } else {
-        #expect((store.errorMessage == nil) == (result == "updated"))
+        #expect((reportedError == nil) == (result == "updated"))
     }
 }
 

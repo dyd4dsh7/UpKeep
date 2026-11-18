@@ -10,71 +10,74 @@ struct SetupView: View {
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 24) {
-                VStack(alignment: .leading, spacing: 12) {
-                    sectionHeader(
-                        "What should Upkeep manage?",
-                        detail: "Pick a starting point. Individual sources remain configurable in Settings."
-                    )
-
-                    VStack(spacing: 8) {
-                        ForEach(SetupProfile.allCases) { profile in
-                            profileButton(profile)
-                        }
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 12) {
-                    sectionHeader(
-                        "Choose your view",
-                        detail: "This controls how much navigation and technical detail is shown."
-                    )
-
-                    HStack(spacing: 10) {
-                        ForEach(SidebarViewMode.allCases) { mode in
-                            viewModeButton(mode)
-                        }
-                    }
-                }
+            ScrollView {
+                setupOptions
             }
-            .padding(28)
+            .frame(idealHeight: 307, maxHeight: 340)
 
-            Divider()
-
-            HStack(spacing: 12) {
-                Label("No account required", systemImage: "checkmark.shield")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button("Get Started") {
-                    settings.completeSetup(state.profile, sidebarViewMode: state.sidebarViewMode)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .tint(.accentColor)
-                .keyboardShortcut(.defaultAction)
-            }
-            .padding(.horizontal, 28)
-            .padding(.vertical, 18)
+            footer
         }
-        .frame(width: 680)
+        .frame(width: 640)
+        .upkeepWorkspaceAppearance()
+    }
+
+    private var setupOptions: some View {
+        HStack(alignment: .top, spacing: 18) {
+            VStack(alignment: .leading, spacing: 10) {
+                sectionHeader("Update sources", detail: "Choose what to manage.")
+
+                ForEach(SetupProfile.allCases) { profile in
+                    profileButton(profile)
+                }
+            }
+            .frame(maxWidth: .infinity)
+
+            VStack(alignment: .leading, spacing: 10) {
+                sectionHeader("Navigation", detail: "Choose which tools to see.")
+
+                ForEach(SidebarViewMode.allCases) { mode in
+                    viewModeButton(mode)
+                }
+            }
+            .frame(width: 205)
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 16)
+    }
+
+    private var footer: some View {
+        WorkspaceDialogFooter {
+            Label("No account required", systemImage: "checkmark.shield")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button("Get Started") {
+                settings.completeSetup(state.profile, sidebarViewMode: state.sidebarViewMode)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .keyboardShortcut(.defaultAction)
+        }
     }
 
     private var header: some View {
         HStack(spacing: 18) {
-            AppBrandIcon(size: 68)
+            AppBrandIcon(size: 54)
 
             VStack(alignment: .leading, spacing: 5) {
-                Text("Welcome to Upkeep")
-                    .font(.largeTitle.bold())
-                Text("Choose what to keep updated and how much detail you want to see.")
+                Text("Set up UpKeep")
+                    .font(.system(size: 29, weight: .semibold))
+                    .tracking(-0.9)
+                    .accessibilityAddTraits(.isHeader)
+                Text("Choose what to include in update checks.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
 
             Spacer()
         }
-        .padding(28)
+        .padding(.horizontal, 24)
+        .padding(.vertical, 16)
     }
 
     private func sectionHeader(_ title: String, detail: String) -> some View {
@@ -101,19 +104,9 @@ struct SetupView: View {
                     )
 
                 VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 8) {
-                        Text(profile.title)
-                            .font(.headline)
-                            .foregroundStyle(.primary)
-                        if profile == .applications {
-                            Text("Recommended")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.blue)
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 3)
-                                .background(.blue.opacity(0.12), in: Capsule())
-                        }
-                    }
+                    Text(profile.title)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
                     Text(profile.detail)
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -127,7 +120,7 @@ struct SetupView: View {
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
             }
-            .padding(12)
+            .padding(10)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -166,7 +159,7 @@ struct SetupView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.leading)
-                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Spacer(minLength: 8)
@@ -175,7 +168,7 @@ struct SetupView: View {
                     .font(.body.weight(.semibold))
                     .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
             }
-            .padding(12)
+            .padding(10)
             .frame(maxWidth: .infinity, minHeight: 84, alignment: .topLeading)
             .contentShape(Rectangle())
         }

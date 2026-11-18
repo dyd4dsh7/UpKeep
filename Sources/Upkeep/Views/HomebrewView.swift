@@ -9,10 +9,10 @@ struct HomebrewView: View {
         let packages = sortedPackages
         PackageCleanupContainer(result: $cleanupResult, contentIdentity: packages.map(\.id)) {
             if HomebrewClient.brewURL == nil {
-                ContentUnavailableView("Homebrew not installed", systemImage: "terminal", description: Text("Install Homebrew to manage packages here."))
+                WorkspaceEmptyState("Homebrew not installed", systemImage: "terminal", description: Text("Install Homebrew to manage packages here."))
                     .upkeepStateTransition()
             } else if packages.isEmpty {
-                ContentUnavailableView("No packages to show", systemImage: "shippingbox",
+                WorkspaceEmptyState("No packages to show", systemImage: "shippingbox",
                     description: Text(store.homebrewPackages.isEmpty
                         ? "Check for updates to refresh your Homebrew inventory."
                         : "Try another filter to see your installed packages."))
@@ -23,8 +23,8 @@ struct HomebrewView: View {
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            WorkspaceSummary(title: WorkspaceSummary.count(packages.count, "Homebrew package", "Homebrew packages"),
-                detail: "Updates available in this view: \(packages.filter(\.isOutdated).count)",
+            WorkspaceSummary(title: "Homebrew",
+                detail: "\(WorkspaceSummary.count(packages.count, "package", "packages")) · \(WorkspaceSummary.count(packages.filter(\.isOutdated).count, "update", "updates")) available",
                 systemImage: "shippingbox")
         }
         .toolbar { packageToolbar }
@@ -278,7 +278,7 @@ struct PackageDetail: View {
                         Image(systemName: "shippingbox.fill").font(.system(size: 32)).foregroundStyle(.secondary)
                     } detail: {
                         Text(package.isOutdated ? "\(package.installedVersion) → \(package.currentVersion)" : package.installedVersion)
-                            .font(.title3.monospacedDigit()).foregroundStyle(package.isOutdated ? .blue : .secondary)
+                            .font(.callout.monospacedDigit()).foregroundStyle(package.isOutdated ? Color.accentColor : .secondary)
                         if let description = package.description { Text(description).foregroundStyle(.secondary) }
                         ItemCheckStatus(
                             isRefreshing: store.isRefreshing(package),
@@ -318,7 +318,7 @@ struct PackageDetail: View {
                 }
             }
         } else {
-            ContentUnavailableView("Select a package", systemImage: "shippingbox")
+            WorkspaceEmptyState("Select a package", systemImage: "shippingbox")
         }
     }
 
@@ -365,17 +365,17 @@ struct PackageDetail: View {
     }
 
     private func detailCard(_ package: HomebrewPackage) -> some View {
-        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
-            GridRow { label("Token"); Text(package.token).textSelection(.enabled) }
-            GridRow { label("Install Type"); Text(package.isDependency ? "\(package.kind.rawValue) · Dependency" : package.kind.rawValue) }
-            GridRow { label("Installed"); Text(package.installedVersion).monospacedDigit() }
-            GridRow { label("Latest"); Text(package.currentVersion).monospacedDigit() }
+        InspectorSection(title: "Package information") {
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 10) {
+                GridRow { label("Token"); Text(package.token).textSelection(.enabled) }
+                GridRow { label("Install Type"); Text(package.isDependency ? "\(package.kind.rawValue) · Dependency" : package.kind.rawValue) }
+                GridRow { label("Installed"); Text(package.installedVersion).monospacedDigit() }
+                GridRow { label("Latest"); Text(package.currentVersion).monospacedDigit() }
 
-            if let license = package.license { GridRow { label("License"); Text(license) } }
-            if let homepage = package.homepage { GridRow { label("Homepage"); Link(homepage.host() ?? homepage.absoluteString, destination: homepage) } }
+                if let license = package.license { GridRow { label("License"); Text(license) } }
+                if let homepage = package.homepage { GridRow { label("Homepage"); Link(homepage.host() ?? homepage.absoluteString, destination: homepage) } }
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-                .upkeepOutlinedInspectorCard()
     }
 
     private func versionSupport(_ package: HomebrewPackage) -> some View {

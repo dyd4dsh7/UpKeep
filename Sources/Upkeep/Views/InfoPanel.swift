@@ -3,6 +3,7 @@ import SwiftUI
 /// The single inspector layout for applications, packages, and models.
 struct InfoPanel<Header: View, Content: View>: View {
     @UpkeepStoreReference private var store
+    @Environment(\.colorScheme) private var scheme
     @ViewBuilder let header: Header
     @ViewBuilder let content: Content
 
@@ -30,6 +31,7 @@ struct InfoPanel<Header: View, Content: View>: View {
             }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(UpkeepLayout.pageInset)
+                .background(UpkeepPalette.surface(in: scheme))
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: UpkeepLayout.sectionSpacing) {
@@ -52,7 +54,9 @@ struct InfoPanelHeader<Icon: View, Detail: View>: View {
         HStack(alignment: .top, spacing: 12) {
             icon.frame(width: 44, height: 44)
             VStack(alignment: .leading, spacing: 6) {
-                Text(title).font(.title3.weight(.semibold)).lineLimit(2)
+                Text(title).font(.title2.weight(.semibold)).lineLimit(2)
+                    .tracking(-0.35)
+                    .accessibilityAddTraits(.isHeader)
                     .textSelection(.enabled)
                 detail.font(.callout)
             }

@@ -1,83 +1,94 @@
 import SwiftUI
 import UserNotifications
 
-private struct DiagnosticSnapshot {
-    let entries: [DiagnosticEntry]
-    let warningCount: Int
-    let errorCount: Int
-    let latestScanDuration: String
-
-    init(
-        entries: [DiagnosticEntry],
-        searchText: String,
-        levelFilter: DiagnosticLevelFilter,
-        categoryFilter: DiagnosticCategory?
-    ) {
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.entries = entries.filter { entry in
-            let matchesLevel = levelFilter.level.map { entry.level == $0 } ?? true
-            let matchesCategory = categoryFilter.map { entry.category == $0 } ?? true
-            guard matchesLevel && matchesCategory else { return false }
-            guard !query.isEmpty else { return true }
-            let searchable = ([entry.message, entry.category.rawValue]
-                + entry.metadata.flatMap { [$0.key, $0.value] })
-                .joined(separator: " ")
-            return searchable.localizedCaseInsensitiveContains(query)
-        }
-
-        let completionIndex = entries.firstIndex(where: {
-            $0.category == .scan && $0.message == "Update scan completed"
-        })
-        let latestScanEntries: ArraySlice<DiagnosticEntry>
-        if let completionIndex {
-            let remaining = entries[completionIndex...]
-            if let startIndex = remaining.firstIndex(where: {
-                $0.category == .scan && $0.message == "Update scan started"
-            }) {
-                latestScanEntries = entries[completionIndex...startIndex]
-            } else {
-                latestScanEntries = remaining
-            }
-        } else {
-            latestScanEntries = entries[...]
-        }
-        warningCount = latestScanEntries.count { $0.level == .warning }
-        errorCount = latestScanEntries.count { $0.level == .error }
-        let duration = completionIndex.flatMap { entries[$0].metadata["Duration"] } ?? "—"
-        latestScanDuration = diagnosticDisplayValue(duration, key: "Duration")
-    }
-}
-
 struct SettingsView: View {
     @EnvironmentObject private var settings: AppSettings
     @UpkeepStoreReference private var store
 
     var body: some View {
-        TabView(selection: $settings.selectedSection) {
-            ForEach(visibleSettingsSections) { section in
-                settingsContent(for: section)
-                    .tabItem {
-                        Label(section.rawValue, systemImage: icon(for: section))
-                    }
-                    .tag(section)
+        HStack(spacing: 0) {
+            settingsNavigation
+                .frame(width: 186)
+            Divider()
+            VStack(spacing: 0) {
+                WorkspaceSummary(
+                    title: settings.selectedSection.rawValue,
+                    detail: description(for: settings.selectedSection),
+                    systemImage: icon(for: settings.selectedSection)
+                )
+                settingsContent(for: settings.selectedSection)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .id(settings.selectedSection)
             }
         }
-        .frame(width: 860, height: 620)
-        .upkeepAnimated(for: visibleSettingsSections)
-        .onChange(of: settings.sidebarViewMode) { _, mode in
-            if mode == .basic, settings.selectedSection.requiresAdvancedView {
+        .frame(width: 830, height: 600)
+        .upkeepWorkspaceAppearance()
+        .onChange(of: visibleSettingsSections, initial: true) { _, sections in
+            if !sections.contains(settings.selectedSection) {
                 settings.selectedSection = .general
             }
         }
-        .alert("Include prerelease updates?", isPresented: $settings.confirmingPrereleaseUpdates) {
+        .alert("Check for prerelease updates?", isPresented: $settings.confirmingPrereleaseUpdates) {
             Button("Cancel", role: .cancel) {}
             Button("Include Prereleases", role: .destructive) {
                 settings.includePrereleaseUpdates = true
                 Task { await store.scan() }
             }
         } message: {
-            Text("Alpha, beta, preview, release-candidate, nightly, and other non-stable software may be unreliable, incompatible, or cause data loss. UpKeep will check every enabled app and package source for these releases.")
+            Text("Upkeep will look for beta, preview, and other prerelease builds across enabled sources. These builds can be unstable and may cause data loss.")
         }
+    }
+
+    private var settingsNavigation: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            WorkspaceSectionLabel(title: "Settings")
+                .padding(.horizontal, 13)
+                .padding(.top, 16)
+            List(selection: settingsSelection) {
+                Section {
+                    ForEach(visibleSettingsSections.filter { [.general, .sources, .developer, .ignored].contains($0) }) {
+                        settingsLink($0)
+                    }
+                } header: {
+                    WorkspaceSectionLabel(title: "Preferences")
+                }
+                Section {
+                    ForEach(visibleSettingsSections.filter { [.diagnostics, .changelog, .about].contains($0) }) {
+                        settingsLink($0)
+                    }
+                } header: {
+                    WorkspaceSectionLabel(title: "App & support")
+                }
+            }
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            .accessibilityLabel("Settings sections")
+        }
+        .padding(.horizontal, 8)
+        .background(.regularMaterial)
+    }
+
+    private func settingsLink(_ section: SettingsSection) -> some View {
+        Label(section.rawValue, systemImage: icon(for: section))
+            .tag(section)
+    }
+
+    private func description(for section: SettingsSection) -> String {
+        switch section {
+        case .general: "Navigation, appearance, and automatic checks."
+        case .sources: "Choose where Upkeep looks for releases."
+        case .developer: "Choose which package managers Upkeep checks."
+        case .ignored: "Manage skipped versions and ignored software."
+        case .diagnostics: "Inspect update checks and export the local log."
+        case .changelog: "Browse release notes by version."
+        case .about: versionText
+        }
+    }
+
+    private var settingsSelection: Binding<SettingsSection?> {
+        Binding(get: { settings.selectedSection }, set: { section in
+            if let section { settings.selectedSection = section }
+        })
     }
 
     @ViewBuilder private func settingsContent(for section: SettingsSection) -> some View {
@@ -85,7 +96,7 @@ struct SettingsView: View {
         case .general: general
         case .sources: sources
         case .developer: developer
-        case .diagnostics: diagnostics
+        case .diagnostics: DiagnosticsSettingsView()
         case .changelog: changelog
         case .ignored: ignored
         case .about: about
@@ -95,18 +106,22 @@ struct SettingsView: View {
     private var general: some View {
         Form {
             Section {
-                Picker("Navigation", selection: $settings.sidebarViewMode) {
-                    ForEach(SidebarViewMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
+                SettingsOptionRow(title: "Navigation", systemImage: "sidebar.left") {
+                    Picker("Navigation", selection: $settings.sidebarViewMode) {
+                        ForEach(SidebarViewMode.allCases) { Text($0.title).tag($0) }
                     }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: 190)
                 }
-                .pickerStyle(.segmented)
-                Picker("List density", selection: $settings.listDensity) {
-                    ForEach(ListDensity.allCases) { density in
-                        Text(density.title).tag(density)
+                SettingsOptionRow(title: "List density", systemImage: "line.3.horizontal") {
+                    Picker("List density", selection: $settings.listDensity) {
+                        ForEach(ListDensity.allCases) { Text($0.title).tag($0) }
                     }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: 190)
                 }
-                .pickerStyle(.segmented)
             } header: {
                 Text("Appearance")
             } footer: {
@@ -217,12 +232,16 @@ struct SettingsView: View {
                     "sparkles", $settings.checkSparkle
                 )
                 sourceToggle(
-                    "Homebrew", "Installed apps and requested packages.",
-                    "shippingbox", $settings.checkHomebrew
-                )
-                sourceToggle(
                     "GitHub Releases", "Releases for apps linked to GitHub.",
                     "chevron.left.forwardslash.chevron.right", $settings.checkGitHub
+                )
+            } header: {
+                Text("Application Sources")
+            }
+            Section {
+                sourceToggle(
+                    "Homebrew", "Installed apps and requested packages.",
+                    "shippingbox", $settings.checkHomebrew
                 )
                 if settings.sidebarViewMode == .advanced {
                     sourceToggle(
@@ -230,8 +249,15 @@ struct SettingsView: View {
                         "brain.head.profile", $settings.checkLocalModels
                     )
                 }
+                sourceToggle(
+                    "macOS updates",
+                    settings.sidebarViewMode == .advanced
+                        ? "Software updates and full installers."
+                        : "Stable software updates.",
+                    "apple.logo", $settings.checkMacOS
+                )
             } header: {
-                Text("Application Sources")
+                Text("System and Package Sources")
             }
             if settings.sidebarViewMode == .advanced {
                 Section {
@@ -263,7 +289,6 @@ struct SettingsView: View {
                     Text("Prerelease Updates")
                 }
             }
-            SourceHealthView(settings: settings)
             if settings.checkHomebrew {
                 Section {
                     SettingsOptionRow(
@@ -302,23 +327,13 @@ struct SettingsView: View {
                     Text("macOS App Management controls whether Upkeep can update or delete other apps. The check opens one eligible app file for modification but does not write, truncate, or change it.")
                 }
             }
-            Section {
-                sourceToggle(
-                    "macOS updates",
-                    settings.sidebarViewMode == .advanced
-                        ? "Software updates and full installers."
-                        : "Stable software updates.",
-                    "apple.logo", $settings.checkMacOS
-                )
-            } header: {
-                Text("macOS")
-            }
+            SourceHealthView(settings: settings)
         }
         .formStyle(.grouped)
     }
 
     private var changelog: some View {
-        ChangelogView(compact: true)
+        ChangelogView()
     }
 
     private var visibleSettingsSections: [SettingsSection] {
@@ -327,110 +342,55 @@ struct SettingsView: View {
         }
     }
 
-    private var diagnostics: some View {
-        let snapshot = DiagnosticSnapshot(
-            entries: store.diagnosticEntries,
-            searchText: store.diagnosticsSearchText,
-            levelFilter: store.diagnosticsLevelFilter,
-            categoryFilter: store.diagnosticsCategoryFilter
-        )
-        return VStack(spacing: 0) {
-            Form {
-                Section("Latest Activity") {
-                    Grid(alignment: .leading, horizontalSpacing: 28, verticalSpacing: 8) {
-                        GridRow {
-                            diagnosticSummary("Entries", "\(store.diagnosticEntries.count)", "list.bullet.rectangle")
-                            diagnosticSummary("Warnings", "\(snapshot.warningCount)", "exclamationmark.triangle.fill")
-                        }
-                        GridRow {
-                            diagnosticSummary("Errors", "\(snapshot.errorCount)", "xmark.octagon.fill")
-                            diagnosticSummary("Latest scan", snapshot.latestScanDuration, "clock")
-                        }
-                    }
-                }
-                Section("Filter") {
-                    TextField("Search diagnostics", text: $store.diagnostics.diagnosticsSearchText)
-                        .textFieldStyle(.roundedBorder)
-                    HStack {
-                        Picker("Level", selection: $store.diagnostics.diagnosticsLevelFilter) {
-                            ForEach(DiagnosticLevelFilter.allCases) { Text($0.title).tag($0) }
-                        }
-                        Picker("Category", selection: $store.diagnostics.diagnosticsCategoryFilter) {
-                            Text("All Categories").tag(nil as DiagnosticCategory?)
-                            ForEach(DiagnosticCategory.allCases) { category in
-                                Label(category.shortTitle, systemImage: category.systemImage)
-                                    .tag(Optional(category))
-                            }
-                        }
-                    }
-                }
-            }
-            .formStyle(.grouped)
-            .frame(height: 255)
-
-            HStack(spacing: 8) {
-                Label("Private paths and secrets are redacted", systemImage: "hand.raised")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button { store.refreshDiagnostics() } label: {
-                    Label("Reload", systemImage: "arrow.clockwise")
-                }
-                Button { store.exportDiagnostics() } label: {
-                    Label("Export…", systemImage: "square.and.arrow.up")
-                }
-                Button("Clear", role: .destructive) { store.clearDiagnostics() }
-                    .disabled(store.diagnosticEntries.isEmpty)
-            }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 10)
-
-            if snapshot.entries.isEmpty {
-                ContentUnavailableView(
-                    store.diagnosticsSearchText.isEmpty ? "No diagnostics yet" : "No matching diagnostics",
-                    systemImage: "stethoscope",
-                    description: Text(store.diagnosticsSearchText.isEmpty ? "Run an update check to populate this log." : "Try a different search or level.")
-                )
-            } else {
-                List(snapshot.entries) { entry in
-                    DiagnosticRow(entry: entry)
-                }
-                .listStyle(.inset)
-            }
-        }
-        .onAppear { store.refreshDiagnostics() }
-    }
-
     private var ignored: some View {
-        Group {
-            if settings.updateExclusions.isEmpty {
-                ContentUnavailableView(
+        let ignored = settings.updateExclusions.filter { $0.mode == .ignored }
+        let skipped = settings.updateExclusions.filter { $0.mode == .skipped }
+        return Group {
+            if ignored.isEmpty && skipped.isEmpty {
+                WorkspaceEmptyState(
                     "Nothing skipped or ignored", systemImage: "eye",
-                    description: Text("Use the More menu beside an update to skip one version or ignore future updates.")
+                    description: Text("Use an update’s options to skip a version or ignore future releases.")
                 )
             } else {
                 VStack(spacing: 0) {
                     HStack {
-                        Text("Skipped versions return automatically when a newer version is released.")
-                            .font(.callout).foregroundStyle(.secondary)
+                        Text(WorkspaceSummary.count(settings.updateExclusions.count, "exclusion", "exclusions"))
+                            .font(.callout.weight(.medium))
                         Spacer()
-                        Button("Restore All") { store.restoreAllExclusions() }
-                    }.padding(.horizontal, 10).padding(.bottom, 10)
-                    List(settings.updateExclusions) { exclusion in
-                        StandardItemRow {
-                            Image(systemName: exclusion.mode == .ignored ? "eye.slash.fill" : "forward.end.fill")
-                                .foregroundStyle(exclusion.mode == .ignored ? .orange : .blue)
-                        } content: {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(exclusion.name).fontWeight(.semibold).lineLimit(1)
-                                Text(exclusionDescription(exclusion))
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                        } accessories: {
-                            Button("Restore") { store.restore(exclusion) }.buttonStyle(.bordered).controlSize(.small)
+                        Button("Restore All Updates", systemImage: "arrow.uturn.backward") {
+                            store.restoreAllExclusions()
                         }
-                    }.listStyle(.inset)
+                    }
+                    .padding(.horizontal, UpkeepLayout.pageInset)
+                    .padding(.vertical, 12)
+                    Divider()
+                    List {
+                        exclusionSection("Skipped versions", items: skipped)
+                        exclusionSection("Ignored software", items: ignored)
+                    }
+                    .upkeepContentList()
                 }
+            }
+        }
+    }
+
+    @ViewBuilder private func exclusionSection(_ title: String, items: [UpdateExclusion]) -> some View {
+        if !items.isEmpty {
+            Section {
+                ForEach(items) { exclusion in
+                    StandardItemRow {
+                        WorkspaceGlyph(systemImage: exclusion.mode == .ignored ? "eye.slash" : "forward.end", size: 34)
+                    } content: {
+                        ItemIdentityView(title: exclusion.name, detail: exclusionDescription(exclusion))
+                    } accessories: {
+                        Button("Restore") { store.restore(exclusion) }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .accessibilityLabel("Restore updates for \(exclusion.name)")
+                    }
+                }
+            } header: {
+                WorkspaceSectionLabel(title: title, count: items.count)
             }
         }
     }
@@ -447,12 +407,33 @@ struct SettingsView: View {
         return "\(exclusion.category) · \(behavior) until \(expiresAt.formatted(date: .abbreviated, time: .shortened))"
     }
 
+    @UpkeepState private var managerSearch = ""
+
     private var developer: some View {
-        Form {
+        let query = managerSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        let managers = DeveloperPackageManager.allCases.filter { query.isEmpty || $0.rawValue.localizedCaseInsensitiveContains(query) }
+        let detected = Set(store.installedDeveloperManagers)
+        return Form {
+            Section("Inventory") {
+                SettingsOptionRow(
+                    title: "Show current packages",
+                    detail: "Include packages that don’t need updates.",
+                    systemImage: "checkmark.circle"
+                ) {
+                    Toggle("Show current packages", isOn: $settings.showCurrentDeveloperPackages)
+                        .labelsHidden()
+                }
+            }
             Section("Package Managers") {
-                ForEach(DeveloperPackageManager.allCases) { manager in
+                TextField("Find a package manager", text: $managerSearch)
+                    .textFieldStyle(.roundedBorder)
+                if managers.isEmpty {
+                    Text("No managers match your search.").foregroundStyle(.secondary)
+                }
+                ForEach(managers) { manager in
                     DeveloperManagerSettingsRow(
                         manager: manager,
+                        detected: detected.contains(manager),
                         isEnabled: Binding(
                             get: { settings.isManagerEnabled(manager) },
                             set: { settings.setManager(manager, enabled: $0) }
@@ -460,38 +441,35 @@ struct SettingsView: View {
                     )
                 }
             }
-            Section {
-                SettingsOptionRow(
-                    title: "Show packages that are already current",
-                    systemImage: "checkmark.circle"
-                ) {
-                    Toggle("Show current packages", isOn: $settings.showCurrentDeveloperPackages)
-                        .labelsHidden()
-                }
-            } header: {
-                Text("Display and Versions")
-            } footer: {
-                Text("Prerelease package versions are controlled by the global option in Sources.")
-            }
         }
         .formStyle(.grouped)
     }
 
     private var about: some View {
-        VStack(spacing: 14) {
-            AppBrandIcon(size: 104)
-            Text("Upkeep").font(.largeTitle.weight(.semibold))
-            Text(versionText).foregroundStyle(.secondary)
-            Text("Every app, package, and system update in one native macOS workspace.")
-                .multilineTextAlignment(.center).foregroundStyle(.secondary).frame(maxWidth: 390)
-            Divider().frame(width: 220).padding(.vertical, 4)
-            VStack(spacing: 5) {
-                Text("Developed by Hayden Thorn")
-                Link("haydenthorn.com", destination: URL(string: "https://haydenthorn.com")!)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                HStack(alignment: .center, spacing: 17) {
+                    AppBrandIcon(size: 76)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Upkeep")
+                            .font(.title.weight(.semibold))
+                        Text("Manage updates for apps, packages, AI models, and macOS.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Divider()
+                LabeledContent("Developer") {
+                    VStack(alignment: .trailing, spacing: 5) {
+                        Text("Hayden Thorn")
+                        Link("haydenthorn.com", destination: URL(string: "https://haydenthorn.com")!)
+                    }
+                }
             }
-            .font(.callout)
-            Spacer()
-        }.padding(.top, 28)
+            .padding(22)
+            .upkeepSurface()
+            .padding(UpkeepLayout.pageInset)
+        }
     }
 
     private var versionText: String {
@@ -581,18 +559,6 @@ struct SettingsView: View {
         }
     }
 
-    private func diagnosticSummary(_ title: String, _ value: String, _ systemImage: String) -> some View {
-        LabeledContent {
-            Text(value)
-                .fontWeight(.semibold)
-                .monospacedDigit()
-        } label: {
-            Label(title, systemImage: systemImage)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
     private func sourceToggle(
         _ title: String,
         _ detail: String,
@@ -655,110 +621,23 @@ private struct SettingsOptionRow<Control: View>: View {
 
 private struct DeveloperManagerSettingsRow: View {
     let manager: DeveloperPackageManager
+    let detected: Bool
     @Binding var isEnabled: Bool
 
     var body: some View {
         HStack(spacing: 12) {
             PackageManagerIcon(manager: manager, size: 30)
                 .frame(width: 30, height: 30)
-            Text(manager.rawValue)
-                .fontWeight(.medium)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(manager.rawValue).fontWeight(.medium)
+                if detected {
+                    Text("Detected in inventory").font(.caption).foregroundStyle(.secondary)
+                }
+            }
             Spacer(minLength: 16)
             Toggle(manager.rawValue, isOn: $isEnabled)
                 .labelsHidden()
         }
         .padding(.vertical, 4)
     }
-}
-
-private struct DiagnosticRow: View {
-    let entry: DiagnosticEntry
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 11) {
-            Image(systemName: icon)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(color)
-                .frame(width: 22, height: 22)
-
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(entry.message).fontWeight(.semibold)
-                    Label(entry.category.shortTitle, systemImage: entry.category.systemImage)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .labelStyle(.titleAndIcon)
-                    Spacer()
-                    Text(entry.date, format: .dateTime.hour().minute().second())
-                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                }
-                if !entry.metadata.isEmpty {
-                    LazyVGrid(
-                        columns: [GridItem(.adaptive(minimum: 160), spacing: 9, alignment: .leading)],
-                        alignment: .leading,
-                        spacing: 9
-                    ) {
-                        ForEach(orderedMetadata, id: \.key) { pair in
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(pair.key)
-                                    .font(.caption2.weight(.semibold))
-                                    .foregroundStyle(.tertiary)
-                                Text(diagnosticDisplayValue(pair.value, key: pair.key))
-                                    .font(.caption.monospaced())
-                                    .foregroundStyle(pair.key == "Error" ? .red : .secondary)
-                                    .lineLimit(3)
-                                    .textSelection(.enabled)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                }
-            }
-        }
-        .padding(.vertical, 6)
-    }
-
-    private var orderedMetadata: [(key: String, value: String)] {
-        let priority = [
-            "Item", "Source", "Result", "Installed", "Available", "From", "To",
-            "Duration", "Warnings", "Error", "Command", "Output"
-        ]
-        return entry.metadata.sorted { left, right in
-            let leftIndex = priority.firstIndex(of: left.key) ?? priority.count
-            let rightIndex = priority.firstIndex(of: right.key) ?? priority.count
-            if leftIndex != rightIndex { return leftIndex < rightIndex }
-            return left.key.localizedStandardCompare(right.key) == .orderedAscending
-        }
-    }
-
-    private var icon: String {
-        switch entry.level {
-        case .info: "info.circle.fill"
-        case .warning: "exclamationmark.triangle.fill"
-        case .error: "xmark.octagon.fill"
-        }
-    }
-
-    private var color: Color {
-        switch entry.level {
-        case .info: .blue
-        case .warning: .orange
-        case .error: .red
-        }
-    }
-}
-
-private func diagnosticDisplayValue(_ value: String, key: String) -> String {
-    if key == "Duration",
-       value.hasSuffix(" ms"),
-       let milliseconds = Double(value.dropLast(3)),
-       milliseconds >= 1_000 {
-        return String(format: "%.1f s", milliseconds / 1_000)
-    }
-    if value == "true" { return "Enabled" }
-    if value == "false" { return "Disabled" }
-    if value == "completed" { return "Completed" }
-    if value == "disabled" { return "Disabled" }
-    if value == "failed" { return "Failed" }
-    return value
 }

@@ -1,40 +1,106 @@
 import SwiftUI
 
 struct ChangelogView: View {
-    var compact = false
+    @UpkeepState private var searchText = ""
+    @UpkeepState private var expandedVersions = Set(UpkeepRelease.all.prefix(1).map(\.id))
+
+    private var query: String { searchText.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
-        VStack(spacing: 0) {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 18) {
-                    ForEach(UpkeepRelease.all) { release in
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack(alignment: .firstTextBaseline) {
-                                Text("Upkeep \(release.version)").font(.title2.bold())
-                                if release.version == UpkeepRelease.all.first?.version {
-                                    Text(release.isUnreleased ? "UNRELEASED" : "CURRENT")
-                                        .font(.caption2.bold()).foregroundStyle(.blue)
-                                        .padding(.horizontal, 7).padding(.vertical, 3)
-                                        .background(.blue.opacity(0.12), in: Capsule())
-                                }
-                                Spacer()
-                                Text(release.date).foregroundStyle(.secondary)
-                            }
-                            ForEach(release.changes, id: \.self) { change in
-                                HStack(alignment: .top, spacing: 10) {
-                                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).padding(.top, 2)
-                                    Text(change).frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                            }
-                        }
-                        .padding(20)
-                        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 14))
-                    }
-                }
-                .padding(compact ? 8 : 24).frame(maxWidth: 850)
-            }
-            .frame(maxWidth: .infinity)
+        let matches = UpkeepRelease.all.compactMap { release -> (release: UpkeepRelease, changes: [String])? in
+            let changes = matchingChanges(release)
+            return changes.isEmpty ? nil : (release, changes)
         }
+
+        VStack(spacing: 0) {
+            HStack {
+                TextField("Search versions or release notes", text: $searchText)
+                    .textFieldStyle(.roundedBorder)
+                if !query.isEmpty {
+                    Button("Clear Search") { searchText = "" }
+                }
+            }
+            .padding(.horizontal, UpkeepLayout.pageInset)
+            .padding(.vertical, 12)
+            Divider()
+
+            if matches.isEmpty {
+                WorkspaceEmptyState("No matching releases", systemImage: "list.bullet.rectangle",
+                    description: Text("Try a version number or a word from the release notes."))
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 10) {
+                        ForEach(matches, id: \.release.id) { match in
+                            releaseCard(match.release, changes: match.changes)
+                        }
+                    }
+                    .padding(UpkeepLayout.pageInset)
+                }
+            }
+        }
+    }
+
+    private func matchingChanges(_ release: UpkeepRelease) -> [String] {
+        if query.isEmpty || release.version.localizedCaseInsensitiveContains(query)
+            || release.date.localizedCaseInsensitiveContains(query) {
+            return release.changes
+        }
+        return release.changes.filter { $0.localizedCaseInsensitiveContains(query) }
+    }
+
+    private func releaseCard(_ release: UpkeepRelease, changes: [String]) -> some View {
+        Group {
+            if query.isEmpty {
+                DisclosureGroup(isExpanded: expansion(for: release.id)) {
+                    changeList(changes)
+                } label: {
+                    releaseHeading(release)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    releaseHeading(release)
+                    changeList(changes)
+                }
+            }
+        }
+        .padding(14)
+        .upkeepSurface()
+    }
+
+    private func expansion(for version: String) -> Binding<Bool> {
+        Binding(
+            get: { expandedVersions.contains(version) },
+            set: { expanded in
+                if expanded { expandedVersions.insert(version) }
+                else { expandedVersions.remove(version) }
+            }
+        )
+    }
+
+    private func releaseHeading(_ release: UpkeepRelease) -> some View {
+        HStack(spacing: 9) {
+            Text(release.isUnreleased ? "Unreleased" : release.version)
+                .font(.headline.monospacedDigit())
+                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 8)
+            Text(release.date).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func changeList(_ changes: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Divider()
+            ForEach(changes.indices, id: \.self) { index in
+                HStack(alignment: .firstTextBaseline, spacing: 9) {
+                    Image(systemName: "circle.fill")
+                        .font(.system(size: 5))
+                        .foregroundStyle(.tint)
+                        .accessibilityHidden(true)
+                    Text(changes[index]).font(.callout)
+                }
+            }
+        }
+        .padding(.top, 10)
     }
 }
 

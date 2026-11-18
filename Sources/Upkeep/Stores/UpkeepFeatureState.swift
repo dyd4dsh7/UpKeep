@@ -203,6 +203,8 @@ final class UpkeepNavigationState: ObservableObject {
     var isLoadingDeveloperVersions = false { willSet { objectWillChange.send() } }
     var selectedApp: InstalledApp? { willSet { objectWillChange.send() } }
     var updateInspectorSelection: UpdateInspectorSelection? { willSet { objectWillChange.send() } }
+    var requestedSearchResult: SearchResultSelection? { willSet { objectWillChange.send() } }
+    var inventoryReveal: InventoryReveal? { willSet { objectWillChange.send() } }
     var searchText = "" { willSet { objectWillChange.send() } }
     var pendingRevert: UpdateRecord? { willSet { objectWillChange.send() } }
     var pendingRunningAppConfirmation: RunningAppConfirmation? { willSet { objectWillChange.send() } }

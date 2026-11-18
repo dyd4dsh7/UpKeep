@@ -1,35 +1,46 @@
 import SwiftUI
 
-/// Shared orientation for inventory screens, including filtered and empty lists.
-struct WorkspaceSummary: View {
+/// Shared heading for workspaces, sheets, and settings pages.
+struct WorkspaceSummary<Accessory: View>: View {
+    @Environment(\.colorScheme) private var scheme
     let title: String
     let detail: String
-    var systemImage: String
-
-    static func count(_ value: Int, _ singular: String, _ plural: String) -> String {
-        "\(value) \(value == 1 ? singular : plural)"
-    }
+    let systemImage: String
+    @ViewBuilder var accessory: Accessory
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .center, spacing: 12) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 20, weight: .regular))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 28)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title).font(.headline)
-                        .accessibilityAddTraits(.isHeader)
-                    Text(detail).font(.callout).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+        HStack(spacing: 14) {
+            WorkspaceGlyph(systemImage: systemImage, size: 46)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.system(size: 27, weight: .semibold))
+                    .tracking(-0.85)
+                    .accessibilityAddTraits(.isHeader)
+                if !detail.isEmpty {
+                    Text(detail)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .help(detail)
                 }
-                Spacer(minLength: 0)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, UpkeepLayout.pageInset)
-            .padding(.vertical, 14)
-            Divider()
+            Spacer(minLength: 0)
+            accessory.fixedSize()
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, UpkeepLayout.pageInset)
+        .padding(.vertical, 19)
+        .background(UpkeepPalette.canvas(in: scheme))
+        .overlay(alignment: .bottom) { Divider() }
+    }
+}
+
+extension WorkspaceSummary where Accessory == EmptyView {
+    init(title: String, detail: String, systemImage: String) {
+        self.init(title: title, detail: detail, systemImage: systemImage, accessory: { EmptyView() })
+    }
+
+    static func count(_ value: Int, _ singular: String, _ plural: String) -> String {
+        "\(value.formatted()) \(value == 1 ? singular : plural)"
     }
 }

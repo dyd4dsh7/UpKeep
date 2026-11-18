@@ -64,6 +64,35 @@ final class UpkeepStore: ObservableObject {
     let settings: AppSettings
     private let dependencies: UpkeepDependencies
 
+    // Shared update routines record errors for single-item alerts. A batch item
+    // reads the same information into its result without publishing a second
+    // alert or overwriting an unrelated operation's error.
+    @MainActor
+    private final class BatchItemError {
+        let owner: ObjectIdentifier
+        var message: String?
+
+        init(owner: UpkeepStore) {
+            self.owner = ObjectIdentifier(owner)
+        }
+    }
+
+    @TaskLocal private static var batchItemError: BatchItemError?
+
+    var errorMessage: String? {
+        get {
+            if let item = Self.batchItemError, item.owner == ObjectIdentifier(self) { return item.message }
+            return scanState.errorMessage
+        }
+        set {
+            if let item = Self.batchItemError, item.owner == ObjectIdentifier(self) {
+                item.message = newValue
+            } else {
+                scanState.errorMessage = newValue
+            }
+        }
+    }
+
     func scanHomebrewServices() async {
         guard !library.isCheckingHomebrewServices else { return }
         library.isCheckingHomebrewServices = true
@@ -513,40 +542,69 @@ final class UpkeepStore: ObservableObject {
 
     func waitForAutomaticCVECheck() async { await automaticCVETask?.value }
 
+    var showsDeveloperInventory: Bool {
+        settings.sidebarViewMode == .advanced
+            && installedDeveloperManagers.contains(where: settings.enabledDeveloperManagers.contains)
+    }
+
     private var pendingCVESoftware: CVEInventoryItem?
 
     func showCVESoftware(_ item: CVEInventoryItem) {
-        pendingCVESoftware = item
-        navigation.searchText = ""
-        if item.id.hasPrefix("app|") {
-            navigation.selection = .allApps
-        } else if item.id.hasPrefix("brew|") {
-            homebrewFilter = .all
-            navigation.selection = .homebrewPackages
+        if let id = item.id.removingPrefix("brew|"), !settings.checkHomebrew {
+            showSoftwareInSearch(named: item.name, result: .homebrew(id))
+        } else if let id = item.id.removingPrefix("developer|"), !showsDeveloperInventory {
+            showSoftwareInSearch(named: item.name, result: .developer(id))
         } else {
-            developerManagerFilter = .all
-            settings.showCurrentDeveloperPackages = true
-            navigation.selection = .developerPackages
+            pendingCVESoftware = item
+            navigation.searchText = ""
+            if item.id.hasPrefix("app|") {
+                navigation.selection = .allApps
+                appListFilter = .all
+            } else if item.id.hasPrefix("brew|") {
+                navigation.selection = .homebrewPackages
+                homebrewFilter = .all
+            } else {
+                navigation.selection = .developerPackages
+                developerManagerFilter = .all
+                settings.showCurrentDeveloperPackages = true
+            }
         }
+    }
+
+    private func showSoftwareInSearch(named name: String, result: SearchResultSelection) {
+        selectedApp = nil
+        updateInspectorSelection = nil
+        navigation.searchText = name
+        navigation.requestedSearchResult = result
     }
 
     /// Apply focus after the destination change clears the previous inspector selection.
     func completeCVESoftwareNavigation() {
         guard let item = pendingCVESoftware else { return }
         pendingCVESoftware = nil
-        if navigation.selection == .allApps {
-            selectedApp = apps.first { "app|\($0.id)" == item.id }
-        } else if navigation.selection == .homebrewPackages {
-            selectedPackageID = homebrewPackages.first { "brew|\($0.id)" == item.id }?.id
-        } else if navigation.selection == .developerPackages {
-            selectedDeveloperPackageID = developerPackages.first { "developer|\($0.id)" == item.id }?.id
+        if navigation.selection == .allApps, let id = item.id.removingPrefix("app|") {
+            selectedApp = app(forID: id)
+        } else if navigation.selection == .homebrewPackages, let id = item.id.removingPrefix("brew|") {
+            selectedPackageID = homebrewPackage(forID: id)?.id
+        } else if navigation.selection == .developerPackages, let id = item.id.removingPrefix("developer|") {
+            selectedDeveloperPackageID = developerPackage(forID: id)?.id
         }
     }
 
     func showCVEInfo(for item: CVEInventoryItem) {
+        selectedApp = nil
+        updateInspectorSelection = nil
+        navigation.searchText = ""
         cveScanState.filter = .all
         cveScanState.searchText = item.name
+        cveScanState.requestedItemID = item.id
         navigation.selection = .cveChecker
+    }
+
+    func revealInventoryResult(_ result: InventoryReveal) {
+        navigation.inventoryReveal = result
+        navigation.searchText = ""
+        navigation.selection = result.destination
     }
 
     private func publishScanProgress(_ event: ScanProgressEvent, generation: UUID, revision: UInt64, started: Date) {
@@ -2032,7 +2090,6 @@ final class UpkeepStore: ObservableObject {
         let batchID = OperationID.unifiedBatch
         guard !items.isEmpty, !isWorking(batchID) else { return BatchUpdateSummary(results: []) }
         updateExecutionState.activeOperations.insert(batchID)
-        errorMessage = nil
         defer {
             updateExecutionState.activeOperations.remove(batchID)
             batchUpdateProgress = nil
@@ -2064,7 +2121,9 @@ final class UpkeepStore: ObservableObject {
                 ))
                 continue
             }
-            let result = await performBatchItem(item)
+            let result = await Self.$batchItemError.withValue(BatchItemError(owner: self)) {
+                await performBatchItem(item)
+            }
             results.append(result)
             if result.outcome == .updated {
                 setUpdatePhase(.queued, for: item.updateOperationID)
@@ -2838,5 +2897,12 @@ final class UpkeepStore: ObservableObject {
         if scanWarnings.contains(where: { $0.source == .homebrew }) {
             errorMessage = "Homebrew completed the update for \(name), but Upkeep could not fully refresh Homebrew data. Review Diagnostics and refresh again."
         }
+    }
+}
+
+private extension String {
+    func removingPrefix(_ prefix: String) -> String? {
+        guard hasPrefix(prefix) else { return nil }
+        return String(dropFirst(prefix.count))
     }
 }

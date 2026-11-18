@@ -33,6 +33,7 @@ struct AppleSiliconMigrationWarning: View {
 struct AppleSiliconMigrationView: View {
     @UpkeepStoreReference private var store
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var scheme
     @StateObject private var state = AppleSiliconMigrationState()
     let app: InstalledApp
 
@@ -41,42 +42,44 @@ struct AppleSiliconMigrationView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 12) {
-                AppIcon(url: app.url, size: 42)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Move to Apple Silicon").font(.title2.weight(.semibold))
-                    Text(app.name).foregroundStyle(.secondary)
-                }
-                Spacer()
+        VStack(spacing: 0) {
+            WorkspaceSummary(title: "Move to Apple Silicon", detail: app.name, systemImage: "cpu") {
+                AppIcon(url: app.url, size: 38)
+                    .accessibilityHidden(true)
             }
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    step("1. Find a native edition", text: sourceInstructions)
-                    sourceButton
-                    if state.openingFailed {
-                        Text("The source could not be opened. Try again or visit the developer’s website directly.")
-                            .font(.callout).foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 16) {
+                    step("1. Find a native edition", text: sourceInstructions) {
+                        sourceButton
+                        if state.openingFailed {
+                            Label("The source could not be opened. Try the developer’s website.", systemImage: "exclamationmark.triangle")
+                                .font(.callout)
+                                .foregroundStyle(UpkeepColors.warning(in: scheme))
+                        }
                     }
-                    step("2. Install the replacement", text: installInstructions)
-                    Text(app.url.path)
-                        .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-                    Button("Show Installed App in Finder") {
-                        NSWorkspace.shared.activateFileViewerSelecting([app.url])
+                    step("2. Install the replacement", text: installInstructions) {
+                        Text(app.url.path)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                        Button("Show Installed App in Finder", systemImage: "folder") {
+                            NSWorkspace.shared.activateFileViewerSelecting([app.url])
+                        }
                     }
-                    step("3. Verify Apple Silicon support", text: "Return here after installation. Upkeep checks the installed executable, even if the version number has not changed.")
-                    if let verification = state.verification {
-                        Label(verification.message, systemImage: verification == .native ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                            .foregroundStyle(verification == .native ? Color.green : Color.orange)
-                            .font(.callout)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("appleSiliconVerification")
+                    step("3. Verify Apple Silicon support", text: "After installation, check the replacement app. Upkeep verifies its executable even when the version number stays the same.") {
+                        if let verification = state.verification {
+                            Label(verification.message, systemImage: verification == .native ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                .foregroundStyle(verification == .native ? UpkeepPalette.accent(in: scheme) : UpkeepColors.warning(in: scheme))
+                                .font(.callout.weight(.medium))
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("appleSiliconVerification")
+                        }
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(UpkeepLayout.pageInset)
             }
-            Divider()
-            HStack {
+
+            WorkspaceDialogFooter {
                 Button(state.verification == .native ? "Done" : "Close") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Spacer()
@@ -93,15 +96,17 @@ struct AppleSiliconMigrationView: View {
                 .disabled(state.isChecking)
             }
         }
-        .padding(24)
-        .frame(width: 510, height: 570)
+        .frame(width: 540, height: 500)
+        .upkeepWorkspaceAppearance()
     }
 
-    private func step(_ title: String, text: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.headline)
-            Text(text).font(.callout).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+    private func step<Actions: View>(_ title: String, text: String, @ViewBuilder actions: () -> Actions) -> some View {
+        InspectorSection(title: title) {
+            VStack(alignment: .leading, spacing: 9) {
+                Text(text).font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                actions()
+            }
         }
     }
 

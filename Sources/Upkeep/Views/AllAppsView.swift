@@ -94,8 +94,8 @@ struct AllAppsView: View {
         }
         .upkeepAnimated(for: visibleApps.map(\.id))
         .safeAreaInset(edge: .top, spacing: 0) {
-            WorkspaceSummary(title: WorkspaceSummary.count(visibleApps.count, "application", "applications"),
-                detail: "Updates available in this view: \(visibleApps.filter { store.visibleUpdate(for: $0) != nil }.count)",
+            WorkspaceSummary(title: title,
+                detail: "\(WorkspaceSummary.count(visibleApps.count, "application", "applications")) · \(WorkspaceSummary.count(visibleApps.filter { store.visibleUpdate(for: $0) != nil }.count, "update", "updates")) available",
                 systemImage: systemImage)
         }
         .toolbar { listToolbar }
@@ -191,11 +191,8 @@ struct AllAppsView: View {
     }
 
     private var emptyState: some View {
-        ContentUnavailableView {
-            Label(emptyTitle, systemImage: emptySystemImage)
-        } description: {
-            Text(emptyDescription)
-        } actions: {
+        WorkspaceEmptyState(title: emptyTitle, systemImage: emptySystemImage,
+                            description: Text(emptyDescription)) {
             if store.searchText.isEmpty {
                 Button("Check Again") { Task { await store.scan() } }
                     .buttonStyle(.borderedProminent)
@@ -665,8 +662,8 @@ struct AppDetailView: View {
 
     private var technicalDetails: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Information").font(.headline)
-            Grid(alignment: .leading, horizontalSpacing: 30, verticalSpacing: 12) {
+            WorkspaceSectionLabel(title: "App information")
+            Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 10) {
                 GridRow { detailLabel("Bundle ID"); Text(app.bundleIdentifier ?? "Not declared").textSelection(.enabled) }
                 GridRow { detailLabel("Location"); Text(app.url.path).lineLimit(2).textSelection(.enabled) }
                 GridRow { detailLabel("Installed version"); Text(app.installedVersion).monospacedDigit() }
@@ -693,8 +690,7 @@ struct AppDetailView: View {
                 if let adoptableItem { GridRow { detailLabel("Homebrew cask"); Text(adoptableItem.caskToken).textSelection(.enabled) } }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(16)
-            .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 14))
+            .upkeepOutlinedInspectorCard()
         }
     }
 
@@ -732,7 +728,7 @@ struct AppDetailView: View {
                     )
                     .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.bordered)
                 .disabled(store.isWorking(.homebrewAdoption(adoptableItem.id)))
                 .help("Adopt with Homebrew using the \(adoptableItem.caskToken) cask")
             }

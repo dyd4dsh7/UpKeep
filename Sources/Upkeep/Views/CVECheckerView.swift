@@ -55,7 +55,8 @@ struct CVECheckerView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header.padding(.horizontal, 22).padding(.vertical, 18)
+            header
+            coverageSummary
             Divider()
             if state.running { progress.padding(.horizontal, 22).padding(.vertical, 10) }
             if state.checkedAt != nil, state.inventory != inventory {
@@ -70,11 +71,20 @@ struct CVECheckerView: View {
                         .frame(minWidth: min(300, geometry.size.width * 0.45), maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            Divider()
-            coverageSummary.padding(.horizontal, 18).padding(.vertical, 10).background(.bar)
         }
         .onChange(of: displayedInventory.map(\.id), initial: true) { _, ids in
-            if selectedID == nil || !ids.contains(selectedID ?? "") { selectedID = ids.first }
+            if let requested = state.requestedItemID, ids.contains(requested) {
+                selectedID = requested
+                state.requestedItemID = nil
+            } else if selectedID == nil || !ids.contains(selectedID ?? "") {
+                selectedID = ids.first
+            }
+        }
+        .onChange(of: state.requestedItemID) { _, requested in
+            if let requested, displayedInventory.contains(where: { $0.id == requested }) {
+                selectedID = requested
+                state.requestedItemID = nil
+            }
         }
         .toolbar {
             Button("Coverage & Privacy", systemImage: "info.circle") { showingCoverage = true }
@@ -92,14 +102,10 @@ struct CVECheckerView: View {
                 Text("Software").font(.headline)
                 Text("\(displayedInventory.count)").font(.callout).foregroundStyle(.secondary)
                 Spacer()
-                Picker("Show", selection: $state.filter) {
-                    ForEach(CVEResultFilter.allCases) { Text($0.rawValue).tag($0) }
-                }.pickerStyle(.menu).labelsHidden().fixedSize()
-                .accessibilityLabel("Filter software by result")
             }.padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 10)
             searchField.padding(.horizontal, 14).padding(.bottom, 12)
             if displayedInventory.isEmpty {
-                ContentUnavailableView(emptyTitle, systemImage: search.isEmpty ? "shield" : "magnifyingglass",
+                WorkspaceEmptyState(emptyTitle, systemImage: search.isEmpty ? "shield" : "magnifyingglass",
                                        description: Text(emptyDescription))
             } else {
                 List(displayedInventory, selection: $selectedID) { item in
@@ -111,7 +117,8 @@ struct CVECheckerView: View {
                 .contentMargins(.top, 0, for: .scrollContent)
                 .scrollContentBackground(.hidden)
             }
-        }.background(.quaternary.opacity(0.12))
+        }
+        .background(UpkeepPalette.surface(in: colorScheme))
     }
 
     @ViewBuilder private var selectedDetail: some View {
@@ -119,66 +126,118 @@ struct CVECheckerView: View {
             CVEAdvisoryDetail(item: item, result: resultsByID[item.id], pendingStatus: pendingStatus(item),
                               reviewUpdates: reviewUpdates, showSoftware: { showSoftware(item) })
         } else {
-            ContentUnavailableView("Select software", systemImage: "shield",
+            WorkspaceEmptyState("Select software", systemImage: "shield",
                                    description: Text("Choose an item to review its advisories and fixed releases."))
         }
     }
 
     private var header: some View {
-        let updateCount = store.cveBatchUpdateItems.count
-        return HStack(alignment: .center, spacing: 16) {
-            Image(systemName: findings > 0 ? "exclamationmark.shield" : "shield")
-                .font(.system(size: 28, weight: .regular))
-                .foregroundStyle(findings > 0 ? CVEColors.severity(.medium, in: colorScheme) : Color.secondary)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 5) {
-                Text(state.running ? "Checking your software" : state.checkedAt == nil ? "Check your software"
-                     : findings == 0 ? "No advisories returned" : "\(findings) \(findings == 1 ? "item needs" : "items need") review")
-                    .font(.title2.weight(.semibold))
-                if let checkedAt = state.checkedAt {
-                    Text("\(state.running ? "Checking" : "Last checked") \(checkedAt.formatted(date: .abbreviated, time: .shortened))")
-                        .font(.callout).foregroundStyle(.secondary)
-                } else {
-                    Text("Find published advisories for installed apps and packages.")
-                        .font(.callout).foregroundStyle(.secondary)
-                }
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 16) {
+                securityTitle.fixedSize(horizontal: true, vertical: false)
+                Spacer(minLength: 0)
+                securityActions
             }
-            Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 5) {
-                Button("Update All…") {
-                    batchReview = CVEBatchReview(items: store.cveBatchUpdateItems)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(state.running || updateCount == 0 || store.isWorking(.unifiedBatch))
-                .help("Review all affected software with available updates, including findings hidden by search or filters.")
-                .accessibilityLabel("Update all affected software")
-                .accessibilityValue("\(updateCount) \(updateCount == 1 ? "update" : "updates") available")
-                .accessibilityHint(state.running ? "Available after the CVE check finishes." : "Opens a review before making changes, including findings hidden by the current filter.")
-                Text("\(updateCount) \(updateCount == 1 ? "update" : "updates") available")
-                    .font(.caption).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 12) {
+                securityTitle
+                securityActions
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, UpkeepLayout.pageInset)
+        .padding(.vertical, 18)
+    }
+
+    private var securityTitle: some View {
+        HStack(spacing: 14) {
+            WorkspaceGlyph(systemImage: findings > 0 ? "exclamationmark.shield" : "shield.lefthalf.filled", size: 46,
+                           color: findings > 0 ? UpkeepColors.warning(in: colorScheme) : nil)
+            VStack(alignment: .leading, spacing: 5) {
+                Text("CVE Checker")
+                    .font(.system(size: 27, weight: .semibold))
+                    .tracking(-0.85)
+                    .accessibilityAddTraits(.isHeader)
+                Text(securityStatus)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
-    private var coverageSummary: some View {
-        HStack(spacing: 18) {
-            coverageMetric("Checked", value: checked, filter: .all)
-            coverageMetric("Incomplete", value: incomplete, filter: .incomplete)
-            coverageMetric("Not covered", value: uncovered, filter: .notCovered)
-            Spacer(minLength: 0)
+
+    private var securityStatus: String {
+        if state.running { return "Checking installed software…" }
+        guard let checkedAt = state.checkedAt else { return "Find advisories for installed apps and packages." }
+        let date = checkedAt.formatted(date: .abbreviated, time: .shortened)
+        if checked == 0 { return "No checks completed · \(date)" }
+        return "\(WorkspaceSummary.count(checked, "item", "items")) checked · \(date)"
+    }
+
+    private var securityActions: some View {
+        let updateCount = store.cveBatchUpdateItems.count
+        return HStack(spacing: 8) {
             if state.running {
                 Button("Cancel Check") { state.cancel() }
+                    .buttonStyle(.bordered)
             } else {
                 Button(state.checkedAt == nil ? "Check CVEs" : "Check Again", systemImage: "arrow.clockwise") {
                     state.start(inventory: inventory, client: makeClient())
-                }.disabled(inventory.isEmpty)
+                }
+                .buttonStyle(.bordered)
+                .disabled(inventory.isEmpty)
             }
-        }.font(.callout)
+            Button(updateCount == 0 ? "Review Updates…" : "Review \(updateCount.formatted()) \(updateCount == 1 ? "Update" : "Updates")…",
+                   systemImage: "arrow.down.circle") {
+                batchReview = CVEBatchReview(items: store.cveBatchUpdateItems)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(state.running || updateCount == 0 || store.isWorking(.unifiedBatch))
+            .help("Review affected software with available updates, including findings hidden by search or filters.")
+            .accessibilityLabel("Update all affected software")
+            .accessibilityValue("\(WorkspaceSummary.count(updateCount, "update", "updates")) available")
+            .accessibilityHint("Opens a review before making changes, including findings hidden by the current filter.")
+        }
+        .fixedSize()
     }
+
+    private var coverageSummary: some View {
+        HStack(spacing: 8) {
+            coverageMetric("All Software", value: items.count, filter: .all)
+            coverageMetric("Findings", value: findings, filter: .findings)
+            coverageMetric("Incomplete", value: incomplete, filter: .incomplete)
+            coverageMetric("Not covered", value: uncovered, filter: .notCovered)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, UpkeepLayout.pageInset)
+        .padding(.bottom, 13)
+    }
+
     private func coverageMetric(_ title: String, value: Int, filter: CVEResultFilter) -> some View {
-        Button { state.filter = filter } label: {
-            Text("\(value) \(title.lowercased())").foregroundStyle(.secondary)
-        }.buttonStyle(.plain)
-        .accessibilityLabel("\(title): \(value). Show \(filter.rawValue.lowercased())")
+        let isSelected = state.filter == filter
+        return Button { state.filter = filter } label: {
+            HStack(spacing: 6) {
+                Text(value, format: .number)
+                    .monospacedDigit()
+                    .fontWeight(.semibold)
+                    .contentTransition(.numericText())
+                    .upkeepAnimated(for: value, animation: UpkeepMotion.quick)
+                Text(title)
+            }
+            .font(.caption)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+            .background(
+                isSelected ? Color.accentColor.opacity(0.13) : Color.primary.opacity(0.06),
+                in: RoundedRectangle(cornerRadius: 6)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityLabel(title)
+        .accessibilityValue(WorkspaceSummary.count(value, "item", "items"))
+        .upkeepAnimated(for: isSelected, animation: UpkeepMotion.quick)
     }
     private var searchField: some View {
         TextField("Filter software or CVE…", text: $state.searchText)
@@ -227,16 +286,44 @@ struct CVECheckerView: View {
         return state.running ? "Waiting" : "Not checked"
     }
     private var coverageSheet: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("Coverage & privacy").font(.title2.weight(.semibold))
-            Text("\(apps.count) apps · \(homebrew.count) Homebrew · \(packages.count) developer packages")
-                .font(.callout).foregroundStyle(.secondary)
-            Text("Checks use OSV for developer packages, Homebrew’s advisory feed for core formulae, and NVD for mapped apps and casks. Unknown identities and unsupported versions remain not covered.")
-            Text("NVD findings are potential matches. Review the linked records for platform and configuration applicability. No matches does not guarantee safety.")
-            Text("Registry names or mapped product identities and installed versions are sent to these services. Local paths stay on your Mac. Homebrew’s shared feed is matched locally. NVD requests are paced and a response can take up to 45 seconds.")
-            Text("Severity reflects source ratings, using CVSS base scores when available. Unrated does not mean low risk. Fixed releases come from explicit OSV or Homebrew fixed events for the matched package; NVD affected-range boundaries are not treated as verified fixes. Fixes may span release branches and do not imply every later version is unaffected.")
-            Text("Automatic CVE checks follow launch and background update refreshes when enabled in Settings. Results use the current inventory. Refresh update sources to include missing software. Checks do not install updates.")
-            HStack { Spacer(); Button("Done") { showingCoverage = false }.keyboardShortcut(.defaultAction) }
-        }.padding(24).frame(width: 480)
+        VStack(spacing: 0) {
+            WorkspaceSummary(
+                title: "Coverage & Privacy",
+                detail: "\(apps.count) apps · \(homebrew.count) Homebrew packages · \(packages.count) developer packages",
+                systemImage: "checkmark.shield"
+            )
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    coverageSection("What Upkeep checks",
+                        "OSV covers supported developer packages. Homebrew’s advisory feed covers core formulae. NVD covers mapped apps and casks. Unknown identities and unsupported versions are marked Not covered.")
+                    coverageSection("What leaves your Mac",
+                        "Requests include registry names or mapped product identities and installed versions. Local paths stay on your Mac. Upkeep matches Homebrew’s downloaded feed locally. NVD requests may take up to 45 seconds.")
+                    coverageSection("How to read findings",
+                        "NVD findings are potential matches. Check the source advisory for the affected platform and configuration. Severity comes from the source’s rating, such as CVSS. Unrated findings can still be serious, and a check with no findings cannot establish that software is safe.")
+                    coverageSection("Fixed releases",
+                        "Upkeep shows versions that OSV or Homebrew explicitly lists as fixed. NVD affected-version boundaries do not verify a fix. Check the advisory before choosing a release branch.")
+                    coverageSection("When checks run",
+                        "Automatic CVE checks follow launch and background update checks when enabled in Settings. Refresh update sources to include missing software. CVE checks only report findings.")
+                }
+                .padding(UpkeepLayout.pageInset)
+            }
+            WorkspaceDialogFooter {
+                Spacer()
+                Button("Done") { showingCoverage = false }
+                    .keyboardShortcut(.defaultAction)
+                    .keyboardShortcut(.cancelAction)
+            }
+        }
+        .frame(width: 545, height: 490)
+        .upkeepWorkspaceAppearance()
+    }
+
+    private func coverageSection(_ title: String, _ description: String) -> some View {
+        InspectorSection(title: title) {
+            Text(description)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 }
