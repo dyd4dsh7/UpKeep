@@ -4,29 +4,51 @@ struct UpkeepSidebarView: View {
     @UpkeepStoreReference private var store
     @EnvironmentObject private var settings: AppSettings
 
+    @Environment(\.colorScheme) private var scheme
+
     @AppStorage("sidebarSourcesExpanded") private var sourcesExpanded = false
 
     var body: some View {
-        List(selection: $store.navigation.selection) {
-            item(.updates)
+        VStack(spacing: 0) {
+            brand
+            destinations
+            footer
+        }
+        .accentColor(UpkeepPalette.accent(in: scheme))
+        .tint(UpkeepPalette.accent(in: scheme))
+    }
 
-            Section("Library") {
+    private var destinations: some View {
+        List(selection: $store.navigation.selection) {
+            Section {
+                item(.updates)
+            } header: {
+                WorkspaceSectionLabel(title: "Overview")
+            }
+
+            Section {
                 item(.allApps)
                 if settings.sidebarViewMode == .advanced, settings.checkHomebrew {
                     item(.adoptable)
                 }
+            } header: {
+                WorkspaceSectionLabel(title: "Library")
             }
 
             if !packageDestinations.isEmpty {
-                Section("Packages") {
+                Section {
                     ForEach(packageDestinations, id: \.self) { item($0) }
+                } header: {
+                    WorkspaceSectionLabel(title: "Packages")
                 }
             }
 
-            Section("System") {
+            Section {
                 if settings.checkMacOS { item(.macOSUpdates) }
                 item(.cveChecker)
                 item(.history)
+            } header: {
+                WorkspaceSectionLabel(title: "System")
             }
 
             if settings.sidebarViewMode == .advanced, !sourceDestinations.isEmpty {
@@ -49,6 +71,80 @@ struct UpkeepSidebarView: View {
         }
     }
 
+    private var brand: some View {
+        HStack(spacing: 9) {
+            AppBrandIcon(size: 30)
+                .accessibilityHidden(true)
+            Text("UpKeep")
+                .font(.system(size: 20, weight: .semibold))
+                .tracking(-0.6)
+                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 9)
+        .padding(.bottom, 13)
+    }
+
+    private var footer: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Divider()
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: statusSymbol)
+                    .foregroundStyle(statusColor)
+                    .frame(width: 15)
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(statusTitle)
+                        .font(.callout.weight(.medium))
+                    if let checked = store.lastChecked {
+                        Text("Last checked \(checked, format: .dateTime.month(.abbreviated).day().hour().minute())")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+            }
+            SettingsLink {
+                Label("Settings", systemImage: "gearshape")
+                    .font(.callout)
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.regular)
+        }
+        .padding(.horizontal, 15)
+        .padding(.bottom, 13)
+    }
+
+    private var statusTitle: String {
+        switch store.updateCheckState {
+        case .complete: "Sources checked"
+        case .checking: "Checking sources…"
+        case .partial: "Check incomplete"
+        case .failed: "Check failed"
+        case .disabled: "Checks disabled"
+        case .notChecked: "Awaiting first check"
+        }
+    }
+
+    private var statusSymbol: String {
+        switch store.updateCheckState {
+        case .complete: "checkmark.circle.fill"
+        case .notChecked: "circle.dashed"
+        default: store.updateCheckState.symbol
+        }
+    }
+
+    private var statusColor: Color {
+        switch store.updateCheckState {
+        case .complete, .checking: UpkeepPalette.accent(in: scheme)
+        case .partial, .failed: UpkeepColors.warning(in: scheme)
+        case .notChecked, .disabled: .secondary
+        }
+    }
+
     private var sourceDestinations: [SidebarDestination] {
         let destinations: [SidebarDestination] = [
             .appStore, .testFlight, .setapp, .microsoftAutoUpdate, .steam,
@@ -62,7 +158,7 @@ struct UpkeepSidebarView: View {
         var destinations: [SidebarDestination] = []
         if settings.checkHomebrew { destinations.append(.homebrewPackages) }
         if settings.sidebarViewMode == .advanced {
-            if store.installedDeveloperManagers.contains(where: settings.enabledDeveloperManagers.contains) {
+            if store.showsDeveloperInventory {
                 destinations.append(.developerPackages)
             }
             if settings.checkLocalModels, !store.localModels.isEmpty {
@@ -79,7 +175,7 @@ struct UpkeepSidebarView: View {
                 .lineLimit(1)
         } icon: {
             Image(systemName: destination.systemImage)
-                .symbolRenderingMode(.hierarchical)
+                .symbolRenderingMode(.monochrome)
                 .frame(width: 18)
         }
         .badge(count)

@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 enum UpkeepLayout {
-    static let pageInset: CGFloat = 20
+    static let pageInset: CGFloat = 24
     static let sectionSpacing: CGFloat = 16
     static let listActionWidth: CGFloat = 108
     static let inspectorMinimumWidth: CGFloat = 320
@@ -66,6 +66,7 @@ struct StandardItemRow<Icon: View, Content: View, Accessories: View>: View {
                 VStack(alignment: .leading, spacing: 8) {
                     content.frame(maxWidth: .infinity, alignment: .leading)
                     rowAccessories
+                        .frame(maxWidth: .infinity, alignment: .trailing)
                 }
             }
         }
@@ -118,7 +119,7 @@ struct ItemIdentityView: View {
         VStack(alignment: .leading, spacing: settings.listDensity == .compact ? 1 : 4) {
             HStack(spacing: 7) {
                 Text(title)
-                    .font(.body.weight(.medium))
+                    .font(.body.weight(.semibold))
                     .lineLimit(1)
                     .help(title)
                 if isRunning { RunningIndicator() }
@@ -296,7 +297,7 @@ struct InstalledVersionView: View {
 
     var body: some View {
         Text(version)
-            .font(.subheadline.monospacedDigit())
+            .font(.system(.callout, design: .monospaced))
             .foregroundStyle(.secondary)
             .lineLimit(1)
             .minimumScaleFactor(0.75)
@@ -322,6 +323,10 @@ struct VersionTransitionView: View {
                     Text(latest)
                         .fontWeight(.semibold)
                         .foregroundStyle(isSelected ? Color.primary : .accentColor)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background((isSelected ? Color.primary : Color.accentColor).opacity(0.11),
+                                    in: RoundedRectangle(cornerRadius: 5))
                 }
             } else {
                 HStack(spacing: 5) {
@@ -335,7 +340,7 @@ struct VersionTransitionView: View {
         .id(latest == nil || latest == current ? "current" : "update")
         .upkeepStateTransition()
         .upkeepAnimated(for: latest ?? "")
-        .font(.subheadline.monospacedDigit())
+        .font(.system(.callout, design: .monospaced))
         .lineLimit(1)
         .minimumScaleFactor(0.8)
         .frame(width: usesFixedWidth ? 138 : nil, alignment: usesFixedWidth ? .trailing : .leading)
@@ -480,11 +485,10 @@ struct InspectorUpdateStatusCard<Actions: View, Options: View>: View {
 
 private struct OutlinedInspectorCardStyle: ViewModifier {
     func body(content: Content) -> some View {
-        GroupBox {
-            content
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(8)
-        }
+        content
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
+            .upkeepSurface()
     }
 }
 
@@ -533,10 +537,13 @@ struct RunningIndicator: View {
 /// Shared chrome for item lists; the navigation sidebar retains its native sidebar style.
 private struct ContentListStyle: ViewModifier {
     @EnvironmentObject private var settings: AppSettings
+    @Environment(\.colorScheme) private var scheme
 
     func body(content: Content) -> some View {
         content
             .listStyle(.inset)
+            .scrollContentBackground(.hidden)
+            .background(UpkeepPalette.surface(in: scheme))
             .environment(\.defaultMinListRowHeight, settings.listDensity == .compact ? 34 : 46)
     }
 }

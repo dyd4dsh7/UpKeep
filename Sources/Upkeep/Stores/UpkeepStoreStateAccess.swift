@@ -40,7 +40,6 @@ extension UpkeepStore {
     var isScanning: Bool { get { scanState.isScanning } set { scanState.isScanning = newValue } }
     var lastChecked: Date? { get { scanState.lastChecked } set { scanState.lastChecked = newValue } }
     var nextScheduledCheck: Date? { get { scanState.nextScheduledCheck } set { scanState.nextScheduledCheck = newValue } }
-    var errorMessage: String? { get { scanState.errorMessage } set { scanState.errorMessage = newValue } }
     var scanWarnings: [ScanWarning] { get { scanState.scanWarnings } set { scanState.scanWarnings = newValue } }
     var batchUpdateProgress: BatchUpdateProgress? { get { updateExecutionState.batchUpdateProgress } set { updateExecutionState.batchUpdateProgress = newValue } }
     var appManagementPermissionCheck: AppManagementPermissionCheck? {

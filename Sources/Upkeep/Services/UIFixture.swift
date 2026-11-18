@@ -3,12 +3,29 @@ import Foundation
 
 /// Explicit debug-only fixture launch. Every external mutation is rejected.
 enum UIFixture {
-    enum OperationState: String { case completed, active, empty, longLog, services, servicesFailure, servicesRetained, servicesEmpty, cleanupUnavailable, cve }
+    enum OperationState: String {
+        case completed, active, empty, longLog, services, servicesFailure, servicesRetained, servicesEmpty
+        case cleanupUnavailable, cve, workspace
+    }
     static var operationState: OperationState {
         let prefix = "--ui-fixture-state="
         return ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix(prefix) })
             .flatMap { OperationState(rawValue: String($0.dropFirst(prefix.count))) } ?? .completed
     }
+    static var showsProgress: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-fixture-slow")
+    }
+
+    static var showsDialogs: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-fixture-dialogs")
+    }
+
+    static let backupDirectory: URL = {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("upkeep-fixture-backups-\(UUID())")
+        try? FileManager.default.createDirectory(at: directory.appendingPathComponent("Fixture Editor.app"), withIntermediateDirectories: true)
+        return directory
+    }()
+
     static var enabled: Bool {
         ProcessInfo.processInfo.arguments.contains("--ui-fixture")
             || Bundle.main.bundleIdentifier?.hasPrefix("test.upkeep.ui-fixture.") == true
@@ -16,7 +33,8 @@ enum UIFixture {
     }
     static let app = InstalledApp(name: "Fixture Editor", bundleIdentifier: "test.upkeep.fixture.editor",
         installedVersion: "1.0", buildVersion: "10", url: URL(fileURLWithPath: "/fixture/Editor.app"),
-        sparkleFeedURL: URL(string: "https://example.invalid/feed"), githubRepository: nil, hasAppStoreReceipt: false)
+        sparkleFeedURL: URL(string: "https://example.invalid/feed"), githubRepository: nil, hasAppStoreReceipt: false,
+        architectures: showsDialogs ? ["x86_64"] : [])
     static var update: AvailableUpdate {
         AvailableUpdate(app: app, availableVersion: "2.0", source: .sparkle, releaseNotes: "Fixture release notes.",
             actionURL: URL(string: "https://example.invalid/editor.zip"), homebrewToken: nil)
@@ -63,6 +81,21 @@ enum UIFixture {
     static let cveFormula = HomebrewPackage(token: "zip", displayName: "zip", description: nil,
         homepage: nil, license: nil, installedVersion: "1.0_1", currentVersion: "1.0_2", kind: .formula,
         isOutdated: true, isDependency: false, dependencies: [], tap: "homebrew/core")
+    static let historyRecord = UpdateRecord(id: UUID(), date: .now, name: "Fixture Editor",
+        fromVersion: "0.9", toVersion: "1.0", kind: .app,
+        originalAppPath: showsDialogs ? app.url.path : nil,
+        backupPath: showsDialogs ? backupDirectory.appendingPathComponent("Fixture Editor.app").path : nil,
+        recoveryNote: "Offline recovery record for interface verification.")
+    static let earlierHistoryRecord = UpdateRecord(id: UUID(), date: .now.addingTimeInterval(-86_400), name: "Fixture Editor",
+        fromVersion: "0.8", toVersion: "0.9", kind: .app, originalAppPath: nil, backupPath: nil,
+        recoveryNote: "Earlier offline record for the same application.")
+    static let adoptableApp = AdoptableApp(app: app, caskToken: "fixture-editor", caskVersion: "1.1")
+    static let macOSUpdate = MacOSUpdate(label: "offline-fixture", title: "Fixture macOS Update",
+        version: "27.3.1", size: nil, requiresRestart: true, isBeta: false, isFullInstaller: false)
+    static let localModel = LocalLLMModel(id: "fixture-model", name: "Fixture Model", variant: "8B",
+        runtime: .ollama, installedRevision: "7ddbc4a1", latestRevision: "ff71828d",
+        sizeBytes: 4_900_000_000, modifiedAt: nil, homepage: nil, executablePath: "/fixture/ollama",
+        updateReference: "fixture-model:8b", isOutdated: true)
     @MainActor static func makeStore(settings: AppSettings, operationState: OperationState = .completed,
                                     makeCVEClient: (@MainActor @Sendable () -> CVEInventoryClient)? = nil) -> UpkeepStore {
         let services = UIFixtureServices(operationState: operationState)
@@ -70,6 +103,15 @@ enum UIFixture {
             applicationDiscovery: services, homebrew: services, developerPackages: services,
             packageCleanup: services, localModels: services, history: services, externalOpener: services,
             directAppInstaller: services, applicationLifecycle: services, makeCVEClient: makeCVEClient ?? { UIFixture.cveInventoryClient }))
+        if showsDialogs {
+            DiagnosticsStore.shared.record(.info, category: .scan, "Update scan started")
+            DiagnosticsStore.shared.record(.warning, category: .source, "Fixture publisher returned a partial result", metadata: [
+                "Source": "Sparkle", "Item": app.name
+            ])
+            DiagnosticsStore.shared.record(.info, category: .scan, "Update scan completed", metadata: ["Duration": "1250 ms"])
+            settings.skip(key: "fixture|skip", name: "Fixture Calendar", category: "App", version: "1.4", duration: .oneWeek)
+            settings.ignore(key: "fixture|ignore", name: "Fixture Terminal", category: "Homebrew")
+        }
         store.apps = [app]
         store.updates = [update]
         if operationState == .cleanupUnavailable {
@@ -93,6 +135,9 @@ enum UIFixture {
             store.developerPackages = cvePackages
             store.installedDeveloperManagers = [.npm, .node]
             store.selection = .cveChecker
+        }
+        if operationState == .workspace {
+            store.updateHistory = [historyRecord, earlierHistoryRecord]
         }
         let operation = OperationID.applicationUpdate(app.id)
         if operationState != .empty {
@@ -135,14 +180,43 @@ private struct UIFixtureServices: UpdateScanning, ApplicationDiscovering, Homebr
         if operationState == .servicesEmpty { return [] }
         return [HomebrewService(name: UIFixture.package.token, status: "started", user: "fixture", file: nil, exitCode: 0)]
     }
+    func scan(settings: ScanSettings, progress: @escaping ScanProgressReporter) async -> ScanReport {
+        let report = await scan(settings: settings)
+        guard UIFixture.showsProgress else { return report }
+
+        await progress(.discovered(report.apps))
+        try? await Task.sleep(for: .seconds(2))
+        for (index, update) in report.updates.enumerated() {
+            await progress(.appSource(appID: update.app.id, source: update.source, update: update,
+                warning: nil, completed: index + 1, total: report.updates.count))
+            try? await Task.sleep(for: .seconds(2))
+        }
+        return report
+    }
+
     func scan(settings: ScanSettings) async -> ScanReport {
-        ScanReport(apps: operationState == .cve ? [UIFixture.app, UIFixture.cveApp] : [UIFixture.app], updates: operationState == .cve ? [UIFixture.update, UIFixture.cveUpdate] : [UIFixture.update], checkedAt: Date(), warnings: [],
-            failedAppSources: [:], homebrewInventoryStatus: .succeeded, homebrewCatalogStatus: .disabled,
-            macOSUpdatesStatus: .disabled, macOSInstallersStatus: .disabled, failedDeveloperManagers: [],
-            failedDeveloperExecutablePaths: [], localModelsStatus: .disabled, failedLocalModelIDs: [],
-            failedLocalModelRuntimes: [], homebrewPackages: operationState == .cve ? [UIFixture.cveFormula] : [UIFixture.package], adoptableApps: [], macOSUpdates: [],
-            developerPackages: operationState == .cve ? UIFixture.cvePackages : (operationState == .cleanupUnavailable ? [UIFixture.developerPackage] : []),
-            installedDeveloperManagers: operationState == .cve ? [.npm, .node] : (operationState == .cleanupUnavailable ? [.npm] : []), localModels: [])
+        let hasCVEInventory = operationState == .cve || operationState == .workspace
+        let isWorkspace = operationState == .workspace
+        return ScanReport(
+            apps: hasCVEInventory ? [UIFixture.app, UIFixture.cveApp] : [UIFixture.app],
+            updates: hasCVEInventory ? [UIFixture.update, UIFixture.cveUpdate] : [UIFixture.update],
+            checkedAt: Date(),
+            warnings: UIFixture.showsDialogs ? [
+                ScanWarning(source: .sparkle, itemNames: [UIFixture.app.name], message: "Fixture publisher feed is temporarily unavailable.")
+            ] : [],
+            failedAppSources: UIFixture.showsDialogs ? [UIFixture.app.id: [.sparkle]] : [:],
+            homebrewInventoryStatus: .succeeded,
+            homebrewCatalogStatus: isWorkspace ? .succeeded : .disabled,
+            macOSUpdatesStatus: isWorkspace ? .succeeded : .disabled, macOSInstallersStatus: .disabled,
+            failedDeveloperManagers: [], failedDeveloperExecutablePaths: [],
+            localModelsStatus: isWorkspace ? .succeeded : .disabled, failedLocalModelIDs: [],
+            failedLocalModelRuntimes: [], homebrewPackages: hasCVEInventory ? [UIFixture.cveFormula] : [UIFixture.package],
+            adoptableApps: isWorkspace ? [UIFixture.adoptableApp] : [],
+            macOSUpdates: isWorkspace ? [UIFixture.macOSUpdate] : [],
+            developerPackages: hasCVEInventory ? UIFixture.cvePackages : (operationState == .cleanupUnavailable ? [UIFixture.developerPackage] : []),
+            installedDeveloperManagers: hasCVEInventory ? [.npm, .node] : (operationState == .cleanupUnavailable ? [.npm] : []),
+            localModels: isWorkspace ? [UIFixture.localModel] : []
+        )
     }
     func scan(app: InstalledApp, settings: ScanSettings) async -> UpdateScanner.TargetedAppReport {
         .init(updates: [UIFixture.update], failedSources: [], warnings: [])
@@ -150,7 +224,10 @@ private struct UIFixtureServices: UpdateScanning, ApplicationDiscovering, Homebr
     func discover() async -> [InstalledApp] { [UIFixture.app] }
     func discover(at url: URL) async -> InstalledApp? { url == UIFixture.app.url ? UIFixture.app : nil }
     func package(token: String, kind: HomebrewPackageKind, includePrereleases: Bool) async throws -> HomebrewPackage? { nil }
-    func upgrade(_ package: HomebrewPackage) async throws { throw UIFixtureError.mutationBlocked }
+    func upgrade(_ package: HomebrewPackage) async throws {
+        if UIFixture.showsProgress { try await Task.sleep(for: .seconds(4)) }
+        throw UIFixtureError.mutationBlocked
+    }
     func adopt(_ item: AdoptableApp) async throws { throw UIFixtureError.mutationBlocked }
     func installOrReplace(_ item: AdoptableApp) async throws { throw UIFixtureError.mutationBlocked }
     func upgradeCask(token: String) async throws { throw UIFixtureError.mutationBlocked }
@@ -158,13 +235,21 @@ private struct UIFixtureServices: UpdateScanning, ApplicationDiscovering, Homebr
     func availableVersions(for package: DeveloperPackage, includePrereleases: Bool) async -> [String] { [] }
     func install(_ package: DeveloperPackage, version: String) async throws { throw UIFixtureError.mutationBlocked }
     func scan(_ target: PackageCleanupTarget) async throws -> PackageCleanupEstimate {
-        guard operationState == .cleanupUnavailable else { throw UIFixtureError.mutationBlocked }
+        guard operationState == .cleanupUnavailable || operationState == .workspace else { throw UIFixtureError.mutationBlocked }
         return PackageCleanupEstimate(target: target, bytes: 0, basis: .unavailable)
     }
     func cleanup(_ target: PackageCleanupTarget) async throws -> PackageCleanupResult { throw UIFixtureError.mutationBlocked }
     func scan() async -> LocalModelClient.Report { .empty }
     func update(_ model: LocalLLMModel) async throws { throw UIFixtureError.mutationBlocked }
-    func records() async -> [UpdateRecord] { [] }
+    func records() async -> [UpdateRecord] { operationState == .workspace ? [UIFixture.historyRecord, UIFixture.earlierHistoryRecord] : [] }
+    func recoveryStorage() async -> RecoveryStorage? {
+        guard UIFixture.showsDialogs else { return nil }
+        let directory = UIFixture.backupDirectory
+        return RecoveryStorage(directory: directory, byteLimit: 2_000_000_000, backups: [
+            .init(path: directory.appendingPathComponent("Fixture Editor.app").path, bytes: 104_000_000, protected: false),
+            .init(path: directory.appendingPathComponent("Fixture Recovery.app").path, bytes: 416_000_000, protected: true)
+        ])
+    }
     func prepareAppBackup(app: InstalledApp, toVersion: String, kind: UpdateRecordKind) async throws -> UpdateRecord { throw UIFixtureError.mutationBlocked }
     func add(_ record: UpdateRecord) async throws { throw UIFixtureError.mutationBlocked }
     func discardBackup(for record: UpdateRecord) async {}
@@ -172,7 +257,11 @@ private struct UIFixtureServices: UpdateScanning, ApplicationDiscovering, Homebr
     func revert(_ record: UpdateRecord) async throws { throw UIFixtureError.mutationBlocked }
     @MainActor func open(_ url: URL) -> Bool { false }
     func install(update: AvailableUpdate) async throws { throw UIFixtureError.mutationBlocked }
-    @MainActor func runningApplications() -> RunningApplications { .init(identifiers: [], paths: []) }
+    @MainActor func runningApplications() -> RunningApplications {
+        UIFixture.showsDialogs
+            ? .init(identifiers: Set([UIFixture.app.bundleIdentifier].compactMap { $0 }), paths: [UIFixture.app.url.path])
+            : .init(identifiers: [], paths: [])
+    }
     @MainActor func quit(_ apps: [InstalledApp]) async throws { throw UIFixtureError.mutationBlocked }
 }
 #endif

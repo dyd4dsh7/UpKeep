@@ -138,21 +138,16 @@ struct CVEAdvisoryDetail: View {
                     }
                     .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
+                    .upkeepSurface(radius: 10)
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel("Next step. \(nextStep)")
                     .accessibilityAddTraits(.isStaticText)
 
-                    HStack {
-                        Text("Advisories").font(.headline).accessibilityAddTraits(.isHeader)
-                        Text("\(groups.count)").font(.callout).foregroundStyle(.secondary)
-                        Spacer()
-                        Text("Highest severity first").font(.caption).foregroundStyle(.secondary)
-                    }
-                    VStack(alignment: .leading, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        WorkspaceSectionLabel(title: "Advisories", count: groups.count)
                         ForEach(groups) { group in
                             advisory(group)
-                            if group.id != groups.last?.id { Divider() }
+                                .upkeepOutlinedInspectorCard()
                         }
                     }
                 } else {
@@ -167,7 +162,6 @@ struct CVEAdvisoryDetail: View {
             .frame(maxWidth: 760, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .background(.background)
         .accessibilityLabel("Security details for \(item.name)")
         .id(item.id)
     }

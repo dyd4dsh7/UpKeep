@@ -367,6 +367,7 @@ private let cveBrewFeed = #"{"advisories":{"zip":[{"id":"BREW-zip-example","upst
     store.showCVEInfo(for: item)
     #expect(store.selection == .cveChecker)
     #expect(store.cveScanState.searchText == item.name && store.cveScanState.filter == .all)
+    #expect(store.cveScanState.requestedItemID == item.id)
 }
 
 private actor CVEHeldFeed {
@@ -494,6 +495,7 @@ private actor CVEHeldFeed {
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite) }
     let settings = AppSettings(defaults: defaults)
+    settings.completeSetup(.advanced, sidebarViewMode: .advanced)
     settings.refreshInterval = .never
     settings.checkOnLaunch = false
     settings.automaticallyCheckCVEs = false
@@ -514,11 +516,22 @@ private actor CVEHeldFeed {
     #expect(store.filteredHomebrewPackages.contains { $0.id == formula.id })
     #expect(store.selectedPackageID == formula.id)
     let app = try #require(store.apps.first)
+    store.appListFilter = .updates
     store.showCVESoftware(CVEInventoryItem(app))
     store.selectedApp = nil
     store.completeCVESoftwareNavigation()
     #expect(store.selection == .allApps)
     #expect(store.selectedApp?.id == app.id)
+    #expect(store.appListFilter == .all)
+
+    settings.sidebarViewMode = .basic
+    settings.showCurrentDeveloperPackages = false
+    store.selection = .cveChecker
+    store.showCVESoftware(CVEInventoryItem(current))
+    #expect(store.selection == .cveChecker)
+    #expect(store.searchText == current.name)
+    #expect(store.navigation.requestedSearchResult == .developer(current.id))
+    #expect(!settings.showCurrentDeveloperPackages)
 }
 
 @Test func cvePackageMetadataMatchesCanonicalPyPIAndNuGetNames() throws {

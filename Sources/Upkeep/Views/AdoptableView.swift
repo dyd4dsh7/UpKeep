@@ -8,7 +8,7 @@ struct AdoptableView: View {
         let adoptableApps = sortedAdoptableApps
         VStack(spacing: 0) {
             if adoptableApps.isEmpty {
-                ContentUnavailableView(
+                WorkspaceEmptyState(
                     "No adoptable apps",
                     systemImage: "shippingbox",
                     description: Text("Upkeep matches installed apps with Homebrew’s official cask catalog.")
@@ -55,8 +55,8 @@ struct AdoptableView: View {
         }
         .upkeepAnimated(for: adoptableApps.map(\.id))
         .safeAreaInset(edge: .top, spacing: 0) {
-            WorkspaceSummary(title: WorkspaceSummary.count(adoptableApps.count, "app available to adopt", "apps available to adopt"),
-                detail: "Manage these installed apps through Homebrew’s official cask catalog.",
+            WorkspaceSummary(title: "Homebrew Adoption",
+                detail: WorkspaceSummary.count(adoptableApps.count, "app matched to a Homebrew cask", "apps matched to Homebrew casks"),
                 systemImage: "shippingbox")
         }
         .toolbar {

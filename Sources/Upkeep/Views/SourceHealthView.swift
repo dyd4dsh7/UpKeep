@@ -4,15 +4,25 @@ struct SourceHealthView: View {
     @UpkeepStoreReference private var store
     @ObservedObject var settings: AppSettings
     @UpkeepState private var showingSuccessfulChecks = false
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
+        let failures = settings.sourceCheckFreshness.values.count { $0.failure != nil }
+        let successes = settings.sourceCheckFreshness.count - failures
         Section("Check Health") {
             if settings.sourceCheckFreshness.isEmpty {
-                Text("Run a check to see source health.").foregroundStyle(.secondary)
+                Label("Run an update check to see source health.", systemImage: "clock")
+                    .foregroundStyle(.secondary)
             } else {
-                Toggle("Show successful checks", isOn: $showingSuccessfulChecks)
-                if !settings.sourceCheckFreshness.values.contains(where: { $0.failure != nil }) {
-                    Label("No recorded check failures", systemImage: "checkmark.circle").foregroundStyle(.secondary)
+                Label(
+                    failures == 0
+                        ? "No recorded check failures"
+                        : WorkspaceSummary.count(failures, "source needs attention", "sources need attention"),
+                    systemImage: failures == 0 ? "checkmark.circle" : "exclamationmark.triangle"
+                )
+                .foregroundStyle(failures == 0 ? UpkeepPalette.accent(in: scheme) : UpkeepColors.warning(in: scheme))
+                if successes > 0 {
+                    Toggle("Show successful checks (\(successes.formatted()))", isOn: $showingSuccessfulChecks)
                 }
             }
             ForEach(settings.sourceCheckFreshness.keys.filter {
@@ -22,7 +32,7 @@ struct SourceHealthView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
                             Label(title(for: key), systemImage: health.failure == nil ? "checkmark.circle" : "exclamationmark.triangle")
-                                .foregroundStyle(health.failure == nil ? Color.primary : Color.orange)
+                                .foregroundStyle(health.failure == nil ? Color.primary : UpkeepColors.warning(in: scheme))
                             Spacer()
                             if health.failure != nil, canRetry(key) {
                                 Button("Retry") { Task { await retry(key) } }
@@ -38,7 +48,7 @@ struct SourceHealthView: View {
                         if let failure = health.failure {
                             Text(failure).font(.callout).textSelection(.enabled)
                             if health.isRetained {
-                                Text("Previously known results are retained; refresh before relying on them.")
+                                Text("Showing results from the previous successful check.")
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                         }

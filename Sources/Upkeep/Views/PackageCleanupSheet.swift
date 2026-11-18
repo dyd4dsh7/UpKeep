@@ -24,14 +24,7 @@ struct PackageCleanupSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Package cleanup").font(.title2.weight(.semibold))
-                Text("Review unused files before removing them.")
-                    .foregroundStyle(.secondary)
-            }
-            .padding(24)
-
-            Divider()
+            WorkspaceSummary(title: "Package Cleanup", detail: "Review unused files before removing them.", systemImage: "trash")
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     if targets.count > 1 {
@@ -43,19 +36,17 @@ struct PackageCleanupSheet: View {
                         .disabled(isBusy)
                     }
                     if let target {
-                        GroupBox {
-                            VStack(alignment: .leading, spacing: 10) {
-                                Label(target.kind.cleanupSubject, systemImage: "shippingbox")
-                                    .font(.headline)
-                                Text(target.kind.confirmationMessage)
-                                    .foregroundStyle(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(8)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label(target.kind.cleanupSubject, systemImage: "shippingbox")
+                                .font(.headline)
+                            Text(target.kind.confirmationMessage)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
+                        .upkeepOutlinedInspectorCard()
 
-                        status
+                        VStack(alignment: .leading, spacing: 7) { status }
+                            .upkeepOutlinedInspectorCard()
 
                         DisclosureGroup("Command details") {
                             VStack(alignment: .leading, spacing: 8) {
@@ -71,8 +62,7 @@ struct PackageCleanupSheet: View {
                 }
                 .padding(24)
             }
-            Divider()
-            HStack {
+            WorkspaceDialogFooter {
                 if !isBusy, completed == nil, estimate != nil {
                     Button("Check Again") { Task { await check() } }
                 }
@@ -86,15 +76,16 @@ struct PackageCleanupSheet: View {
                             Task { await check() }
                         }
                         .buttonStyle(.borderedProminent)
+                        .keyboardShortcut(.defaultAction)
                     } else if estimate?.shouldOfferCleanup == true {
                         Button("Clean Up…") { showsConfirmation = true }
                             .buttonStyle(.borderedProminent)
                     }
                 }
             }
-            .padding(20)
         }
-        .frame(width: 520, height: 480)
+        .frame(width: 530, height: 440)
+        .upkeepWorkspaceAppearance()
         .interactiveDismissDisabled(isBusy)
         .onChange(of: selectedID) { _, _ in
             estimate = nil
@@ -135,9 +126,10 @@ struct PackageCleanupSheet: View {
                 Text(estimate.basis == .unavailable ? "Cleanup estimate unavailable"
                      : estimate.basis == .reclaimable ? "Estimated space to recover" : "Current cache size")
                     .font(.headline)
-                Text(estimate.basis == .unavailable ? "Unavailable"
-                     : ByteCountFormatter.string(fromByteCount: estimate.bytes, countStyle: .file))
-                    .font(.largeTitle.weight(.semibold).monospacedDigit())
+                if estimate.basis != .unavailable {
+                    Text(ByteCountFormatter.string(fromByteCount: estimate.bytes, countStyle: .file))
+                        .font(.largeTitle.weight(.semibold).monospacedDigit())
+                }
                 Text(estimate.basis == .unavailable ? estimate.confirmationMessage
                      : estimate.basis == .cacheFootprintOnly
                      ? "The manager cannot estimate how much it will remove. This is the total cache size; cleanup may recover less or no space."

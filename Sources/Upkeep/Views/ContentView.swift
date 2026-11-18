@@ -48,12 +48,14 @@ struct ContentView: View {
                 .upkeepHomebrewAuthorizationAlert(store)
         } detail: {
             detail
+                .upkeepWorkspaceAppearance()
                 // The window owns its minimum size. Avoid feeding changing list,
                 // banner, and inspector minima back into AppKit's split layout.
                 .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                 .upkeepRunningAppConfirmationAlert(store)
                 .inspector(isPresented: inspectorPresented) {
                     inspectorContent
+                        .upkeepWorkspaceAppearance()
                         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                         .inspectorColumnWidth(min: UpkeepLayout.inspectorMinimumWidth,
                                               ideal: UpkeepLayout.inspectorIdealWidth,
@@ -70,7 +72,7 @@ struct ContentView: View {
         .sheet(isPresented: $showingOperations) {
             OperationCentreView(execution: store.updateExecutionState).environment(\.upkeepStoreReference, store)
         }
-        .searchable(text: $store.navigation.searchText, placement: .toolbar, prompt: "Search Upkeep")
+        .searchable(text: searchTextBinding, placement: .toolbar, prompt: "Search Upkeep")
         .sheet(isPresented: Binding(
             get: { !settings.hasCompletedSetup },
             set: { _ in }
@@ -113,13 +115,11 @@ struct ContentView: View {
             store.selectedApp = nil
             store.updateInspectorSelection = nil
             store.searchText = ""
-            store.completeCVESoftwareNavigation()
-        }
-        .onChange(of: store.searchText) { _, value in
-            if !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                store.selectedApp = nil
-                store.updateInspectorSelection = nil
+            store.navigation.requestedSearchResult = nil
+            if store.navigation.inventoryReveal?.destination != store.selection {
+                store.navigation.inventoryReveal = nil
             }
+            store.completeCVESoftwareNavigation()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshDockBadge()
@@ -258,6 +258,23 @@ struct ContentView: View {
         }
     }
 
+    private var searchTextBinding: Binding<String> {
+        Binding(
+            get: { store.searchText },
+            set: { value in
+                guard value != store.searchText else { return }
+                let oldQuery = store.searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+                let newQuery = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                if oldQuery != newQuery {
+                    store.selectedApp = nil
+                    store.updateInspectorSelection = nil
+                    store.navigation.requestedSearchResult = nil
+                }
+                store.searchText = value
+            }
+        )
+    }
+
     private var isSearching: Bool {
         !store.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -304,7 +321,7 @@ extension View {
             set: { store.pendingHomebrewAuthorizationConfirmation = $0 }
         )) { confirmation in
             Alert(
-                title: Text("Administrator Password May Be Required"),
+                title: Text("Continue with Homebrew?"),
                 message: Text(confirmation.action.authorizationMessage(itemName: confirmation.itemName)),
                 primaryButton: .default(Text(confirmation.action.isAdoption ? "Continue Adoption" : "Continue Update")) {
                     Task { await store.confirmHomebrewAuthorization(confirmation) }
@@ -341,8 +358,8 @@ private extension HomebrewAuthorizationConfirmation.Action {
 
     func authorizationMessage(itemName: String) -> String {
         if isAdoption {
-            return "\(itemName) is a Homebrew cask. If Homebrew cannot read the existing app bundle, Upkeep will open Terminal and ask for your macOS password to repair readable permissions inside that app only, then retry adoption."
+            return "Homebrew may need to repair read permissions inside \(itemName) before it can adopt the app. If needed, Terminal will ask for your administrator password and Upkeep will retry adoption."
         }
-        return "\(itemName) is a Homebrew cask. Its installer or cleanup steps may need administrator approval. If required, Upkeep will open Terminal and macOS will ask for your password."
+        return "The installer or cleanup for \(itemName) may need administrator approval. If needed, Terminal will ask for your administrator password."
     }
 }

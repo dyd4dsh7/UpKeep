@@ -27,14 +27,15 @@ private struct MacOSUpdateGroups {
 struct MacOSUpdatesView: View {
     @UpkeepStoreReference private var store
     @EnvironmentObject private var settings: AppSettings
+    @UpkeepState private var selectedUpdateID: String?
 
     var body: some View {
         let groups = MacOSUpdateGroups(store.macOSUpdates.filter {
-            settings.sidebarViewMode == .advanced || !$0.isFullInstaller
+            settings.sidebarViewMode == .advanced || !$0.isFullInstaller || $0.id == revealedUpdateID
         })
         VStack(spacing: 0) {
             if groups.isEmpty {
-                ContentUnavailableView(
+                WorkspaceEmptyState(
                     store.macOSCheckState == .complete ? "Your Mac is up to date" : store.macOSCheckState.title,
                     systemImage: store.macOSCheckState.symbol,
                     description: Text(store.macOSCheckState == .complete
@@ -43,24 +44,8 @@ struct MacOSUpdatesView: View {
                 ).frame(maxWidth: .infinity, maxHeight: .infinity)
                     .upkeepStateTransition()
             } else {
-                List {
-                    if !groups.updates.isEmpty {
-                        Section("Available Updates") {
-                            ForEach(groups.updates) { update in systemRow(update) }
-                        }
-                    }
-                    if settings.sidebarViewMode == .advanced, !groups.installers.isEmpty {
-                        Section {
-                            ForEach(groups.installers) { update in systemRow(update) }
-                        } header: {
-                            Text("Full macOS Installers")
-                        } footer: {
-                            Text("Installers offered by Apple for clean installs, upgrades, and recovery media.")
-                        }
-                    }
-                }
-                .upkeepContentList()
-                .upkeepStateTransition()
+                systemList(groups)
+                    .upkeepStateTransition()
             }
         }
         .upkeepAnimated(for: groups.identity)
@@ -88,8 +73,40 @@ struct MacOSUpdatesView: View {
         }
     }
 
+    private var revealedUpdateID: String? {
+        guard case let .macOS(id) = store.navigation.inventoryReveal else { return nil }
+        return id
+    }
+
+    private func systemList(_ groups: MacOSUpdateGroups) -> some View {
+        ScrollViewReader { proxy in
+            List(selection: $selectedUpdateID) {
+                if !groups.updates.isEmpty {
+                    Section("Available Updates") {
+                        ForEach(groups.updates) { update in systemRow(update) }
+                    }
+                }
+                if !groups.installers.isEmpty {
+                    Section {
+                        ForEach(groups.installers) { update in systemRow(update) }
+                    } header: {
+                        Text("Full macOS Installers")
+                    } footer: {
+                        Text("Installers offered by Apple for clean installs, upgrades, and recovery media.")
+                    }
+                }
+            }
+            .upkeepContentList()
+            .onChange(of: revealedUpdateID, initial: true) { _, id in
+                guard let id, groups.identity.contains(id) else { return }
+                selectedUpdateID = id
+                proxy.scrollTo(id, anchor: .center)
+            }
+        }
+    }
+
     private func systemRow(_ update: MacOSUpdate) -> some View {
-        StandardItemRow {
+        StandardItemRow(isSelected: selectedUpdateID == update.id) {
             Image(systemName: update.isFullInstaller ? "internaldrive" : "apple.logo")
                 .font(.title2).foregroundStyle(update.isBeta ? .purple : .blue)
         } content: {
@@ -112,6 +129,8 @@ struct MacOSUpdatesView: View {
             .listRowPrimaryAction()
             .disabled(store.isWorking(.macOSUpdate(update.id)))
         }
+        .tag(update.id)
+        .id(update.id)
     }
 
     private func formattedSize(_ value: String?) -> String? {

@@ -30,77 +30,33 @@ struct UpdatesView: View {
 
     var body: some View {
         let snapshot = listSnapshot
-        VStack(spacing: 0) {
-            if store.isScanning && store.apps.isEmpty {
-                scanningState
-                    .upkeepStateTransition()
-            } else if snapshot.isEmpty {
-                emptyState
-                    .upkeepStateTransition()
-            } else {
-                VStack(spacing: 0) {
-                    UpdateDecisionHeader(
-                        recommendedCount: store.recommendedBatchUpdateItems.count,
-                        attentionCount: store.availableBatchUpdateItems.count - store.recommendedBatchUpdateItems.count,
-                        isWorking: store.isWorking(.unifiedBatch),
-                        review: { store.isShowingBatchReview = true }
-                    )
-                    Divider()
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            // Eager measurement keeps selection from correcting
-                            // estimated heights above the current scroll position.
-                            VStack(spacing: 0) {
-                                if !snapshot.applications.isEmpty {
-                                    updateSectionHeader("Applications")
-                                    ForEach(snapshot.applications) { update in
-                                        selectionRow(id: "app:\(update.app.id)") { UpdateCard(update: update) }
-                                    }
-                                }
-                                if !snapshot.homebrewPackages.isEmpty {
-                                    updateSectionHeader("Homebrew Packages")
-                                    ForEach(snapshot.homebrewPackages) { package in
-                                        selectionRow(id: UpdateInspectorSelection.homebrew(package.id).listID) {
-                                            HomebrewUpdateCard(package: package)
-                                        }
-                                    }
-                                }
-                                if !snapshot.macOSUpdates.isEmpty {
-                                    updateSectionHeader("macOS")
-                                    ForEach(snapshot.macOSUpdates) { MacOSUpdateCard(update: $0).padding(.horizontal, 12) }
-                                }
-                                if !snapshot.developerPackages.isEmpty {
-                                    updateSectionHeader("Developer Packages")
-                                    ForEach(snapshot.developerPackages) { package in
-                                        selectionRow(id: UpdateInspectorSelection.developer(package.id).listID) {
-                                            DeveloperUpdateCard(package: package)
-                                        }
-                                    }
-                                }
-                                if !snapshot.models.isEmpty {
-                                    updateSectionHeader("AI Models")
-                                    ForEach(snapshot.models) { model in
-                                        selectionRow(id: UpdateInspectorSelection.model(model.id).listID) {
-                                            LocalModelUpdateCard(model: model)
-                                        }
-                                    }
-                                }
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.bottom, 8)
-                        }
-                        .focusable()
-                        .focused($updatesFocused)
-                        .focusEffectDisabled()
-                        .onMoveCommand { direction in
-                            moveSelection(direction, snapshot: snapshot, proxy: proxy)
+        ScrollViewReader { proxy in
+            ScrollView {
+                // Eager measurement keeps selection from correcting estimated
+                // heights above the current scroll position.
+                VStack(alignment: .leading, spacing: 17) {
+                    UpdateDecisionHeader(review: { store.isShowingBatchReview = true })
+                    if !snapshot.isEmpty || viewState.filter != .all {
+                        queueToolbar
+                        if snapshot.isEmpty {
+                            emptyState
+                        } else {
+                            updateGroups(snapshot)
                         }
                     }
                 }
-                .upkeepStateTransition()
+                .padding(.horizontal, UpkeepLayout.pageInset)
+                .padding(.vertical, 20)
+                .frame(maxWidth: 1_200)
+                .frame(maxWidth: .infinity)
+            }
+            .focusable()
+            .focused($updatesFocused)
+            .focusEffectDisabled()
+            .onMoveCommand { direction in
+                moveSelection(direction, snapshot: snapshot, proxy: proxy)
             }
         }
-        .upkeepAnimated(for: store.isScanning && store.apps.isEmpty ? "scanning" : snapshot.isEmpty ? "empty" : "content")
         .upkeepAnimated(for: snapshot.identity)
         .sheet(isPresented: $store.navigation.isShowingBatchReview) {
             BatchUpdateSheet(items: store.availableBatchUpdateItems)
@@ -109,37 +65,87 @@ struct UpdatesView: View {
         .toolbar { listToolbar }
     }
 
-    private func updateSectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.secondary)
+    private var queueToolbar: some View {
+        HStack(spacing: 10) {
+            Text("Updates by source")
+                .font(.title3.weight(.semibold))
+                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 12)
+            updateFilterMenu
+            updateSortMenu
+        }
+    }
+
+    private func updateGroups(_ snapshot: UpdateListSnapshot) -> some View {
+        VStack(spacing: 14) {
+            updateSection("Applications", items: snapshot.applications) { update in
+                selectionRow(id: "app:\(update.app.id)") { UpdateCard(update: update) }
+            }
+            updateSection("Homebrew Packages", items: snapshot.homebrewPackages) { package in
+                selectionRow(id: UpdateInspectorSelection.homebrew(package.id).listID) {
+                    HomebrewUpdateCard(package: package)
+                }
+            }
+            updateSection("macOS", items: snapshot.macOSUpdates) { update in
+                MacOSUpdateCard(update: update).padding(.horizontal, 8)
+            }
+            updateSection("Developer Packages", items: snapshot.developerPackages) { package in
+                selectionRow(id: UpdateInspectorSelection.developer(package.id).listID) {
+                    DeveloperUpdateCard(package: package)
+                }
+            }
+            updateSection("AI Models", items: snapshot.models) { model in
+                selectionRow(id: UpdateInspectorSelection.model(model.id).listID) {
+                    LocalModelUpdateCard(model: model)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func updateSection<Item: Identifiable, Row: View>(
+        _ title: String,
+        items: [Item],
+        @ViewBuilder row: @escaping (Item) -> Row
+    ) -> some View {
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                WorkspaceSectionLabel(title: title, count: items.count)
+                    .padding(.horizontal, 15)
+                    .padding(.vertical, 9)
+                Divider().opacity(0.62)
+                VStack(spacing: 0) {
+                    ForEach(items) { item in
+                        row(item)
+                        if item.id != items.last?.id {
+                            Divider().opacity(0.6).padding(.leading, 58)
+                        }
+                    }
+                }
+                .padding(5)
+            }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 8)
-            .padding(.top, 12)
-            .padding(.bottom, 8)
+            .upkeepSurface()
+        }
     }
 
     private func selectionRow<Row: View>(id: String, @ViewBuilder content: () -> Row) -> some View {
         let isSelected = selectedUpdateItemID.wrappedValue == id
-        return VStack(spacing: 0) {
-            content()
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(isSelected ? Color.accentColor.opacity(0.2) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    selectedUpdateItemID.wrappedValue = id
-                    updatesFocused = true
-                }
-                .accessibilityElement(children: .contain)
-                .accessibilityAddTraits(isSelected ? .isSelected : [])
-                .accessibilityAction {
-                    selectedUpdateItemID.wrappedValue = id
-                    updatesFocused = true
-                }
-            Divider().padding(.leading, 58)
-        }
-        .id(id)
+        return content()
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(isSelected ? Color.accentColor.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 8))
+            .contentShape(Rectangle())
+            .onTapGesture {
+                selectedUpdateItemID.wrappedValue = id
+                updatesFocused = true
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
+            .accessibilityAction {
+                selectedUpdateItemID.wrappedValue = id
+                updatesFocused = true
+            }
+            .id(id)
     }
 
     private func moveSelection(_ direction: MoveCommandDirection, snapshot: UpdateListSnapshot, proxy: ScrollViewProxy) {
@@ -157,11 +163,6 @@ struct UpdatesView: View {
     }
 
     @ToolbarContentBuilder private var listToolbar: some ToolbarContent {
-        ToolbarItemGroup(placement: .primaryAction) {
-            updateSortMenu
-            updateFilterMenu
-        }
-        upkeepToolbarSpacer()
         ToolbarItem(placement: .primaryAction) {
             ScanToolbarButton()
         }
@@ -180,12 +181,10 @@ struct UpdatesView: View {
                 updateSortButton("Available Version", order: .availableVersion)
             }
         } label: {
-            ListControlLabel(
-                systemImage: "list.bullet",
-                isActive: viewState.sortOrder != .recommended
-            )
+            Label("Sort", systemImage: "arrow.up.arrow.down")
+                .foregroundStyle(viewState.sortOrder == .recommended ? Color.primary : .accentColor)
         }
-        .menuIndicator(.hidden)
+        .fixedSize()
         .toolbarControlLabel("Sort updates")
     }
 
@@ -201,12 +200,10 @@ struct UpdatesView: View {
                 }
             }
         } label: {
-            ListControlLabel(
-                systemImage: "line.3.horizontal.decrease",
-                isActive: viewState.filter != .all
-            )
+            Label(viewState.filter == .all ? "All Sources" : viewState.filter.rawValue,
+                  systemImage: "line.3.horizontal.decrease")
         }
-        .menuIndicator(.hidden)
+        .fixedSize()
         .toolbarControlLabel("Filter updates")
     }
 
@@ -352,414 +349,14 @@ struct UpdatesView: View {
         return viewState.sortAscending ? comparison == .orderedAscending : comparison == .orderedDescending
     }
 
-    private var scanningState: some View {
-        VStack(spacing: 16) {
-            ProgressView().controlSize(.large)
-            Text("Checking for updates…")
-                .font(.title3.weight(.medium))
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
     private var emptyState: some View {
-        ContentUnavailableView {
-            Label(emptyTitle, systemImage: store.updateCheckState.symbol)
-        } description: {
-            Text(store.searchText.isEmpty
-                 ? (viewState.filter != .all
-                    ? "No available updates match the selected category."
-                    : store.updateCheckState.detail)
-                 : "Try a different search term.")
-        } actions: {
-            if store.searchText.isEmpty {
-                Button("Check Again") { Task { await store.scan() } }
-                    .buttonStyle(.borderedProminent)
-            }
+        WorkspaceEmptyState(title: "No matching updates", systemImage: "line.3.horizontal.decrease",
+                            description: Text("Try another source to see available updates.")) {
+            Button("Show All Sources") { viewState.filter = .all }
+                .buttonStyle(.bordered)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var emptyTitle: String {
-        if !store.searchText.isEmpty { return "No matching updates" }
-        if store.updateCheckState != .complete { return store.updateCheckState.title }
-        if viewState.filter != .all { return "No \(viewState.filter.rawValue)" }
-        return "No updates found"
-    }
-}
-
-struct BatchUpdateSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @UpkeepStoreReference private var store
-    @EnvironmentObject private var settings: AppSettings
-    let items: [BatchUpdateItem]
-    let isCVEReview: Bool
-
-    @StateObject private var state: BatchUpdateSheetState
-
-    init(items: [BatchUpdateItem], isCVEReview: Bool = false) {
-        self.items = items
-        self.isCVEReview = isCVEReview
-        let initial = BatchUpdateSheetState(items: items)
-        if isCVEReview {
-            initial.selectedIDs = Set(items.map(\.id))
-            initial.expandedGroups = Set(items.map(\.riskGroup))
-        }
-        _state = StateObject(wrappedValue: initial)
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            if let summary = state.summary {
-                resultsView(summary)
-            } else {
-                reviewView
-            }
-            Divider()
-            footer
-        }
-        .frame(minWidth: 780, idealWidth: 840, minHeight: 560, idealHeight: 620)
-        .interactiveDismissDisabled(state.isRunning)
-    }
-
-    private var header: some View {
-        HStack(spacing: 16) {
-            Image(systemName: state.summary == nil ? "checklist" : resultHeaderIcon)
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(state.summary == nil ? Color.accentColor : resultHeaderColor)
-                .frame(width: 44, height: 44)
-                .background(
-                    (state.summary == nil ? Color.accentColor : resultHeaderColor).opacity(0.12),
-                    in: RoundedRectangle(cornerRadius: 12)
-                )
-            VStack(alignment: .leading, spacing: 2) {
-                Text(state.summary == nil ? (isCVEReview ? "Update Affected Software" : "Review Updates") : "Update Results")
-                    .font(.title2.bold())
-                if state.summary != nil {
-                    Text(headerSubtitle)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-            if state.summary == nil {
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("\(state.selectedIDs.count)")
-                        .font(.title2.bold().monospacedDigit())
-                    Text("of \(visibleItems.count) selected")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .accessibilityElement(children: .combine)
-            }
-        }
-        .padding(20)
-    }
-
-    private var reviewView: some View {
-        VStack(spacing: 0) {
-            if isCVEReview {
-                Text("Only affected software with available updates is included. Review version changes below. External updaters still require you to finish there; available updates may not fix every advisory.")
-                    .font(.callout).foregroundStyle(.secondary).padding(.horizontal, 20).padding(.top, 14)
-            }
-            HStack(spacing: 12) {
-                Button(state.selectedIDs.isEmpty ? (isCVEReview ? "Select All" : "Select Recommended") : "Deselect All") {
-                    state.selectedIDs = state.selectedIDs.isEmpty
-                        ? Set(visibleItems.filter { isCVEReview || $0.isRecommendedByDefault }.map(\.id))
-                        : []
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.tint)
-                Spacer()
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 11)
-
-            if selectedItems.contains(where: \.mayRequireAdministratorPassword) {
-                Label(
-                    "Selected Homebrew casks may open Terminal and request your administrator password.",
-                    systemImage: "lock.shield.fill"
-                )
-                .font(.callout)
-                .foregroundStyle(.orange)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 20)
-                .padding(.bottom, 10)
-            }
-
-            List {
-                ForEach(visibleRiskGroups) { group in
-                    let groupItems = visibleItems.filter { $0.riskGroup == group }
-                    if !groupItems.isEmpty {
-                        Section {
-                            if state.expandedGroups.contains(group) {
-                                ForEach(groupItems) { item in
-                                    BatchReviewRow(item: item, isSelected: selectionBinding(for: item))
-                                }
-                            }
-                        } header: {
-                            BatchGroupHeader(
-                                group: group,
-                                itemCount: groupItems.count,
-                                selectedCount: groupItems.count { state.selectedIDs.contains($0.id) },
-                                isExpanded: state.expandedGroups.contains(group)
-                            ) {
-                                withAnimation(.snappy(duration: 0.18)) {
-                                    if state.expandedGroups.contains(group) {
-                                        state.expandedGroups.remove(group)
-                                    } else {
-                                        state.expandedGroups.insert(group)
-                                    }
-                                }
-                            }
-                        }
-                        .listSectionSeparator(.hidden)
-                    }
-                }
-            }
-            .upkeepContentList()
-
-        }
-    }
-
-    private func resultsView(_ summary: BatchUpdateSummary) -> some View {
-        List(summary.results) { result in
-            HStack(spacing: 12) {
-                Image(systemName: resultIcon(result.outcome))
-                    .foregroundStyle(resultColor(result.outcome))
-                    .font(.title3)
-                    .frame(width: 24)
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack {
-                        Text(result.item.name).fontWeight(.semibold)
-                        Spacer()
-                        Text(result.outcome.rawValue)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(resultColor(result.outcome))
-                    }
-                    Text(result.detail).font(.caption).foregroundStyle(.secondary)
-                    if let warning = result.warning {
-                        Label(warning, systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption).foregroundStyle(.orange)
-                    }
-                }
-            }
-            .padding(.vertical, 6)
-        }
-        .upkeepContentList()
-    }
-
-    private var footer: some View {
-        HStack {
-            if state.isRunning, let progress = store.batchUpdateProgress {
-                ProgressView(value: Double(progress.completed), total: Double(max(progress.total, 1)))
-                    .frame(width: 150)
-                Text("\(progress.itemName) · \(progress.completed)/\(progress.total)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer()
-            Button(state.summary == nil ? "Cancel" : "Done") { dismiss() }
-                .keyboardShortcut(.cancelAction)
-                .disabled(state.isRunning)
-            if state.summary == nil {
-                Button(batchButtonTitle) {
-                    let selected = visibleItems.filter { state.selectedIDs.contains($0.id) }
-                    state.isRunning = true
-                    Task {
-                        state.summary = isCVEReview
-                            ? await store.performCVEBatchUpdates(selected)
-                            : await store.performBatchUpdates(selected)
-                        state.isRunning = false
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-                .disabled(state.selectedIDs.isEmpty || state.isRunning)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .background(.bar)
-    }
-
-    private func selectionBinding(for item: BatchUpdateItem) -> Binding<Bool> {
-        Binding(
-            get: { state.selectedIDs.contains(item.id) },
-            set: { selected in
-                if selected { state.selectedIDs.insert(item.id) }
-                else { state.selectedIDs.remove(item.id) }
-            }
-        )
-    }
-
-    private var visibleRiskGroups: [UpdateRiskGroup] {
-        UpdateRiskGroup.allCases.filter { group in
-            isCVEReview || settings.sidebarViewMode == .advanced || ![.prerelease, .dependency, .developer].contains(group)
-        }
-    }
-
-    private var visibleItems: [BatchUpdateItem] {
-        items.filter { visibleRiskGroups.contains($0.riskGroup) }
-    }
-
-    private var selectedItems: [BatchUpdateItem] { visibleItems.filter { state.selectedIDs.contains($0.id) } }
-
-    private var selectedRunningApps: [InstalledApp] {
-        store.runningAppsForBatch(selectedItems)
-    }
-
-    private var batchButtonTitle: String {
-        if !selectedRunningApps.isEmpty { return "Quit Apps and Update \(state.selectedIDs.count)" }
-        return "Update \(state.selectedIDs.count)"
-    }
-
-    private var headerSubtitle: String {
-        guard let summary = state.summary else { return "Choose what Upkeep should update, then review each action." }
-        var parts = ["\(summary.updatedCount) updated"]
-        if summary.openedCount > 0 { parts.append("\(summary.openedCount) need attention") }
-        if summary.failedCount > 0 { parts.append("\(summary.failedCount) failed") }
-        return parts.joined(separator: " · ")
-    }
-
-    private var resultHeaderIcon: String { state.summary?.failedCount == 0 ? "checkmark.circle.fill" : "exclamationmark.triangle.fill" }
-    private var resultHeaderColor: Color { state.summary?.failedCount == 0 ? .green : .orange }
-    private func resultIcon(_ outcome: BatchUpdateResult.Outcome) -> String {
-        switch outcome { case .updated: "checkmark.circle.fill"; case .opened: "arrow.up.right.circle.fill"; case .failed: "xmark.circle.fill" }
-    }
-    private func resultColor(_ outcome: BatchUpdateResult.Outcome) -> Color {
-        switch outcome { case .updated: .green; case .opened: .blue; case .failed: .red }
-    }
-}
-
-@MainActor
-private final class BatchUpdateSheetState: ObservableObject {
-    @Published var selectedIDs: Set<String>
-    @Published var summary: BatchUpdateSummary?
-    @Published var isRunning = false
-    @Published var expandedGroups: Set<UpdateRiskGroup> = [.automatic, .manual]
-
-    init(items: [BatchUpdateItem]) {
-        selectedIDs = Set(items.filter(\.isRecommendedByDefault).map(\.id))
-    }
-}
-
-private struct BatchGroupHeader: View {
-    let group: UpdateRiskGroup
-    let itemCount: Int
-    let selectedCount: Int
-    let isExpanded: Bool
-    let toggle: () -> Void
-
-    var body: some View {
-        Button(action: toggle) {
-            HStack(spacing: 10) {
-                Image(systemName: group.systemImage)
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(groupColor)
-                    .frame(width: 22)
-                Text(group.title)
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(.primary)
-                Spacer()
-                if selectedCount > 0 {
-                    Text("\(selectedCount) selected")
-                        .font(.caption2.weight(.medium).monospacedDigit())
-                        .foregroundStyle(Color.accentColor)
-                }
-                Text("\(itemCount)")
-                    .font(.caption.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(.quaternary, in: Capsule())
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
-            }
-            .contentShape(Rectangle())
-            .padding(.vertical, 5)
-        }
-        .buttonStyle(.plain)
-        .listRowSeparator(.hidden)
-        .accessibilityLabel("\(group.title), \(itemCount) updates")
-        .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
-        .accessibilityHint(group.detail)
-    }
-
-    private var groupColor: Color {
-        switch group {
-        case .automatic: .green
-        case .manual: .orange
-        case .major: .red
-        case .prerelease: .purple
-        case .dependency: .blue
-        case .developer: .indigo
-        }
-    }
-}
-
-private struct BatchReviewRow: View {
-    @UpkeepStoreReference private var store
-    let item: BatchUpdateItem
-    @Binding var isSelected: Bool
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 10) {
-            Toggle("", isOn: $isSelected)
-                .labelsHidden()
-                .toggleStyle(.checkbox)
-                .fixedSize()
-                .accessibilityLabel(item.name)
-            itemIcon
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 7) {
-                    Text(item.name).fontWeight(.semibold)
-                    if isAppRunning {
-                        RunningBadge()
-                    }
-                }
-                Text(item.actionDescription).font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            VersionTransitionView(current: item.currentVersion, latest: displayedVersion)
-            if item.opensExternalUpdater {
-                Image(systemName: "arrow.up.right.square")
-                    .foregroundStyle(.secondary)
-                    .help("Requires completion outside Upkeep")
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 5)
-        .listRowSeparator(.hidden)
-    }
-
-    private var displayedVersion: String {
-        if case let .application(update) = item { return update.displayAvailableVersion }
-        return item.availableVersion
-    }
-
-    private var isAppRunning: Bool {
-        switch item {
-        case let .application(update):
-            store.isRunning(update.app)
-        case let .homebrew(package):
-            package.kind == .cask && store.homebrewPackageApp(for: package).map { store.isRunning($0) } == true
-        case .developer, .model:
-            false
-        }
-    }
-
-    @ViewBuilder private var itemIcon: some View {
-        switch item {
-        case let .application(update): AppIcon(url: update.app.url, size: 34)
-        case .homebrew: PackageSourceIcon(name: "homebrew", size: 34)
-        case let .developer(package): PackageManagerIcon(manager: package.manager, size: 34)
-        case let .model(model): LocalModelRuntimeIcon(runtime: model.runtime, size: 34)
-        }
+        .frame(maxWidth: .infinity, minHeight: 152)
+        .upkeepSurface()
     }
 }
 

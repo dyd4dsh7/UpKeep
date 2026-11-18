@@ -72,6 +72,20 @@ func appRefreshTracksFailedSourcesWithoutChangingOtherApps(fails: Bool) async {
 }
 
 @MainActor
+@Test func batchResultKeepsAnUnrelatedAlertAvailable() async {
+    let f = ReviewFixture(models: ModelMutationReviewClient(result: "partial"))
+    defer { f.cleanUp() }
+    let model = reviewModel()
+    f.store.localModels = [model]
+    f.store.errorMessage = "An unrelated action failed."
+
+    let summary = await f.store.performBatchUpdates([.model(model)])
+
+    #expect(summary.results.first?.detail.contains("download failed") == true)
+    #expect(f.store.errorMessage == "An unrelated action failed.")
+}
+
+@MainActor
 @Test func restoreWaitsForQuitConfirmationAndReopensApp() async throws {
     let f = ReviewFixture()
     defer { f.cleanUp() }
@@ -976,16 +990,22 @@ func modelMutationRecordsObservedRevisionAcrossCommandOutcomes(result: String, b
     defer { f.cleanUp() }
     let model = reviewModel()
     f.store.localModels = [model]
+    let reportedError: String?
     if batch {
         let summary = await f.store.performBatchUpdates([.model(model)])
+        reportedError = summary.results.first(where: { $0.outcome == .failed })?.detail
+        #expect(f.store.errorMessage == nil)
         #expect(summary.results.first?.outcome == (result == "updated" ? .updated : .failed))
         if result == "updated" { #expect(summary.results.first?.detail.contains("observed") == true) }
-    } else { await f.store.updateLocalModel(model) }
+    } else {
+        await f.store.updateLocalModel(model)
+        reportedError = f.store.errorMessage
+    }
     let changed = result == "updated" || result == "partial"
     #expect(f.store.updateHistory.count == (changed ? 1 : 0))
     if changed { #expect(f.store.updateHistory.first?.toVersion == "observed") }
-    #expect((f.store.errorMessage == nil) == (result == "updated"))
-    if result == "partial" { #expect(f.store.errorMessage?.contains("download failed") == true) }
+    #expect((reportedError == nil) == (result == "updated"))
+    if result == "partial" { #expect(reportedError?.contains("download failed") == true) }
     #expect(await client.fullCalls == 0)
     #expect(await client.runtimes == [.ollama])
     #expect(f.store.updateExecutionState.completedOperations.first?.result ==
@@ -1077,11 +1097,17 @@ func developerInstallRecordsObservedVersionAndVerifiesItsEnvironment(result: Str
     let package = reviewPackage("fixture", executable: "/fixture/npm")
     let independent = DeveloperPackage(name: "other", currentVersion: "1", latestVersion: "2", manager: .uv, executablePath: "/fixture/uv")
     f.store.developerPackages = [package, independent]
+    let reportedError: String?
     if batch {
         let summary = await f.store.performBatchUpdates([.developer(package)])
+        reportedError = summary.results.first(where: { $0.outcome == .failed })?.detail
+        #expect(f.store.errorMessage == nil)
         #expect(summary.results.first?.outcome == (result == "updated" ? .updated : .failed))
         if result == "updated" { #expect(summary.results.first?.detail.contains("1.1") == true) }
-    } else { await f.store.installDeveloperPackage(package, version: "1.1") }
+    } else {
+        await f.store.installDeveloperPackage(package, version: "1.1")
+        reportedError = f.store.errorMessage
+    }
     #expect(await client.checkedManagers == [[.npm]])
     #expect(f.store.developerPackages.contains(independent))
     let changed = ["updated", "partial", "unexpected"].contains(result)
@@ -1089,9 +1115,9 @@ func developerInstallRecordsObservedVersionAndVerifiesItsEnvironment(result: Str
     if changed {
         #expect(f.store.updateHistory.first?.toVersion == (result == "unexpected" ? "1.2" : "1.1"))
     }
-    #expect((f.store.errorMessage == nil) == (result == "updated"))
-    if result == "partial" { #expect(f.store.errorMessage?.contains("download failed") == true) }
-    if result == "unexpected" { #expect(f.store.errorMessage?.contains("requested version") == true) }
+    #expect((reportedError == nil) == (result == "updated"))
+    if result == "partial" { #expect(reportedError?.contains("download failed") == true) }
+    if result == "unexpected" { #expect(reportedError?.contains("requested version") == true) }
     if result != "unverified" {
         #expect(f.store.updateExecutionState.completedOperations.first?.verification?.requested == "1.1")
         #expect(f.store.updateExecutionState.completedOperations.first?.verification?.targetReached ==
@@ -1185,12 +1211,14 @@ func caskVerificationUsesInstalledBundleAndProtectsUnverifiedRecovery(result: St
     f.store.apps = [app]
     f.store.homebrewPackages = [package]
     #expect(f.store.homebrewPackageApp(for: package) != nil)
+    let reportedError: String?
     if mode == "individualFallback" {
         f.store.homebrewPackages = []
         let update = AvailableUpdate(app: app, availableVersion: "1.1", source: .homebrew,
             releaseNotes: nil, actionURL: nil, homebrewToken: package.token)
         await f.store.performUpdate(update)
         await f.store.confirmHomebrewAuthorization(try #require(f.store.pendingHomebrewAuthorizationConfirmation))
+        reportedError = f.store.errorMessage
     } else if mode == "fallback" || mode == "batchAdoptable" {
         f.store.homebrewPackages = []
         if mode == "batchAdoptable" {
@@ -1199,10 +1227,14 @@ func caskVerificationUsesInstalledBundleAndProtectsUnverifiedRecovery(result: St
         let update = AvailableUpdate(app: app, availableVersion: "1.1", source: .homebrew,
             releaseNotes: nil, actionURL: nil, homebrewToken: package.token)
         let summary = await f.store.performBatchUpdates([.application(update)])
+        reportedError = summary.results.first(where: { $0.outcome == .failed })?.detail
+        #expect(f.store.errorMessage == nil)
         #expect(summary.updatedCount == (successful ? 1 : 0))
         if successful { #expect(summary.results.first?.detail == "Updated to \(observedVersion).") }
     } else if mode == "batch" {
         let summary = await f.store.performBatchUpdates([.homebrew(package)])
+        reportedError = summary.results.first(where: { $0.outcome == .failed })?.detail
+        #expect(f.store.errorMessage == nil)
         #expect(summary.updatedCount == (successful ? 1 : 0))
         if successful { #expect(summary.results.first?.detail == "Updated to \(observedVersion).") }
     } else {
@@ -1212,14 +1244,15 @@ func caskVerificationUsesInstalledBundleAndProtectsUnverifiedRecovery(result: St
         } else { await f.store.updatePackage(package) }
         let confirmation = try #require(f.store.pendingHomebrewAuthorizationConfirmation)
         await f.store.confirmHomebrewAuthorization(confirmation)
+        reportedError = f.store.errorMessage
     }
     let changed = successful || result == "partial"
     #expect(f.store.updateHistory.count == (changed ? 1 : 0))
     if changed { #expect(f.store.updateHistory.first?.toVersion == observedVersion) }
     #expect(await history.discarded == (result == "unchanged"))
-    #expect((f.store.errorMessage == nil) == successful)
-    if result == "partial" { #expect(f.store.errorMessage?.contains("Installed 1.1") == true) }
-    if result == "unverified" { #expect(f.store.errorMessage?.contains("backup was retained") == true) }
+    #expect((reportedError == nil) == successful)
+    if result == "partial" { #expect(reportedError?.contains("Installed 1.1") == true) }
+    if result == "unverified" { #expect(reportedError?.contains("backup was retained") == true) }
 }
 
 private struct CaskReviewDiscovery: ApplicationDiscovering {
@@ -1346,15 +1379,21 @@ func individualDirectInstallVerifiesObservedBundle(result: String, batch: Bool) 
     defer { f.cleanUp() }
     f.store.apps = [app]
     let update = reviewUpdate(app, version: result == "incomplete" ? "1.2" : "1.1")
+    let reportedError: String?
     if batch {
         let summary = await f.store.performBatchUpdates([.application(update)])
+        reportedError = summary.results.first(where: { $0.outcome == .failed })?.detail
+        #expect(f.store.errorMessage == nil)
         #expect(summary.updatedCount == (result == "updated" ? 1 : 0))
-    } else { await f.store.performUpdate(update) }
+    } else {
+        await f.store.performUpdate(update)
+        reportedError = f.store.errorMessage
+    }
     let changed = result == "updated" || result == "partial" || result == "incomplete"
     #expect(f.store.updateHistory.count == (changed ? 1 : 0))
     if changed { #expect(f.store.updateHistory.first?.toVersion == installed?.installedVersion) }
     #expect(await f.history.discarded == (result == "unchanged"))
-    #expect((f.store.errorMessage == nil) == (result == "updated"))
+    #expect((reportedError == nil) == (result == "updated"))
 }
 
 @Test func historyBuildVersionsRoundTripAndOldRecordsRemainReadable() throws {
@@ -1928,17 +1967,21 @@ func cancelledDirectMutationReconcilesObservedVersionWithoutReportingSuccess(bat
     f.store.apps = [original]
     let update = reviewUpdate(original)
     let task = Task {
-        if batch { return await f.store.performBatchUpdates([.application(update)]).updatedCount }
+        if batch {
+            let summary = await f.store.performBatchUpdates([.application(update)])
+            #expect(summary.failedCount == 1)
+            return summary.results.first?.detail
+        }
         await f.store.performUpdate(update)
-        return 0
+        return f.store.errorMessage
     }
     defer { task.cancel() }
     #expect(await eventually { await installer.waiting })
     task.cancel()
     await installer.release()
-    #expect(await task.value == 0)
+    #expect(await task.value != nil)
     #expect(f.store.updateHistory.count == 1)
     #expect(f.store.updateHistory.first?.toVersion == observed.installedVersion)
-    #expect(f.store.errorMessage != nil)
+    #expect((f.store.errorMessage == nil) == batch)
     #expect(!f.store.isUpdating(update))
 }

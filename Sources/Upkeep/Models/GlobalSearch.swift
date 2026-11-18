@@ -1,5 +1,40 @@
 import Foundation
 
+enum SearchScope: String, CaseIterable, Identifiable {
+    case all = "All Sources"
+    case apps = "Applications"
+    case adoptable = "Homebrew Adoption"
+    case homebrew = "Homebrew Packages"
+    case developer = "Developer Packages"
+    case models = "AI Models"
+    case macOS = "macOS"
+    case history = "Update History"
+
+    var id: Self { self }
+}
+
+enum SearchResultSelection: Hashable {
+    case application(String)
+    case adoptable(String)
+    case homebrew(String)
+    case developer(String)
+    case model(String)
+    case macOS(String)
+    case history(UUID)
+}
+
+enum InventoryReveal: Equatable {
+    case macOS(String)
+    case history(UUID)
+
+    var destination: SidebarDestination {
+        switch self {
+        case .macOS: .macOSUpdates
+        case .history: .history
+        }
+    }
+}
+
 struct GlobalSearchResults {
     let apps: [InstalledApp]
     let adoptableApps: [AdoptableApp]
@@ -9,10 +44,36 @@ struct GlobalSearchResults {
     let macOSUpdates: [MacOSUpdate]
     let history: [UpdateRecord]
 
-    var isEmpty: Bool {
-        apps.isEmpty && adoptableApps.isEmpty && homebrewPackages.isEmpty
-            && developerPackages.isEmpty && models.isEmpty && macOSUpdates.isEmpty
-            && history.isEmpty
+    var count: Int {
+        apps.count + adoptableApps.count + homebrewPackages.count + developerPackages.count
+            + models.count + macOSUpdates.count + history.count
+    }
+
+    var isEmpty: Bool { count == 0 }
+
+    func inScope(_ scope: SearchScope) -> GlobalSearchResults {
+        guard scope != .all else { return self }
+        return GlobalSearchResults(
+            apps: scope == .apps ? apps : [],
+            adoptableApps: scope == .adoptable ? adoptableApps : [],
+            homebrewPackages: scope == .homebrew ? homebrewPackages : [],
+            developerPackages: scope == .developer ? developerPackages : [],
+            models: scope == .models ? models : [],
+            macOSUpdates: scope == .macOS ? macOSUpdates : [],
+            history: scope == .history ? history : []
+        )
+    }
+
+    func contains(_ selection: SearchResultSelection) -> Bool {
+        switch selection {
+        case let .application(id): apps.contains { $0.id == id }
+        case let .adoptable(id): adoptableApps.contains { $0.id == id }
+        case let .homebrew(id): homebrewPackages.contains { $0.id == id }
+        case let .developer(id): developerPackages.contains { $0.id == id }
+        case let .model(id): models.contains { $0.id == id }
+        case let .macOS(id): macOSUpdates.contains { $0.id == id }
+        case let .history(id): history.contains { $0.id == id }
+        }
     }
 
     var identity: String {

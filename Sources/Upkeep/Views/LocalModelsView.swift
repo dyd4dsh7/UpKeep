@@ -7,7 +7,7 @@ struct LocalModelsView: View {
         let models = sortedModels
         VStack(spacing: 0) {
             if models.isEmpty {
-                ContentUnavailableView(
+                WorkspaceEmptyState(
                     "No local models found", systemImage: "brain.head.profile",
                     description: Text("Models appear here when Ollama or LM Studio has models installed.")
                 )
@@ -19,8 +19,8 @@ struct LocalModelsView: View {
         }
         .upkeepAnimated(for: models.map(\.id))
         .safeAreaInset(edge: .top, spacing: 0) {
-            WorkspaceSummary(title: WorkspaceSummary.count(models.count, "local model", "local models"),
-                detail: "Updates available: \(models.filter(\.isOutdated).count) · Ollama and LM Studio",
+            WorkspaceSummary(title: "Local AI Models",
+                detail: "\(WorkspaceSummary.count(models.count, "model", "models")) · \(WorkspaceSummary.count(models.filter(\.isOutdated).count, "update", "updates")) available",
                 systemImage: "brain.head.profile")
         }
         .toolbar {
@@ -147,16 +147,16 @@ struct LocalModelDetail: View {
                     } else {
                         Label("Model is current", systemImage: "checkmark.seal.fill").foregroundStyle(.green)
                     }
-                    Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
-                        GridRow { label("Runtime"); Text(model.runtime.rawValue) }
-                        GridRow { label("Installed"); Text(model.installedRevision).monospacedDigit() }
-                        GridRow { label("Latest"); Text(model.latestRevision).monospacedDigit() }
-                        if let size = model.sizeBytes { GridRow { label("Size"); Text(ByteCountFormatter.string(fromByteCount: size, countStyle: .file)) } }
-                        if let modified = model.modifiedAt { GridRow { label("Downloaded"); Text(modified.formatted(date: .abbreviated, time: .shortened)) } }
-                        if let homepage = model.homepage { GridRow { label("Source"); Link(homepage.host() ?? "Open model page", destination: homepage) } }
+                    InspectorSection(title: "Model information") {
+                        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
+                            GridRow { label("Runtime"); Text(model.runtime.rawValue) }
+                            GridRow { label("Installed"); Text(model.installedRevision).monospacedDigit() }
+                            GridRow { label("Latest"); Text(model.latestRevision).monospacedDigit() }
+                            if let size = model.sizeBytes { GridRow { label("Size"); Text(ByteCountFormatter.string(fromByteCount: size, countStyle: .file)) } }
+                            if let modified = model.modifiedAt { GridRow { label("Downloaded"); Text(modified.formatted(date: .abbreviated, time: .shortened)) } }
+                            if let homepage = model.homepage { GridRow { label("Source"); Link(homepage.host() ?? "Open model page", destination: homepage) } }
+                        }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                .upkeepOutlinedInspectorCard()
                     DisclosureGroup("How updates work") {
                     Text(model.runtime == .ollama
                          ? "Upkeep compares the installed manifest digest with Ollama’s registry, then uses ollama pull to update."
@@ -166,7 +166,7 @@ struct LocalModelDetail: View {
                     }
                 }
         } else {
-            ContentUnavailableView("Select a model", systemImage: "brain.head.profile")
+            WorkspaceEmptyState("Select a model", systemImage: "brain.head.profile")
         }
     }
 
