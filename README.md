@@ -4,7 +4,7 @@
 
 A native macOS app for keeping applications and developer tools up to date.
 
-![Upkeep settings showing navigation, list density, and automatic checks](docs/images/settings.png)
+![Upkeep settings showing startup, navigation and list density options](docs/images/settings.png)
 
 ## Install and support
 
@@ -126,14 +126,11 @@ swift test
 For repeatable, offline performance measurements, run
 `./scripts/benchmark-performance.sh outputs/performance/current.log`.
 The benchmark uses an optimized build and isolated fixtures; it does not run
-package managers or apply updates. See the [performance report](docs/performance/2026-08-31.md)
-for baseline measurements, results, tradeoffs, and comparison commands.
-The [second performance pass](docs/performance/2026-08-31-services.md) covers
-diagnostics loading/redaction and developer release sorting. Run it with
-`./scripts/benchmark-performance.sh outputs/performance/services.log services`.
-The [third performance pass](docs/performance/2026-08-31-search.md) covers global
-search across all seven result groups. Run it with
-`./scripts/benchmark-performance.sh outputs/performance/search.log search`.
+package managers or apply updates. Add `services` or `search` after the log path
+to benchmark diagnostics and release sorting, or global search.
+
+The [live scan benchmark](docs/performance/2026-11-22-live-scan.md) measures a
+real full scan and the effect of its caches.
 
 ## Privacy and permissions
 

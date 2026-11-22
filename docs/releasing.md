@@ -8,7 +8,7 @@ Actions workflows, so nothing runs on GitHub when a tag is pushed.
 
 ## One-time setup
 
-1. Confirm ownership/licensing and complete `docs/open-source-readiness.md`.
+1. Confirm ownership and licensing, including `THIRD_PARTY_NOTICES.md` for bundled logos.
 1. Create the self-update signing key once with
    `swift scripts/update-signing.swift generate ~/.config/upkeep/update-signing.key`
    and put the printed public key in `SelfUpdate.publicKey`. Back the private key
