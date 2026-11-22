@@ -154,16 +154,54 @@ struct SystemVersionInfo: Equatable, Sendable {
 }
 
 /// Remembers the last successful full-installer listing for automatic scans.
+/// The packaged app keeps it in its Caches folder so the first check after
+/// launch can reuse it; tests use memory only.
 actor MacOSInstallerListingCache {
-    static let shared = MacOSInstallerListingCache()
-    private var listing: (data: Data, date: Date)?
+    static let shared = MacOSInstallerListingCache(
+        fileURL: Bundle.main.bundleIdentifier == InstalledApp.upkeepBundleIdentifier ? defaultFileURL() : nil
+    )
+
+    private struct Listing: Codable {
+        let data: Data
+        let date: Date
+    }
+
+    private let fileURL: URL?
+    private var listing: Listing?
+    private var loaded = false
+
+    init(fileURL: URL? = nil) {
+        self.fileURL = fileURL
+    }
+
+    static func defaultFileURL() -> URL {
+        let root = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return root.appendingPathComponent("\(InstalledApp.upkeepBundleIdentifier)/macos-installers.json")
+    }
 
     func recent(maximumAge: TimeInterval, now: Date = Date()) -> Data? {
-        guard let listing, now.timeIntervalSince(listing.date) < maximumAge else { return nil }
+        if !loaded {
+            loaded = true
+            if let fileURL, let data = try? Data(contentsOf: fileURL) {
+                listing = try? JSONDecoder().decode(Listing.self, from: data)
+            }
+        }
+        guard let listing else { return nil }
+        let age = now.timeIntervalSince(listing.date)
+        // A date in the future (for example after a clock change) is not trusted.
+        guard age >= -60, age < maximumAge else { return nil }
         return listing.data
     }
 
-    func store(_ data: Data, at date: Date = Date()) { listing = (data, date) }
+    func store(_ data: Data, at date: Date = Date()) {
+        let value = Listing(data: data, date: date)
+        listing = value
+        loaded = true
+        guard let fileURL, let encoded = try? JSONEncoder().encode(value) else { return }
+        try? FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? encoded.write(to: fileURL, options: .atomic)
+    }
 }
 
 private func installerListing(reuseRecent: Bool) async -> (data: Data?, error: Error?) {

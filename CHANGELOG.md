@@ -4,7 +4,7 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
-- Made repeat update checks faster (about 1.8 s to 1.1 s): RubyGems and npm reuse their outdated-package results for up to 30 minutes while the installed packages are unchanged. Installing, updating, or removing a package forces a fresh check.
+- Made update checks faster, including the first check after opening Upkeep (about 2.6 s to 1.0–1.3 s on a typical Mac): RubyGems, npm, and Python reuse their outdated-package results for up to 30 minutes while the installed packages are unchanged, and these results and the macOS full-installer list are kept in Upkeep's Caches folder across launches. Installing, updating, or removing a package forces a fresh check.
 
 ## 0.25.2 — 2026-11-22
 

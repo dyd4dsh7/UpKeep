@@ -528,14 +528,21 @@ func scanPNPM(_ path: String) async -> ManagerScanResult {
 }
 
 func scanPython(_ path: String) async -> ManagerScanResult {
-    async let installedCommand = captureDeveloperCommandAsync(
-        URL(fileURLWithPath: path), ["-m", "pip", "list", "--format=json", "--disable-pip-version-check"]
+    let executable = URL(fileURLWithPath: path)
+    let (installedResult, outdatedResult, _) = await DeveloperOutdatedCache.shared.inventoryAndOutdated(
+        key: "python|\(path)",
+        inventory: {
+            await captureDeveloperCommandAsync(executable, ["-m", "pip", "list", "--format=json", "--disable-pip-version-check"])
+        },
+        outdated: {
+            await captureDeveloperCommandAsync(executable,
+                ["-m", "pip", "list", "--outdated", "--format=json", "--disable-pip-version-check"])
+        },
+        isCacheable: { inventory, outdated in
+            (try? JSONDecoder().decode([PipInstalled].self, from: inventory.data)) != nil
+                && (try? JSONDecoder().decode([PipOutdated].self, from: outdated.data)) != nil
+        }
     )
-    async let outdatedCommand = captureDeveloperCommandAsync(
-        URL(fileURLWithPath: path),
-        ["-m", "pip", "list", "--outdated", "--format=json", "--disable-pip-version-check"]
-    )
-    let (installedResult, outdatedResult) = await (installedCommand, outdatedCommand)
     guard let installed = try? JSONDecoder().decode([PipInstalled].self, from: installedResult.data) else {
         return failedManagerScan(.python, command: "inventory", result: installedResult)
     }

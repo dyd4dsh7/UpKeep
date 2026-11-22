@@ -210,3 +210,14 @@ private func countingClient(_ transport: CountingCVETransport) -> CVEInventoryCl
     #expect(await cache.recent(maximumAge: 60, now: start.addingTimeInterval(30)) == Data("listing".utf8))
     #expect(await cache.recent(maximumAge: 60, now: start.addingTimeInterval(61)) == nil)
 }
+
+@Test func installerListingSurvivesARelaunch() async {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("Installers-\(UUID())/macos-installers.json")
+    defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+    let start = Date()
+    await MacOSInstallerListingCache(fileURL: url).store(Data("listing".utf8), at: start)
+    let relaunched = MacOSInstallerListingCache(fileURL: url)
+    #expect(await relaunched.recent(maximumAge: 60, now: start.addingTimeInterval(30)) == Data("listing".utf8))
+    #expect(await MacOSInstallerListingCache(fileURL: url).recent(maximumAge: 60, now: start.addingTimeInterval(61)) == nil)
+    #expect(await MacOSInstallerListingCache(fileURL: url).recent(maximumAge: 60, now: start.addingTimeInterval(-3_600)) == nil)
+}

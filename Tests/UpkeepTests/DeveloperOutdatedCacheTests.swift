@@ -60,3 +60,39 @@ private func run(_ cache: DeveloperOutdatedCache, calls: Calls, inventory: Strin
     #expect(!reused)
     #expect(calls.outdated.withLock { $0 } == 2)
 }
+
+@Test func cachedResultsSurviveARelaunchAndStayFreshnessChecked() async throws {
+    let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("OutdatedCache-\(UUID())/developer-outdated.json")
+    defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+    let calls = Calls(), start = Date()
+
+    _ = await run(DeveloperOutdatedCache(fileURL: url), calls: calls, inventory: "a@1", outdated: "saved", at: start)
+    #expect(FileManager.default.fileExists(atPath: url.path))
+
+    // A new instance (as after relaunching Upkeep) reads the saved result.
+    let (outdated, reused) = await run(DeveloperOutdatedCache(fileURL: url), calls: calls,
+                                       inventory: "a@1", outdated: "fresh", at: Date())
+    #expect(reused)
+    #expect(String(decoding: outdated.data, as: UTF8.self) == "saved")
+    #expect(calls.outdated.withLock { $0 } == 1)
+
+    // A changed inventory still forces a fresh check after relaunch.
+    let (changed, reusedChanged) = await run(DeveloperOutdatedCache(fileURL: url), calls: calls,
+                                             inventory: "a@2", outdated: "fresh", at: Date())
+    #expect(!reusedChanged)
+    #expect(String(decoding: changed.data, as: UTF8.self) == "fresh")
+}
+
+@Test func futureDatedEntriesAreNotTrusted() async {
+    let cache = DeveloperOutdatedCache(), calls = Calls(), start = Date()
+    _ = await run(cache, calls: calls, inventory: "a@1", at: start.addingTimeInterval(3_600))
+    let (_, reused) = await run(cache, calls: calls, inventory: "a@1", at: start)
+    #expect(!reused)
+}
+
+@Test func onlyThePackagedAppPersistsTheCache() async {
+    // Tests run outside Upkeep's bundle, so the shared cache is memory-only.
+    #expect(Bundle.main.bundleIdentifier != InstalledApp.upkeepBundleIdentifier)
+    #expect(DeveloperOutdatedCache.defaultFileURL().path.contains("/Caches/"))
+}
