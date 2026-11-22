@@ -12,7 +12,12 @@ case "${CONFIGURATION}" in
     debug) BUILD_CONFIGURATION=debug ;;
     *) echo "usage: $0 [release|local-release|debug]" >&2; exit 2 ;;
 esac
-OUTPUT_DIR=${PROJECT_DIR}/outputs
+# Debug archives go to their own folder so they never replace a release archive.
+if [[ "${BUILD_CONFIGURATION}" == "debug" ]]; then
+    OUTPUT_DIR=${UPKEEP_OUTPUT_DIR:-${PROJECT_DIR}/outputs/debug}
+else
+    OUTPUT_DIR=${UPKEEP_OUTPUT_DIR:-${PROJECT_DIR}/outputs}
+fi
 STAGING_DIR=$(mktemp -d)
 BUILD_DIR=$(mktemp -d)
 trap 'rm -rf "${STAGING_DIR}" "${BUILD_DIR}"' EXIT

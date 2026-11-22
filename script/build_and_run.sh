@@ -11,10 +11,13 @@ APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 
-"$ROOT_DIR/scripts/package-app.sh" debug
+# Package into a temporary folder so a release archive in outputs/ is never replaced.
+PACKAGE_DIR="$(mktemp -d)"
+trap 'rm -rf "$PACKAGE_DIR"' EXIT
+UPKEEP_OUTPUT_DIR="$PACKAGE_DIR" "$ROOT_DIR/scripts/package-app.sh" debug
 mkdir -p "$DIST_DIR"
 rm -rf "$APP_BUNDLE"
-/usr/bin/ditto -x -k "$ROOT_DIR/outputs/Upkeep.zip" "$DIST_DIR"
+/usr/bin/ditto -x -k "$PACKAGE_DIR/Upkeep.zip" "$DIST_DIR"
 
 open_app() {
   /usr/bin/open -n "$APP_BUNDLE"

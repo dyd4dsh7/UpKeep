@@ -8,9 +8,9 @@ so its scope and safety expectations can be agreed.
 
 Use macOS with Xcode 26.6 or newer (Swift 6.3+), or matching Apple Command Line
 Tools. The SDK must be macOS 26 or newer; the deployment target remains macOS 14.
-There is no hosted CI; run the tests below before opening a pull request. Homebrew and other package managers are optional
-integrations, not build dependencies. You do not need signing credentials to
-contribute.
+There is no hosted CI; run the tests below before opening a pull request. Homebrew
+and other package managers are optional integrations, not build dependencies. You
+do not need signing credentials to contribute.
 
 Tests use the Swift Testing bundled with the selected toolchain. A separate
 `swift-testing` package, backend override and custom linker paths are unnecessary.
@@ -29,14 +29,31 @@ The run script stops a running Upkeep process, packages a debug app, and launche
 updates, restores, package adoption, or cleanup when you intend those changes.
 Debug packages are ad-hoc signed and are not official distribution builds.
 
+To check UI changes without touching your real apps or settings, build a separate
+preview copy with sample data:
+
+```sh
+swift build
+open -n "$(bash script/package_ui_fixture.sh)" --args --ui-fixture --ui-fixture-dark
+```
+
+Add `--ui-fixture-route=Homebrew` to open a sidebar page, `--ui-fixture-settings=Sources`
+to open a Settings section, `--ui-fixture-batch` for the batch review sheet, or
+`--ui-fixture-light` for light appearance. Preview options only exist in debug builds.
+
 ## Where to work
 
 - `Sources/Upkeep/Views`: SwiftUI windows, lists, settings, and inspectors.
 - `Sources/Upkeep/Services`: discovery, publisher requests, package commands,
-  installation, diagnostics, and backups.
+  installation, self-update, diagnostics, and backups.
 - `Sources/Upkeep/Stores` and `UpkeepStore.swift`: state and operation coordination.
+- `Sources/Upkeep/Models`: data types, settings, and update plans.
+- `Sources/Upkeep/Support`: small shared helpers.
+- `Sources/Upkeep/Resources/ThirdPartyLogos`: bundled logos. Add each new logo's
+  owner, source, and terms to [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - `Tests/UpkeepTests`: Swift Testing fixtures and regression tests.
-- `scripts`: packaging, release validation, and performance measurements.
+- `script`: the run script and the UI preview build.
+- `scripts`: packaging, release signing and validation, and performance measurements.
 
 ## Pull requests
 
