@@ -599,19 +599,14 @@ struct AppDetailView: View {
                     .frame(width: 32)
                 VStack(alignment: .leading, spacing: 5) {
                     Text(statusTitle).font(.headline)
-                    if let update {
-                        Text(update.requiresInAppInstallation
-                             ? "Open \(app.name) to install this update."
-                             : "Available through \(update.source.rawValue)")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text(statusDescription)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                    if let managedStatus = app.managedUpdateStatus {
-                        Text(managedStatus.detail)
+                    Text(primaryDescription)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    if let detail = Self.additionalManagedDetail(
+                        app.managedUpdateStatus?.detail,
+                        primaryDescription: primaryDescription
+                    ) {
+                        Text(detail)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -876,6 +871,20 @@ struct AppDetailView: View {
         if store.sources(for: app).isEmpty { return "No update source" }
         if store.lastChecked(for: app) == nil { return "Not checked yet" }
         return "Up to date"
+    }
+
+    private var primaryDescription: String {
+        guard let update else { return statusDescription }
+        return update.requiresInAppInstallation
+            ? "Open \(app.name) to install this update."
+            : "Available through \(update.source.rawValue)"
+    }
+
+    /// The managed-updater detail, unless it repeats the description above it. Most
+    /// externally managed apps report their `updateExplanation` as both.
+    static func additionalManagedDetail(_ detail: String?, primaryDescription: String) -> String? {
+        guard let detail, detail != primaryDescription else { return nil }
+        return detail
     }
 
     private var statusDescription: String {
