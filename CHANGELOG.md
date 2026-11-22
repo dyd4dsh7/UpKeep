@@ -4,6 +4,10 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+## 0.25.11 — 2026-11-23
+
+- iPhone and iPad apps installed from the App Store on Apple silicon now appear with your other apps and are checked for App Store updates. Upkeep used to skip them because their bundles have no `Contents` folder. App details show them as **iPhone and iPad app**, they are never matched to Homebrew casks, and those installed another way have no update source.
+
 ## 0.25.10 — 2026-11-23
 
 - Extensions for VSCodium (and VSCodium Insiders) and Windsurf, including its renamed Devin Desktop app, are now listed with VS Code and Cursor extensions.

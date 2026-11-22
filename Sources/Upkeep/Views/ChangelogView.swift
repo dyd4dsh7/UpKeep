@@ -118,6 +118,9 @@ private struct UpkeepRelease: Identifiable {
     static let fullChangelogURL = URL(string: "https://github.com/\(SelfUpdate.repository)/blob/main/CHANGELOG.md")!
 
     static let all = [
+        UpkeepRelease(version: "0.25.11", date: "23 November 2026", changes: [
+            "Lists iPhone and iPad apps installed from the App Store on Apple silicon and checks them for App Store updates."
+        ]),
         UpkeepRelease(version: "0.25.10", date: "23 November 2026", changes: [
             "Lists extensions for VSCodium and Windsurf (now Devin Desktop) alongside VS Code and Cursor.",
             "Checks each editor's extensions against the gallery it installs from, so Cursor no longer shows Visual Studio Marketplace versions it cannot install."
