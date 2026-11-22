@@ -118,6 +118,10 @@ private struct UpkeepRelease: Identifiable {
     static let fullChangelogURL = URL(string: "https://github.com/\(SelfUpdate.repository)/blob/main/CHANGELOG.md")!
 
     static let all = [
+        UpkeepRelease(version: "0.25.13", date: "23 November 2026", changes: [
+            "Adds pixi, Krew, juliaup, opam, Dart, Poetry, Flutter, GHCup, swiftly, Conda, and SDKMAN! to developer packages.",
+            "Keeps SDKMAN! candidates on their vendor, so a Temurin JDK is never offered a different distribution."
+        ]),
         UpkeepRelease(version: "0.25.12", date: "23 November 2026", changes: [
             "Compares Homebrew casks that update themselves with the installed app, so an app behind its cask is reported and one that updated itself shows its real version.",
             "Links casks to apps by the app bundles they install, such as Docker Desktop and Docker.app."

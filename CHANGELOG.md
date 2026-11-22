@@ -4,6 +4,11 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+## 0.25.13 — 2026-11-23
+
+- Added 11 developer package sources: pixi global packages, Krew kubectl plugins, juliaup Julia channels, opam packages, Dart global packages, Poetry (from the official installer), the Flutter SDK, GHCup Haskell tools, swiftly Swift toolchains, Conda base environments, and SDKMAN! candidates. Each lists what is installed, compares it with its own release source, and updates through the manager's own command.
+- SDKMAN! candidates keep their vendor, so a Temurin JDK is never offered a different distribution, and their vendor-suffixed versions are not read as prereleases.
+
 ## 0.25.12 — 2026-11-23
 
 - Homebrew casks that update themselves (`auto_updates`) are now compared with the installed app's real version. Homebrew reports them as current unless run with `--greedy`, and its recorded version goes stale once the app updates, so Upkeep could miss an app that was behind its cask. These casks now also show the installed app's version instead of Homebrew's stale one.
