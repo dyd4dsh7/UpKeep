@@ -4,6 +4,8 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+## 0.25.4 — 2026-11-22
+
 - Reduced memory use after an update check from about 340 MB to 214 MB and made repeat checks steadier (about 0.65 s): the Homebrew cask catalog is cached as a 0.5 MB summary instead of the 19 MB API response and kept decoded between checks, and automatic checks reuse the macOS update listing for up to an hour. The macOS page still checks Apple directly.
 
 ## 0.25.3 — 2026-11-22

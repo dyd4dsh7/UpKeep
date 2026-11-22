@@ -112,6 +112,10 @@ private struct UpkeepRelease: Identifiable {
     var isUnreleased: Bool { version == "Next" }
 
     static let all = [
+        UpkeepRelease(version: "0.25.4", date: "22 November 2026", changes: [
+            "Uses about 40% less memory after an update check by caching a small summary of the Homebrew cask catalog instead of the full 19 MB catalog.",
+            "Makes repeat checks steadier by reusing the macOS update list for up to an hour during automatic checks; the macOS page still checks Apple directly."
+        ]),
         UpkeepRelease(version: "0.25.3", date: "22 November 2026", changes: [
             "Makes update checks faster, including the first check after opening Upkeep, by reusing RubyGems, npm, and Python results for up to 30 minutes while installed packages are unchanged.",
             "Keeps these results and the macOS full-installer list across launches; installing, updating, or removing a package always forces a fresh check."
