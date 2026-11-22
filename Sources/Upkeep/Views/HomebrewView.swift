@@ -239,7 +239,7 @@ private struct PackageRow: View, Equatable {
                     .listRowPrimaryAction()
                     .disabled(isWorking)
             } else {
-                Color.clear.frame(width: UpkeepLayout.listActionWidth, height: 1).accessibilityHidden(true)
+                ListActionPlaceholder()
             }
         }
         .contextMenu {

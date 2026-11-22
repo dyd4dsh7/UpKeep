@@ -4,6 +4,8 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+- Stopped update lists from shifting when the details panel opens: rows stay on one line with narrower aligned columns, long names truncate instead of wrapping only some rows, and security badges shrink to their shield icon before an app name is hidden.
+
 ## 0.25.0 — 2026-11-22
 
 ### Updates and correctness

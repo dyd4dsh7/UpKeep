@@ -4,12 +4,6 @@ import SwiftUI
 enum UpkeepLayout {
     static let pageInset: CGFloat = 24
     static let sectionSpacing: CGFloat = 16
-    /// Wide enough for "Open App Store" and "Update & Adopt", so every row's
-    /// version column ends at the same place.
-    static let listActionWidth: CGFloat = 128
-    /// Fixed columns keep the arrow and the new version aligned down a list.
-    static let currentVersionWidth: CGFloat = 88
-    static let latestVersionWidth: CGFloat = 104
     static let inspectorMinimumWidth: CGFloat = 320
     static let inspectorIdealWidth: CGFloat = 380
     static let inspectorMaximumWidth: CGFloat = 500
@@ -18,6 +12,41 @@ enum UpkeepLayout {
 enum UpkeepColors {
     static func warning(in scheme: ColorScheme) -> Color {
         scheme == .light ? Color(.sRGB, red: 0.58, green: 0.30, blue: 0.02) : .orange
+    }
+}
+
+/// Fixed list columns keep the installed version, arrow, new version and
+/// action aligned down a list. Rows use `.regular` when there is room and
+/// `.compact` when an inspector narrows the list, before wrapping.
+struct ListColumnMetrics: Equatable, Sendable {
+    let currentVersion: CGFloat
+    let latestVersion: CGFloat
+    let action: CGFloat
+
+    var versionTransition: CGFloat { currentVersion + latestVersion + 26 }
+
+    /// Action width fits "Open App Store" and "Update & Adopt".
+    static let regular = ListColumnMetrics(currentVersion: 88, latestVersion: 104, action: 128)
+    static let compact = ListColumnMetrics(currentVersion: 64, latestVersion: 78, action: 120)
+}
+
+private struct ListColumnMetricsKey: EnvironmentKey {
+    static let defaultValue = ListColumnMetrics.regular
+}
+
+extension EnvironmentValues {
+    var listColumns: ListColumnMetrics {
+        get { self[ListColumnMetricsKey.self] }
+        set { self[ListColumnMetricsKey.self] = newValue }
+    }
+}
+
+/// Reserves the action column on rows without an action.
+struct ListActionPlaceholder: View {
+    @Environment(\.listColumns) private var columns
+
+    var body: some View {
+        Color.clear.frame(width: columns.action, height: 1).accessibilityHidden(true)
     }
 }
 
@@ -58,20 +87,19 @@ struct StandardItemRow<Icon: View, Content: View, Accessories: View>: View {
         let separatorLeading: CGFloat = (settings.listDensity == .compact ? 2 : 4)
             + (settings.listDensity == .compact ? 30 : 38) + rowSpacing
 
+        // Every row in a list has the same width and fixed accessory columns,
+        // so all rows pick the same variant and stay aligned. Narrow columns
+        // come before wrapping, so opening an inspector doesn't reflow rows.
         return ViewThatFits(in: .horizontal) {
-            HStack(spacing: rowSpacing) {
-                rowIcon
-                content
-                    .frame(minWidth: 140, maxWidth: .infinity, alignment: .leading)
-                    .layoutPriority(1)
-                rowAccessories
-            }
+            singleLine(columns: .regular)
+            singleLine(columns: .compact)
             HStack(alignment: .top, spacing: rowSpacing) {
                 rowIcon
                 VStack(alignment: .leading, spacing: 8) {
                     content.frame(maxWidth: .infinity, alignment: .leading)
                     rowAccessories
                         .frame(maxWidth: .infinity, alignment: .trailing)
+                        .environment(\.listColumns, .compact)
                 }
             }
         }
@@ -90,6 +118,20 @@ struct StandardItemRow<Icon: View, Content: View, Accessories: View>: View {
         .animation(reduceMotion ? nil : UpkeepMotion.quick, value: settings.listDensity)
         // Selection changes color only; native row geometry should not animate.
         .upkeepRowTransition()
+    }
+
+    private func singleLine(columns: ListColumnMetrics) -> some View {
+        HStack(spacing: rowSpacing) {
+            rowIcon
+            // ViewThatFits measures ideal widths. Pinning the name column's ideal
+            // width makes every row choose by the shared columns alone, so long
+            // names truncate instead of making only some rows wrap.
+            content
+                .frame(minWidth: 110, idealWidth: 110, maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
+            rowAccessories
+                .environment(\.listColumns, columns)
+        }
     }
 
     private var rowSpacing: CGFloat { settings.listDensity == .compact ? 10 : 12 }
@@ -123,9 +165,12 @@ struct ItemIdentityView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: settings.listDensity == .compact ? 1 : 4) {
             HStack(spacing: 7) {
+                // The name keeps layout priority, so in a narrow row badges
+                // shorten before the name can be squeezed out.
                 Text(title)
                     .font(.body.weight(.semibold))
                     .lineLimit(1)
+                    .layoutPriority(1)
                     .help(title)
                 if isRunning { RunningIndicator() }
                 if showsIntelWarning { IntelAppBadge() }
@@ -139,7 +184,7 @@ struct ItemIdentityView: View {
                 }
                 if let cveItem {
                     CVEStatusBadge(item: cveItem)
-                        .fixedSize()
+                        .lineLimit(1)
                 }
             }
             Text(detail)
@@ -312,6 +357,7 @@ struct InstalledVersionView: View {
 
 struct VersionTransitionView: View {
     @Environment(\.upkeepItemRowSelected) private var isSelected
+    @Environment(\.listColumns) private var columns
     let current: String
     var latest: String?
     var usesFixedWidth = true
@@ -323,7 +369,7 @@ struct VersionTransitionView: View {
                     Text(current)
                         .foregroundStyle(.secondary)
                         .truncationMode(.middle)
-                        .frame(width: usesFixedWidth ? UpkeepLayout.currentVersionWidth : nil,
+                        .frame(width: usesFixedWidth ? columns.currentVersion : nil,
                                alignment: .trailing)
                     Image(systemName: "arrow.right")
                         .font(.caption)
@@ -336,7 +382,7 @@ struct VersionTransitionView: View {
                         .padding(.vertical, 3)
                         .background((isSelected ? Color.primary : Color.accentColor).opacity(0.11),
                                     in: RoundedRectangle(cornerRadius: 5))
-                        .frame(width: usesFixedWidth ? UpkeepLayout.latestVersionWidth : nil,
+                        .frame(width: usesFixedWidth ? columns.latestVersion : nil,
                                alignment: .leading)
                 }
             } else {
@@ -354,7 +400,7 @@ struct VersionTransitionView: View {
         .font(.system(.callout, design: .monospaced))
         .lineLimit(1)
         .minimumScaleFactor(0.8)
-        .frame(width: usesFixedWidth ? UpkeepLayout.currentVersionWidth + UpkeepLayout.latestVersionWidth + 26 : nil,
+        .frame(width: usesFixedWidth ? columns.versionTransition : nil,
                alignment: usesFixedWidth ? .trailing : .leading)
         .accessibilityElement(children: .combine)
     }
@@ -396,12 +442,14 @@ struct LocalModelIdentityView: View {
 }
 
 struct ListRowPrimaryAction: ViewModifier {
+    @Environment(\.listColumns) private var columns
+
     func body(content: Content) -> some View {
         content
             .buttonStyle(.bordered)
             .controlSize(.regular)
             .fixedSize(horizontal: true, vertical: false)
-            .frame(minWidth: UpkeepLayout.listActionWidth, alignment: .trailing)
+            .frame(minWidth: columns.action, alignment: .trailing)
     }
 }
 

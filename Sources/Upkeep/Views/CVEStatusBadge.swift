@@ -14,9 +14,13 @@ struct CVEStatusBadge: View {
             let highest = CVESeverityRating.highest(rating ?? [])
             let tint = isSelected ? Color.primary : CVEColors.severity(highest?.level, in: colorScheme)
             Button { store.showCVEInfo(for: item) } label: {
-                Label {
-                    Text(badgeTitle(status: status, highest: highest))
-                } icon: {
+                // In a narrow row show just the shield rather than clipped text.
+                ViewThatFits(in: .horizontal) {
+                    Label {
+                        Text(badgeTitle(status: status, highest: highest))
+                    } icon: {
+                        Image(systemName: "exclamationmark.shield")
+                    }
                     Image(systemName: "exclamationmark.shield")
                 }
                     .font(.caption.weight(.medium))

@@ -123,6 +123,11 @@ struct UpkeepApp: App {
         if UIFixture.enabled && ProcessInfo.processInfo.arguments.contains("--ui-fixture-narrow") {
             return CGSize(width: 760, height: 500)
         }
+        if UIFixture.enabled, let width = ProcessInfo.processInfo.arguments
+            .first(where: { $0.hasPrefix("--ui-fixture-width=") })
+            .flatMap({ Double($0.dropFirst("--ui-fixture-width=".count)) }) {
+            return CGSize(width: width, height: 720)
+        }
         #endif
         return CGSize(width: 1180, height: 720)
     }
