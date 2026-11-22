@@ -94,12 +94,13 @@ import Testing
     - ![screenshot](https://example.com/s.png)
     - Kept
     [![badge](https://example.com/b.svg)](https://example.com)
+    Badge [![build](https://example.com/b.svg)](https://example.com) passes.
 
     > ![chart](https://example.com/c.png)
     Done `![not](an image)`
     """
     let text = ReleaseNotesFormatter.attributedString(from: notes)
-    #expect(String(text.characters) == "Fixed sync on Wi-Fi.\nWorks on Windows\n• Kept\n\n▎\nDone ![not](an image)")
+    #expect(String(text.characters) == "Fixed sync on Wi-Fi.\nWorks on Windows\n• Kept\nBadge passes.\n\n▎\nDone ![not](an image)")
     #expect(text.runs.allSatisfy { $0.imageURL == nil })
 }
 

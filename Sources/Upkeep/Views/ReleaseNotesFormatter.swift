@@ -253,7 +253,9 @@ enum ReleaseNotesFormatter {
             }
             if character == "`" {
                 inCode.toggle()
-            } else if !inCode, let image = rest.prefixMatch(of: /!\[[^\]]*\]\([^)]*\)/) {
+            } else if !inCode, let image = rest.prefixMatch(of: /\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)/)
+                        ?? rest.prefixMatch(of: /!\[[^\]]*\]\([^)]*\)/) {
+                // A linked image (a badge) goes with its link, so no empty link is left.
                 rest = rest[image.range.upperBound...]
                 // Keep one space where a mid-sentence image was, not two.
                 if result.last == " " || result.last == "\t" {
