@@ -4,6 +4,11 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+## 0.25.10 — 2026-11-23
+
+- Extensions for VSCodium (and VSCodium Insiders) and Windsurf, including its renamed Devin Desktop app, are now listed with VS Code and Cursor extensions.
+- Each editor's extensions are now checked against the gallery it installs from, read from its `product.json`. Cursor extensions were checked against the Visual Studio Marketplace, which can list versions Cursor's own marketplace does not offer.
+
 ## 0.25.9 — 2026-11-23
 
 - Added **Docker Images** as a developer package source. Images pulled from a public registry are compared by content digest using HEAD requests, which do not count toward Docker Hub's pull limit, and updated with `docker pull`. Local builds are never listed, even when they share a public image's name, and unqualified names are only sent to Docker Hub when they are on Docker's official image list. A stopped Docker daemon is skipped without a warning.
