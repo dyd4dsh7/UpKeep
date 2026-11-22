@@ -84,6 +84,7 @@ enum AppDiscovery {
         )
         let chromiumUpdateChannel = chromiumUpdateChannel(bundleIdentifier: bundleIdentifier)
         let braveUpdateChannel = braveUpdateChannel(bundleIdentifier: bundleIdentifier)
+        let vendorUpdateProduct = VendorUpdateProduct.product(bundleIdentifier: bundleIdentifier)
         let steamAppID = steamAppID(at: url)
         let management = updateManagement(
             bundleIdentifier: bundleIdentifier,
@@ -114,12 +115,14 @@ enum AppDiscovery {
             updateManagement: management,
             hasBuiltInUpdater: feed != nil || electronUpdate.isConfigured
                 || hasUpdaterFramework || mozillaUpdate.channel != nil
-                || chromiumUpdateChannel != nil || braveUpdateChannel != nil,
+                || chromiumUpdateChannel != nil || braveUpdateChannel != nil
+                || vendorUpdateProduct != nil,
             mozillaUpdateProduct: mozillaUpdate.product,
             mozillaUpdateChannel: mozillaUpdate.channel,
             chromiumUpdateChannel: chromiumUpdateChannel,
             braveUpdateChannel: braveUpdateChannel,
             electronUpdateFeedURL: electronUpdate.feedURL,
+            vendorUpdateProduct: vendorUpdateProduct,
             steamAppID: steamAppID,
             managedUpdateStatus: managedStatus,
             installedAt: dates?.creationDate,

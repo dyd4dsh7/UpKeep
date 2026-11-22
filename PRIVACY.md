@@ -14,11 +14,13 @@ and version queries, or model identifiers/digests to the relevant service.
 Those services also receive normal connection metadata such as your IP address.
 
 Examples include Apple App Store and Software Update services, developer Sparkle
-feeds and Electron update servers, GitHub, Mozilla, Google's Chrome version service (which receives only the
-platform and release channel), Homebrew, language package registries, Ollama's
-registry, and Hugging Face. Opening an external updater or a project page invokes
-that service's own privacy policy. Package managers and model runtimes continue
-to manage their own authentication and storage.
+feeds and Electron update servers, GitHub, Mozilla, Google's Chrome version
+service (which receives only the platform and release channel), the Microsoft
+Edge, JetBrains, Zoom, Slack, and 1Password release services (which receive only
+a product code or platform), Homebrew, language package registries, Ollama's
+registry, and Hugging Face. Opening an external updater or a project page
+invokes that service's own privacy policy. Package managers and model runtimes
+continue to manage their own authentication and storage.
 
 CVE checks run after launch, scheduled, and manual inventory refreshes when
 **Automatically check CVEs** is enabled in Settings (enabled by default). They
@@ -51,7 +53,7 @@ keeps the previous version in `Self Update Backup` in the same folder.
 To make later checks faster, Upkeep caches some results in `~/Library/Caches/`:
 developer package names and versions (up to 30 minutes), macOS update and installer
 lists (up to six hours), Homebrew's public cask catalog, and publisher update
-feeds and release details from Sparkle, Electron update servers, GitHub, and Mozilla (up to 30 minutes). Downloaded Upkeep
+feeds and release details from Sparkle, Electron update servers, GitHub, Mozilla, and other publisher release services (up to 30 minutes). Downloaded Upkeep
 updates are staged there until they are installed. macOS may clear these caches
 at any time; Upkeep rebuilds them on the next check.
 

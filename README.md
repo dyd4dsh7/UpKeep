@@ -68,6 +68,7 @@ If a release has no build attached, [build from source](#build-from-source).
 | --- | --- |
 | **Mac App Store** | App Store metadata for production installs |
 | **Sparkle** | Appcast feeds declared by the app, its runtime preferences, or a trusted mapping |
+| **Publisher version services** | Chrome, Edge, Firefox, Thunderbird, Brave, standalone JetBrains IDEs, Zoom, Slack, and 1Password |
 | **Electron update servers** | The release manifest (such as `latest-mac.yml`) of apps that use electron-updater's generic provider |
 | **Homebrew** | Installed formulae and casks, including dependencies |
 | **GitHub Releases** | Repos found in app or Electron update metadata, trusted mappings, or a repo you verify |
@@ -95,7 +96,14 @@ major releases, prereleases, dependencies, and developer-environment changes.
 - Sparkle appcasts that declare a package installer open the app's built-in
   updater instead of downloading the package.
 - Apps with an embedded updater stay labelled as such even when the publisher sets
-  the feed at runtime.
+  the feed at runtime. Some of these, such as ChatGPT, are checked through the
+  feed packaged in the app.
+- Publisher version services and Electron update servers only report the newest
+  release; the app's built-in updater installs it. Electron prereleases are hidden
+  from stable installs unless you include prereleases, and staged rollouts are
+  shown once they reach everyone.
+- JetBrains IDEs and Zoom are compared by build number, so patch releases with
+  the same marketing version are found.
 - In advanced app details you can attach an `owner/project` GitHub repo. Upkeep
   checks it has published releases before saving the mapping.
 - External update actions stay pending until the installed app reports the

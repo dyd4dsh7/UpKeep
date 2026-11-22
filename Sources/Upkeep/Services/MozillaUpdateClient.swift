@@ -1,9 +1,13 @@
 import Foundation
 
 struct MozillaUpdateClient: Sendable {
-    /// Browser channels follow the installed build. `includePrereleases` only
-    /// applies to Electron feeds, whose manifest can offer any version.
+    /// Browser channels follow the installed build and vendor services report
+    /// stable releases. `includePrereleases` only applies to Electron feeds,
+    /// whose manifest can offer any version.
     func update(for app: InstalledApp, includePrereleases: Bool = false) async throws -> AvailableUpdate? {
+        if let product = app.vendorUpdateProduct {
+            return try await VendorUpdateClient().update(for: app, product: product)
+        }
         do {
             let latest: String?
             let comparisonLatest: String?
