@@ -4,34 +4,39 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
-- Removed the GitHub Actions CI and release workflows; tests and signed releases now run locally (see `docs/releasing.md`).
-- Made Upkeep a single main window that the menu bar, Dock icon, and update notifications reopen after it is closed; the menu bar item and Dock badge now stay current while the window is closed.
-- Added pending updates and “Update All Recommended…” to the menu bar menu, an “Open at login” setting, ⌘F for search, and “Stop After Current Update” for batch updates.
-- Batch review now shows every group the Updates header counts, with per-group selection and the list of apps it will quit; sidebar badges now count pending updates only.
-- Fixed empty states during scans, Escape being taken by the inspector, unconfirmed “Restore All Updates”, and a previous session’s check date being shown as current results.
+## 0.25.0 — 2026-11-22
+
+### Updates and correctness
 - Fixed hidden updates for post-release versions such as `9.9p1`, `1.1.1w`, Homebrew letter suffixes, `-stable`/`-final` tags, and cask versions with a commit hash.
 - Skipping or ignoring an app now also hides its Homebrew cask update, and skips match the same release across sources.
 - Sparkle items on named channels (such as canary or insider) are treated as prereleases, and Sparkle releases are compared by build like Sparkle itself, removing phantom updates and false install failures for build-only feeds.
 - Apps quit for an update are reopened when the update fails but the original app is intact; a manual refresh can no longer overwrite a just-installed version; the newest backup is kept when protected backups use the size budget.
 - App Store lookups use the local storefront and are batched; app details say “Not checked yet” or “No update source” instead of “Up to date” when nothing was checked.
-- Improved responsiveness during scans and in large lists, ran CVE checks concurrently with reuse of fresh results, gave network requests their own process pool, cached Sparkle appcasts briefly, and moved diagnostics and check-history writes off the hot path.
 
-- Fixed optimized CVE tests to use test-owned offline fixtures and updated responsiveness benchmark expectations for the unified update count.
+### Window, menu bar and batch updates
+- Made Upkeep a single main window that the menu bar, Dock icon, and update notifications reopen after it is closed; the menu bar item and Dock badge now stay current while the window is closed.
+- Added pending updates and “Update All Recommended…” to the menu bar menu, an “Open at login” setting, ⌘F for search, and “Stop After Current Update” for batch updates.
+- Batch review now shows every group the Updates header counts, with per-group selection, one “selected of total” count per group, and the list of apps it will quit; sidebar badges now count pending updates only.
+- Fixed empty states during scans, Escape being taken by the inspector, unconfirmed “Restore All Updates”, and a previous session’s check date being shown as current results.
 
-- Switched tests to toolchain-bundled Swift Testing, removing the duplicate Swift Testing/SwiftSyntax package builds and custom runtime linker paths; CI and releases select Xcode 26.6 with Swift 6.3 or newer.
-- Kept default-backend builds compatible with Command Line Tools and the macOS 27 SDK by explicitly selecting SwiftUI's State property wrapper, updating a TaskLocal call, and simplifying fixed-version type inference.
-- Fixed newer Swift compiler isolation warnings by calculating list separator offsets before entering alignment-guide closures.
-- Updated commit-pinned artifact upload/download actions to 7.0.2/8.0.2, including retry fixes and download digest enforcement.
-
+### Design
+- Redesigned workspaces, Settings, and dialogs, with a more compact Updates header that has its own light-mode palette.
+- Aligned update lists into columns: installed version, arrow, new version, and action line up on every row.
+- Left-aligned Settings explanations under their sections, showed each appearance option’s explanation on its own row, and matched sidebar and batch-review headings and links to the app’s style.
 - Prevented a SwiftUI navigation crash by avoiding animation of outgoing native list and toolbar hierarchies.
 - Kept item names visible in narrow inspectors by moving version/action controls below the name when space is limited.
-- Made packaged resource loading independent of temporary SwiftPM build directories.
 
+### Performance
+- Improved responsiveness during scans and in large lists, ran CVE checks concurrently with reuse of fresh results, gave network requests their own process pool, cached Sparkle appcasts briefly, and moved diagnostics and check-history writes off the hot path.
+
+### Project
 - Prepared the project for open-source contribution with an MIT licence, privacy and security guidance, contribution instructions, and issue templates.
 - Added dependency notices to app packages and replaced bundled third-party logos with native system symbols.
+- Removed the GitHub Actions workflows; tests and signed releases now run locally (see `docs/releasing.md`).
+- Switched tests to toolchain-bundled Swift Testing, removing the duplicate Swift Testing/SwiftSyntax package builds and custom runtime linker paths.
+- Kept default-backend builds compatible with Command Line Tools and the macOS 27 SDK, and fixed newer Swift compiler isolation warnings.
+- Made packaged resource loading independent of temporary SwiftPM build directories, and kept the previous packaged archive intact when a new packaging or notarization attempt fails.
 - Fixed main-actor isolation of app icon images and optional signature-status matching.
-- Added CI secret scanning and prepared protected, signed draft GitHub Releases with checksums.
-- Kept the previous packaged archive intact when a new packaging or notarization attempt fails.
 
 ## 0.24.0 — 2026-09-02
 

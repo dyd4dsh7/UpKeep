@@ -4,7 +4,12 @@ import SwiftUI
 enum UpkeepLayout {
     static let pageInset: CGFloat = 24
     static let sectionSpacing: CGFloat = 16
-    static let listActionWidth: CGFloat = 108
+    /// Wide enough for "Open App Store" and "Update & Adopt", so every row's
+    /// version column ends at the same place.
+    static let listActionWidth: CGFloat = 128
+    /// Fixed columns keep the arrow and the new version aligned down a list.
+    static let currentVersionWidth: CGFloat = 88
+    static let latestVersionWidth: CGFloat = 104
     static let inspectorMinimumWidth: CGFloat = 320
     static let inspectorIdealWidth: CGFloat = 380
     static let inspectorMaximumWidth: CGFloat = 500
@@ -317,16 +322,22 @@ struct VersionTransitionView: View {
                 HStack(spacing: 5) {
                     Text(current)
                         .foregroundStyle(.secondary)
+                        .truncationMode(.middle)
+                        .frame(width: usesFixedWidth ? UpkeepLayout.currentVersionWidth : nil,
+                               alignment: .trailing)
                     Image(systemName: "arrow.right")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                     Text(latest)
                         .fontWeight(.semibold)
                         .foregroundStyle(isSelected ? Color.primary : .accentColor)
+                        .truncationMode(.middle)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 3)
                         .background((isSelected ? Color.primary : Color.accentColor).opacity(0.11),
                                     in: RoundedRectangle(cornerRadius: 5))
+                        .frame(width: usesFixedWidth ? UpkeepLayout.latestVersionWidth : nil,
+                               alignment: .leading)
                 }
             } else {
                 HStack(spacing: 5) {
@@ -343,7 +354,8 @@ struct VersionTransitionView: View {
         .font(.system(.callout, design: .monospaced))
         .lineLimit(1)
         .minimumScaleFactor(0.8)
-        .frame(width: usesFixedWidth ? 138 : nil, alignment: usesFixedWidth ? .trailing : .leading)
+        .frame(width: usesFixedWidth ? UpkeepLayout.currentVersionWidth + UpkeepLayout.latestVersionWidth + 26 : nil,
+               alignment: usesFixedWidth ? .trailing : .leading)
         .accessibilityElement(children: .combine)
     }
 }

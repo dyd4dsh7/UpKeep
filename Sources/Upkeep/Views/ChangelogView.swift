@@ -112,6 +112,19 @@ private struct UpkeepRelease: Identifiable {
     var isUnreleased: Bool { version == "Next" }
 
     static let all = [
+        UpkeepRelease(version: "0.25.0", date: "22 November 2026", changes: [
+            "Finds updates that were hidden before, including post-release versions such as 9.9p1 and 1.1.1w, Homebrew letter suffixes, -stable tags, and cask versions with a commit hash.",
+            "Skipping or ignoring an app now also hides its Homebrew cask update, and a skipped release stays skipped whichever source reports it.",
+            "Treats Sparkle canary, insider, and other named channels as prereleases, and compares Sparkle builds the way Sparkle does, removing phantom updates and false install failures.",
+            "Reopens apps Upkeep quit for an update when the update fails but the original app is intact, and keeps the newest backup within the storage budget.",
+            "Keeps a single main window that the menu bar, Dock icon, and notifications reopen; the menu bar count and Dock badge stay current while the window is closed.",
+            "Adds pending updates and Update All Recommended to the menu bar, an Open at login setting, ⌘F for search, and Stop After Current Update for batch updates.",
+            "Batch review shows every group the Updates header counts, with per-group selection and the apps it will quit; sidebar badges count pending updates only.",
+            "Shows a checking state instead of empty lists during scans, and says Not checked yet or No update source instead of Up to date when nothing was checked.",
+            "Redesigns workspaces, Settings, and dialogs, with a compact Updates header that adapts to light mode and update lists aligned into columns.",
+            "Improves responsiveness during scans and in large lists, runs CVE checks concurrently, batches App Store lookups, and briefly caches Sparkle feeds.",
+            "Prepares the project for open source, with tests and signed releases run locally."
+        ]),
         UpkeepRelease(version: "0.24.0", date: "2 September 2026", changes: [
             "Flags Intel-only apps on Apple Silicon Macs and guides replacement through their existing update manager, Homebrew cask, or developer releases. Native availability is not assumed.",
             "Verifies Apple Silicon and Universal replacements locally, including same-version installs, while leaving missing, unreadable, or differently identified apps unverified.",
