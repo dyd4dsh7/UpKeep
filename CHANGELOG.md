@@ -4,6 +4,12 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+## 0.25.9 — 2026-11-23
+
+- Added **Docker Images** as a developer package source. Images pulled from a public registry are compared by content digest using HEAD requests, which do not count toward Docker Hub's pull limit, and updated with `docker pull`. Local builds are never listed, even when they share a public image's name, and unqualified names are only sent to Docker Hub when they are on Docker's official image list. A stopped Docker daemon is skipped without a warning.
+- Models in the Hugging Face cache (such as MLX models) now appear under AI models. Upkeep compares each cached revision with the repository's `main` branch and updates the cached files with `hf download`.
+- Upkeep's publisher requests can now use HEAD, for checks that only need response headers.
+
 ## 0.25.8 — 2026-11-23
 
 - Microsoft Edge, standalone JetBrains IDEs (IntelliJ IDEA, PyCharm, WebStorm, GoLand, CLion, Rider, DataGrip, RubyMine, PhpStorm, and RustRover), Zoom, Slack, and 1Password installed outside the App Store are now checked against their publisher's release service. Updates open in the app's built-in updater. JetBrains and Zoom compare build numbers, so patch releases are found too.

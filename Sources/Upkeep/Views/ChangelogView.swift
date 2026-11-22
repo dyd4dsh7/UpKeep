@@ -118,6 +118,10 @@ private struct UpkeepRelease: Identifiable {
     static let fullChangelogURL = URL(string: "https://github.com/\(SelfUpdate.repository)/blob/main/CHANGELOG.md")!
 
     static let all = [
+        UpkeepRelease(version: "0.25.9", date: "23 November 2026", changes: [
+            "Adds Docker Images: images pulled from a public registry are checked by digest and updated with docker pull. Local builds are never listed.",
+            "Shows models from the Hugging Face cache, such as MLX models, and updates them with hf download."
+        ]),
         UpkeepRelease(version: "0.25.8", date: "23 November 2026", changes: [
             "Checks Microsoft Edge, standalone JetBrains IDEs, Zoom, Slack, and 1Password against their publishers' release services.",
             "Checks Electron apps that update from their developer's own server, and ChatGPT through its packaged Sparkle feed.",
