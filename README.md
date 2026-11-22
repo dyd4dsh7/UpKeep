@@ -8,16 +8,21 @@ A native macOS app for keeping applications and developer tools up to date.
 
 ## Install and support
 
-Requires **macOS 14 or newer**. Official download builds target **Apple Silicon**.
-Intel source builds are not currently tested. Download signed, notarized
-archives only from [GitHub Releases](https://github.com/dyd4dsh7/UpKeep/releases).
-If no release is listed, use the source-build instructions below; a debug ZIP
-is not a notarized release.
+Requires **macOS 14 or newer**. Download builds target **Apple Silicon**.
+Intel source builds are not currently tested. Download builds only from
+[GitHub Releases](https://github.com/dyd4dsh7/UpKeep/releases); each release
+says whether its build is notarized. If no build is attached, use the
+source-build instructions below.
 
-For a published release, download `Upkeep.zip` and `Upkeep.zip.sha256`, run
+For a release with a build, download `Upkeep.zip` and `Upkeep.zip.sha256`, run
 `shasum -a 256 -c Upkeep.zip.sha256` in the download directory, extract the ZIP,
-and move `Upkeep.app` into Applications. Open it normally through Finder.
-Do not disable Gatekeeper to run an unverified download.
+and move `Upkeep.app` into Applications.
+
+- **Notarized builds** open normally through Finder.
+- **Builds that are not notarized** (currently, 0.25.1) are signed locally only,
+  so macOS blocks the first launch. After the checksum passes, Control-click
+  `Upkeep.app`, choose **Open**, then confirm, or use **Open Anyway** in System
+  Settings → Privacy & Security. Do not turn off Gatekeeper.
 
 Homebrew and other managers are optional. Upkeep uses tools already installed on
 your Mac. Start with application management and enable developer or model checks
