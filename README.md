@@ -25,9 +25,9 @@
 
 ## Why Upkeep
 
-- **One list for everything.** Apps, Homebrew, macOS, npm/pnpm/pip/RubyGems/Cargo
-  packages, and local AI models share one **All Updates** view, with a live count
-  in the toolbar, menu bar, and Dock.
+- **One list for everything.** Apps, Homebrew, macOS, packages from 23 developer
+  tools (npm, pip, Cargo, Go, and more), and local AI models share one
+  **All Updates** view, with a live count in the toolbar, menu bar, and Dock.
 - **Uses what you already have.** Upkeep works through the tools installed on your
   Mac. Homebrew and developer checks are opt-in.
 - **Updates from the real source.** App Store updates open in the App Store,
@@ -71,7 +71,7 @@ If a release has no build attached, [build from source](#build-from-source).
 | **Homebrew** | Installed formulae and casks, including dependencies |
 | **GitHub Releases** | Repos found in app or Electron update metadata, trusted mappings, or a repo you verify |
 | **macOS** | Apple's Software Update catalog and full installers |
-| **Developer packages** | Global npm, pnpm, Python/pip, RubyGems, and Cargo packages |
+| **Developer packages** | Global packages from 23 managers, including npm, pnpm, Yarn, Bun, pip, uv, RubyGems, Cargo, and Go |
 | **Local AI models** | Ollama registry manifests and LM Studio's Hugging Face repos |
 
 Apps with their own updater are recognised and handed to it: TestFlight, Setapp,
@@ -121,9 +121,16 @@ to Homebrew.
 
 ### Developer packages
 
-Upkeep lists global npm, pnpm, Python/pip, RubyGems, and Cargo packages for the
-managers you have installed. It keeps the executable path it found (such as an NVM
-Node install) when updating, and lets you pick a specific published version.
+Upkeep lists global packages for the managers you have installed:
+
+- **JavaScript:** Node.js, Bun, Deno, npm, pnpm, Yarn, Volta, and fnm
+- **Python:** Python/pip, pipx, and uv
+- **Ruby and Rust:** RubyGems, Rustup, and Cargo
+- **Other tools:** Go, Composer, .NET tools, GitHub CLI, and VS Code extensions
+- **System managers:** MacPorts, Nix, mise, and asdf
+
+It keeps the executable path it found (such as an NVM Node install) when
+updating, and lets you pick a specific published version.
 
 **Cleanup** for Homebrew, npm, pnpm, and uv starts with a dry run, shows the
 estimated size (or says when a manager can't predict it), asks before cleaning,
@@ -132,8 +139,8 @@ and reports the space reclaimed.
 ### CVE Checker
 
 Open **CVE Checker** in the System sidebar and choose **Check CVEs**. Checks also
-run after launch and scheduled refreshes while **Automatically check CVEs** is on
-(the default). No API key is needed.
+run after launch, scheduled, and manual refreshes while **Automatically check CVEs**
+is on (the default). No API key is needed.
 
 | Software | Advisory source |
 | --- | --- |
@@ -203,7 +210,7 @@ limited and do not replace a system backup.
   downgrades and automatic system rollback are not supported.
 - Homebrew historical versions follow its versioned-formula model; old cask
   releases are only available when the cask exposes them.
-- macOS 14 is the deployment target, but tests and smoke checks run on macOS 26.
+- macOS 14 is the deployment target, but tests and smoke checks run on macOS 27.
   Not every supported macOS version is tested end to end.
 
 ## Build from source
