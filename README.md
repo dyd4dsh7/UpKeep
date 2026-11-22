@@ -254,5 +254,5 @@ measures a real full scan and the effect of its caches.
 Upkeep's original code and artwork are [MIT licensed](LICENSE). Third-party logos
 in `Sources/Upkeep/Resources/ThirdPartyLogos/` belong to their owners and are
 **not** covered by the MIT licence. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
-for each logo's source and terms, plus dependency licences. Third-party names and
-logos do not imply endorsement.
+for each logo's source and terms. Third-party names and logos do not imply
+endorsement.
