@@ -156,8 +156,11 @@ Report vulnerabilities privately using [SECURITY.md](SECURITY.md).
 ## Licence
 
 Upkeep's original code and artwork are licensed under [MIT](LICENSE).
-[Third-party notices](THIRD_PARTY_NOTICES.md) describe dependency licences, system
-resources, and trademarks. Third-party names do not imply endorsement.
+The third-party logos in `Sources/Upkeep/Resources/ThirdPartyLogos/` are
+trademarks of their owners and are **not** covered by the MIT licence.
+[Third-party notices](THIRD_PARTY_NOTICES.md) list each logo's source and terms,
+and describe dependency licences and system resources. Third-party names and
+logos do not imply endorsement.
 
 ## Maintainer releases
 

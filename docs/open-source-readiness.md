@@ -80,6 +80,14 @@ rights for its historical assets, or publish the cleaned tree with new history
 while keeping this original history privately archived. No history rewrite,
 repository rename, deletion, or visibility change is performed by this audit.
 
+**Decision, 22 November 2026:** the owner chose to publish this repository with
+its existing history. The historical logos remain in older commits and are
+documented as not covered by the MIT licence. Separately, logos for brands whose
+policies or file licences permit identification use were restored from official
+sources into `Sources/Upkeep/Resources/ThirdPartyLogos/`, with per-file sources,
+terms, and notices in `THIRD_PARTY_NOTICES.md`. Brands requiring permission keep
+system symbols.
+
 ## Build and release gates
 
 CI now selects Xcode 26.3 on `macos-26`, tests with compiler warnings as errors,

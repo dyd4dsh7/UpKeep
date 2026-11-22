@@ -147,6 +147,7 @@ struct PackageManagerIcon: View {
 }
 
 struct PackageSourceIcon: View {
+    @Environment(\.colorScheme) private var colorScheme
     let name: String
     let size: CGFloat
 
@@ -163,11 +164,17 @@ struct PackageSourceIcon: View {
     }
 
     var body: some View {
-        Image(systemName: systemImage)
-            .resizable().scaledToFit().padding(size * 0.2)
-            .foregroundStyle(.secondary)
-            .frame(width: size, height: size)
-            .accessibilityHidden(true)
+        Group {
+            if let logo = ThirdPartyLogo.image(named: name, in: colorScheme) {
+                Image(nsImage: logo).resizable().scaledToFit()
+            } else {
+                Image(systemName: systemImage)
+                    .resizable().scaledToFit().padding(size * 0.2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
     }
 }
 

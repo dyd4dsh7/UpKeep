@@ -215,12 +215,19 @@ struct LocalModelDetail: View {
 }
 
 struct LocalModelRuntimeIcon: View {
+    @Environment(\.colorScheme) private var colorScheme
     let runtime: LocalModelRuntime
     let size: CGFloat
 
     var body: some View {
-        Image(systemName: runtime.systemImage)
-            .resizable().scaledToFit().padding(size * 0.2).foregroundStyle(.blue)
+        Group {
+            if let logo = ThirdPartyLogo.image(named: runtime.assetName, in: colorScheme) {
+                Image(nsImage: logo).resizable().scaledToFit()
+            } else {
+                Image(systemName: runtime.systemImage)
+                    .resizable().scaledToFit().padding(size * 0.2).foregroundStyle(.blue)
+            }
+        }
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: size * 0.22))
         .accessibilityLabel(runtime.rawValue)
