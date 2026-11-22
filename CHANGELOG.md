@@ -4,6 +4,10 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+- Halved the app size (20 MB to 10 MB installed, 8.6 MB to 6.8 MB download) by stripping debug symbols from release builds and optimizing for size; symbols are kept separately for crash reports.
+- Reduced memory use: the CVE check reads only installed formulae from Homebrew's 79 MB advisory feed via a memory-mapped download, and Upkeep returns freed memory after checks. Peak memory fell from about 550 MB to 355 MB and settled memory from about 264 MB to 192–205 MB.
+- Added `./scripts/package-app.sh local-release` for optimized, locally signed builds.
+
 ## 0.25.4 — 2026-11-22
 
 - Reduced memory use after an update check from about 340 MB to 214 MB and made repeat checks steadier (about 0.65 s): the Homebrew cask catalog is cached as a 0.5 MB summary instead of the 19 MB API response and kept decoded between checks, and automatic checks reuse the macOS update listing for up to an hour. The macOS page still checks Apple directly.

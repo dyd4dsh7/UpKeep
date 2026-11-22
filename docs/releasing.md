@@ -21,8 +21,13 @@ Actions workflows, so nothing runs on GitHub when a tag is pushed.
 3. Run `swift test -Xswiftc -warnings-as-errors` on `main`. Smoke-test the packaged
    app and review update/restore behaviour on temporary fixtures and a test Mac.
 4. Build the signed, notarized archive with `./scripts/release.sh` (below). It
-   writes `outputs/Upkeep.zip`; extract it to a temporary folder and run
+   writes `outputs/Upkeep.zip`, `outputs/Upkeep.zip.sha256`, and debug symbols in
+   `outputs/Upkeep.app.dSYM` (keep these for crash reports; do not ship them).
+   Extract the archive to a temporary folder and run
    `./scripts/validate-release.sh /path/to/Upkeep.app` on the extracted bundle.
+   Without Developer ID credentials, `./scripts/package-app.sh local-release`
+   produces the same optimized, stripped build signed locally (not notarized);
+   say so in the release notes.
 5. Create and push an annotated `vMAJOR.MINOR.PATCH` tag on that verified commit.
 
 ## Publish

@@ -677,3 +677,48 @@ private actor CVEHeldFeed {
     #expect(!store.isWorking(.unifiedBatch))
     #expect(store.batchUpdateProgress == nil)
 }
+
+@Test func advisoryFeedScannerReadsOnlyRequestedFormulae() throws {
+    // Strings contain braces, brackets, commas and escaped quotes that must not
+    // confuse the scanner.
+    let feed = #"{"meta":{"note":"{ not [ a , value \"}"},"advisories":{"zip":[{"id":"z","summary":"bad } ] \"quoted\"","affected":[]}],"curl":[{"id":"c","affected":[]}],"git":[{"id":"g","affected":[{"package":{"name":"git","ecosystem":"Homebrew"},"versions":["2.0"]}]}]},"tail":[1,2.5,true,null]}"#
+    let records = try #require(HomebrewAdvisoryFeedScanner.records(in: Data(feed.utf8), formulae: ["zip", "git", "missing"]))
+    #expect(Set(records.keys) == ["zip", "git"])
+    #expect(records["zip"]?.first?.summary == #"bad } ] "quoted""#)
+    #expect(records["git"]?.first?.affected.first?.versions == ["2.0"])
+    #expect(HomebrewAdvisoryFeedScanner.records(in: Data("not json".utf8), formulae: ["zip"]) == nil)
+    #expect(HomebrewAdvisoryFeedScanner.records(in: Data(#"{"advisories":{"zip":[{"id":"#.utf8), formulae: ["zip"]) == nil)
+}
+
+/// Parity with a full decode on a real feed: UPKEEP_ADVISORY_FEED=/path/advisories.json
+@Test func advisoryFeedScannerMatchesFullDecodeOnRealFeed() throws {
+    guard let path = ProcessInfo.processInfo.environment["UPKEEP_ADVISORY_FEED"] else { return }
+    let data = try Data(contentsOf: URL(fileURLWithPath: path), options: .alwaysMapped)
+    let full = try JSONDecoder().decode(HomebrewAdvisoryIndex.self, from: data)
+    let names = Set(full.advisories.keys)
+    let scanned = try #require(HomebrewAdvisoryFeedScanner.records(in: data, formulae: names))
+    #expect(Set(scanned.keys) == names)
+    for name in names {
+        #expect(scanned[name]?.map(\.id) == full.advisories[name]?.map(\.id), "\(name)")
+    }
+}
+
+@Test func unpreparedFormulaReloadsTheFullFeed() async throws {
+    let requests = CVERequestCounter()
+    let client = CVEInventoryClient(transport: { request in
+        await requests.increment()
+        return (Data(cveBrewFeed.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    })
+    await client.prepare(formulaNames: ["curl"])
+    let curl = try await client.check(CVEInventoryItem(cveBrew("curl", version: "1.0")))
+    #expect(curl.advisories.isEmpty)
+    // "zip" was not prepared, so its check must not trust the partial decode.
+    let zip = try await client.check(CVEInventoryItem(cveBrew("zip", version: "2.0")))
+    #expect(zip.advisories.count == 1)
+    #expect(await requests.count == 2)
+}
+
+private actor CVERequestCounter {
+    private(set) var count = 0
+    func increment() { count += 1 }
+}

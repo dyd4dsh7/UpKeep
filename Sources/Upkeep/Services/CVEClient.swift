@@ -11,6 +11,18 @@ struct CVEClient: Sendable {
         return (data, response)
     }
 
+    /// Downloads to a temporary file and returns it memory-mapped, so large
+    /// responses are paged from disk instead of held in process memory.
+    static let mappedDownloadTransport: Transport = { request in
+        let (temporary, response) = try await URLSession.shared.download(for: request)
+        guard let response = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        let owned = FileManager.default.temporaryDirectory.appendingPathComponent("upkeep-feed-\(UUID().uuidString)")
+        try FileManager.default.moveItem(at: temporary, to: owned)
+        // The mapping stays valid after the file is unlinked.
+        defer { try? FileManager.default.removeItem(at: owned) }
+        return (try Data(contentsOf: owned, options: .alwaysMapped), response)
+    }
+
     init(transport: @escaping Transport = Self.networkTransport) {
         self.transport = transport
     }

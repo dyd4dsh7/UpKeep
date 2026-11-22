@@ -3,7 +3,15 @@ set -euo pipefail
 
 SCRIPT_DIR=${0:A:h}
 PROJECT_DIR=${SCRIPT_DIR:h}
+# release: Developer ID signed and notarized (needs credentials).
+# local-release: optimized and stripped, signed locally (ad hoc), not notarized.
+# debug: unoptimized development build with symbols.
 CONFIGURATION=${1:-release}
+case "${CONFIGURATION}" in
+    release|local-release) BUILD_CONFIGURATION=release ;;
+    debug) BUILD_CONFIGURATION=debug ;;
+    *) echo "usage: $0 [release|local-release|debug]" >&2; exit 2 ;;
+esac
 OUTPUT_DIR=${PROJECT_DIR}/outputs
 STAGING_DIR=$(mktemp -d)
 BUILD_DIR=$(mktemp -d)
@@ -25,8 +33,8 @@ LINKER_PLATFORM_FLAGS=(
     -Xlinker 14.0
     -Xlinker "${SDK_VERSION}"
 )
-swift build -c "${CONFIGURATION}" --sdk "${SDK_PATH}" --scratch-path "${BUILD_DIR}" "${LINKER_PLATFORM_FLAGS[@]}"
-BIN_DIR=$(swift build -c "${CONFIGURATION}" --sdk "${SDK_PATH}" --scratch-path "${BUILD_DIR}" --show-bin-path)
+swift build -c "${BUILD_CONFIGURATION}" --sdk "${SDK_PATH}" --scratch-path "${BUILD_DIR}" "${LINKER_PLATFORM_FLAGS[@]}"
+BIN_DIR=$(swift build -c "${BUILD_CONFIGURATION}" --sdk "${SDK_PATH}" --scratch-path "${BUILD_DIR}" --show-bin-path)
 
 mkdir -p "${APP_DIR}/Contents/MacOS" "${APP_DIR}/Contents/Resources"
 cp "${BIN_DIR}/Upkeep" "${APP_DIR}/Contents/MacOS/Upkeep"
@@ -42,6 +50,15 @@ if [[ -d "${BIN_DIR}/Upkeep_Upkeep.bundle" ]]; then
     ditto "${BIN_DIR}/Upkeep_Upkeep.bundle" "${APP_DIR}/Contents/Resources/Upkeep_Upkeep.bundle"
 fi
 chmod +x "${APP_DIR}/Contents/MacOS/Upkeep"
+
+if [[ "${BUILD_CONFIGURATION}" == "release" ]]; then
+    # Keep debug symbols beside the archive for crash symbolication, then
+    # strip them from the shipped binary (about 15 MB to 6 MB).
+    mkdir -p "${OUTPUT_DIR}"
+    rm -rf "${OUTPUT_DIR}/Upkeep.app.dSYM"
+    dsymutil "${APP_DIR}/Contents/MacOS/Upkeep" -o "${OUTPUT_DIR}/Upkeep.app.dSYM"
+    strip -x "${APP_DIR}/Contents/MacOS/Upkeep"
+fi
 
 xattr -cr "${APP_DIR}"
 if [[ "${CONFIGURATION}" == "release" ]]; then
@@ -74,5 +91,8 @@ if [[ "${CONFIGURATION}" == "release" ]]; then
 fi
 
 mv -f "${STAGED_ARCHIVE}" "${ARCHIVE_PATH}"
+if [[ "${BUILD_CONFIGURATION}" == "release" ]]; then
+    (cd "${OUTPUT_DIR}" && shasum -a 256 Upkeep.zip > Upkeep.zip.sha256)
+fi
 
 echo "Packaged ${ARCHIVE_PATH}"

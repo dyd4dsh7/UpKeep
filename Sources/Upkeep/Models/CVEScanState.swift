@@ -109,7 +109,12 @@ final class CVEScanState {
         defer {
             currentItemID = nil; checkingItemIDs = []; running = false; task = nil
             if filter == .all, results.contains(where: { !$0.advisories.isEmpty }) { filter = .findings }
+            MemoryRelief.scheduleRelease()
         }
+        await client.prepare(formulaNames: Set(pending.compactMap { item -> String? in
+            if case let .formula(name, _) = item.target { return name }
+            return nil
+        }))
         var queues: [Lane: ArraySlice<CVEInventoryItem>] = [:]
         for lane in Lane.allCases { queues[lane] = ArraySlice(pending.filter { Lane($0) == lane }) }
         var active: [Lane: Int] = [:]

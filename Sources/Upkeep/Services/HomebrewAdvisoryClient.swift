@@ -29,6 +29,9 @@ enum HomebrewAdvisoryError: LocalizedError {
 
 struct HomebrewAdvisoryIndex: Decodable, Sendable {
     let advisories: [String: [Record]]
+
+    init(advisories: [String: [Record]]) { self.advisories = advisories }
+
     struct Record: Decodable, Sendable {
         let id: String
         let aliases: [String]?
@@ -103,5 +106,130 @@ struct HomebrewAdvisoryIndex: Decodable, Sendable {
             }
         }
         return matches.values.sorted { $0.id < $1.id }
+    }
+}
+
+/// Finds the raw JSON of selected formulae in the Homebrew advisory feed
+/// without building the whole document. The feed is about 79 MB; decoding it
+/// in full temporarily used roughly 270 MB, while a Mac usually needs a few
+/// formulae. Returns nil if the bytes are not the expected shape, so callers
+/// can fall back to a full decode.
+enum HomebrewAdvisoryFeedScanner {
+    static func records(in data: Data, formulae names: Set<String>) -> [String: [HomebrewAdvisoryIndex.Record]]? {
+        guard let slices = slices(in: data, formulae: names) else { return nil }
+        var output: [String: [HomebrewAdvisoryIndex.Record]] = [:]
+        for (name, slice) in slices {
+            guard let records = try? JSONDecoder().decode([HomebrewAdvisoryIndex.Record].self, from: slice) else { return nil }
+            output[name] = records
+        }
+        return output
+    }
+
+    static func slices(in data: Data, formulae names: Set<String>) -> [String: Data]? {
+        data.withUnsafeBytes { raw -> [String: Data]? in
+            guard let bytes = raw.bindMemory(to: UInt8.self).baseAddress else { return nil }
+            var scanner = Scanner(bytes: bytes, count: raw.count)
+            var found: [String: Data] = [:]
+            var sawAdvisories = false
+            let ok = scanner.object { key, scanner in
+                guard key == "advisories" else { return scanner.skipValue() }
+                sawAdvisories = true
+                return scanner.object { formula, scanner in
+                    let start = scanner.position
+                    guard scanner.skipValue() else { return false }
+                    if names.contains(formula) {
+                        found[formula] = Data(bytes: bytes + start, count: scanner.position - start)
+                    }
+                    return true
+                }
+            }
+            guard ok, sawAdvisories else { return nil }
+            scanner.skipWhitespace()
+            return scanner.position == scanner.count ? found : nil
+        }
+    }
+
+    private struct Scanner {
+        let bytes: UnsafePointer<UInt8>
+        let count: Int
+        var position = 0
+
+        init(bytes: UnsafePointer<UInt8>, count: Int) { self.bytes = bytes; self.count = count }
+
+        mutating func skipWhitespace() {
+            while position < count, [0x20, 0x09, 0x0A, 0x0D].contains(bytes[position]) { position += 1 }
+        }
+
+        /// Walks an object, calling `member` with each key positioned at its value.
+        mutating func object(_ member: (String, inout Scanner) -> Bool) -> Bool {
+            skipWhitespace()
+            guard position < count, bytes[position] == UInt8(ascii: "{") else { return false }
+            position += 1
+            skipWhitespace()
+            if position < count, bytes[position] == UInt8(ascii: "}") { position += 1; return true }
+            while true {
+                skipWhitespace()
+                guard let key = string() else { return false }
+                skipWhitespace()
+                guard position < count, bytes[position] == UInt8(ascii: ":") else { return false }
+                position += 1
+                skipWhitespace()
+                guard member(key, &self) else { return false }
+                skipWhitespace()
+                guard position < count else { return false }
+                if bytes[position] == UInt8(ascii: ",") { position += 1; continue }
+                if bytes[position] == UInt8(ascii: "}") { position += 1; return true }
+                return false
+            }
+        }
+
+        mutating func string() -> String? {
+            guard position < count, bytes[position] == UInt8(ascii: "\"") else { return nil }
+            let start = position
+            position += 1
+            var escaped = false
+            while position < count {
+                let byte = bytes[position]
+                position += 1
+                if byte == UInt8(ascii: "\\") { escaped = true; position += 1; continue }
+                if byte == UInt8(ascii: "\"") {
+                    let quoted = Data(bytes: bytes + start, count: position - start)
+                    if !escaped { return String(decoding: quoted.dropFirst().dropLast(), as: UTF8.self) }
+                    return try? JSONDecoder().decode(String.self, from: quoted)
+                }
+            }
+            return nil
+        }
+
+        /// Skips one JSON value, tracking nesting and strings.
+        mutating func skipValue() -> Bool {
+            skipWhitespace()
+            guard position < count else { return false }
+            switch bytes[position] {
+            case UInt8(ascii: "\""):
+                return string() != nil
+            case UInt8(ascii: "{"), UInt8(ascii: "["):
+                var depth = 0
+                while position < count {
+                    let byte = bytes[position]
+                    if byte == UInt8(ascii: "\"") {
+                        guard string() != nil else { return false }
+                        continue
+                    }
+                    if byte == UInt8(ascii: "{") || byte == UInt8(ascii: "[") { depth += 1 }
+                    if byte == UInt8(ascii: "}") || byte == UInt8(ascii: "]") {
+                        depth -= 1
+                        if depth == 0 { position += 1; return true }
+                    }
+                    position += 1
+                }
+                return false
+            default:
+                let start = position
+                while position < count, ![UInt8(ascii: ","), UInt8(ascii: "}"), UInt8(ascii: "]"), 0x20, 0x09, 0x0A, 0x0D]
+                        .contains(bytes[position]) { position += 1 }
+                return position > start
+            }
+        }
     }
 }

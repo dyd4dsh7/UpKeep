@@ -547,6 +547,7 @@ final class UpkeepStore: ObservableObject {
         } runningChanged: { isScanning = $0 }
         if ownedRun { refreshCVEsAutomatically() }
         if ownedRun && didStart { scheduleNextRefresh() }
+        if ownedRun { MemoryRelief.scheduleRelease() }
     }
 
     var cveInventory: [CVEInventoryItem] {
