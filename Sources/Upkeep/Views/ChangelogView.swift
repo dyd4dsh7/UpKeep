@@ -112,6 +112,11 @@ private struct UpkeepRelease: Identifiable {
     var isUnreleased: Bool { version == "Next" }
 
     static let all = [
+        UpkeepRelease(version: "0.25.1", date: "22 November 2026", changes: [
+            "Shows official logos for package managers, model runtimes, and update sources, including Homebrew, npm, Node.js, Python, Rust, Go, GitHub, VS Code, Ollama, LM Studio, and Sparkle, with dark-mode versions.",
+            "Shows the installed App Store, TestFlight, Steam, Setapp, and Microsoft AutoUpdate icons on their source pages.",
+            "Lists every third-party logo with its owner, source, and terms in the third-party notices."
+        ]),
         UpkeepRelease(version: "0.25.0", date: "22 November 2026", changes: [
             "Finds updates that were hidden before, including post-release versions such as 9.9p1 and 1.1.1w, Homebrew letter suffixes, -stable tags, and cask versions with a commit hash.",
             "Skipping or ignoring an app now also hides its Homebrew cask update, and a skipped release stays skipped whichever source reports it.",
