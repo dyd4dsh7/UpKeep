@@ -101,6 +101,7 @@ final class SparkleFeedParser: XMLTextParser {
     private var hasMarketingVersion = false
     private var sourcePrereleaseChannel: PrereleaseChannel?
     private var releaseNotes: String?
+    private var descriptionIsMarkdown = false
     private var downloadURL: URL?
     private var installationType: SparkleInstallationType = .application
     private var hasEdSignature = false
@@ -152,6 +153,11 @@ final class SparkleFeedParser: XMLTextParser {
         }
         currentElement = qName ?? elementName
         currentText = ""
+        if elementName == "description" {
+            // Sparkle 2 lets feeds declare Markdown release notes; otherwise they are HTML.
+            let format = attributeDict["sparkle:format"] ?? attributeDict["format"]
+            descriptionIsMarkdown = format?.lowercased() == "markdown"
+        }
         if elementName == "item" {
             inItem = true
             version = nil
@@ -228,7 +234,9 @@ final class SparkleFeedParser: XMLTextParser {
         } else if qualified == "sparkle:channel" || elementName == "channel" {
             if let channel = Self.channel(named: text) { sourcePrereleaseChannel = channel }
         } else if elementName == "description" {
-            releaseNotes = text.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+            releaseNotes = !descriptionIsMarkdown && ReleaseNotesHTML.isHTML(text)
+                ? ReleaseNotesHTML.markdown(fromHTML: text)
+                : text
         } else if elementName == "item" {
             guard items.count < Self.maximumItems else {
                 parser.abortParsing()
