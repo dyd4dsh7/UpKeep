@@ -6,7 +6,7 @@ struct AllAppsView: View {
     let apps: [InstalledApp]
     let title: String
     let systemImage: String
-    @State private var projection = AllAppsProjection()
+    @UpkeepState private var projection = AllAppsProjection()
 
     var body: some View {
         let visibleApps = displayedApps

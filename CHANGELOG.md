@@ -14,6 +14,7 @@ All notable changes to Upkeep are documented here.
 - The app no longer includes licence texts for Swift Testing and SwiftSyntax, which are used only to run tests and are not part of the app.
 - Redesigned the README, listed all 23 supported developer package managers, and brought SECURITY.md and CONTRIBUTING.md up to date with how releases and self-updates work.
 - `./script/build_and_run.sh` now packages its debug build in a temporary folder, so it no longer replaces a release archive in `outputs/`.
+- Fixed building Upkeep with Command Line Tools on macOS 27 SDKs: one view used SwiftUI's `@State` macro, which needs a plugin those tools don't include. `Package.swift` also drops an old workaround for Swift Testing's macro plugin that current toolchains no longer need.
 
 ## 0.25.6 — 2026-11-22
 
