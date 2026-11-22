@@ -1,25 +1,31 @@
 import SwiftUI
 
+/// Colours taken from the app icon: its deep blue arrow (#0050DC), light blue
+/// arrow (#78B5F5), and warm off-white tile. Green is kept only for success.
 enum UpkeepPalette {
-    static let mint = Color(red: 0.73, green: 0.96, blue: 0.75)
-    static let forest = Color(red: 0.06, green: 0.19, blue: 0.15)
+    /// The icon's deep blue.
+    static let blue = Color(red: 0.00, green: 0.31, blue: 0.86)
+    /// The icon's light blue.
+    static let sky = Color(red: 0.47, green: 0.71, blue: 0.96)
+    /// A deep navy that carries the blues on dark surfaces.
+    static let navy = Color(red: 0.035, green: 0.09, blue: 0.22)
 
     static func accent(in scheme: ColorScheme) -> Color {
         scheme == .dark
-            ? Color(red: 0.56, green: 0.88, blue: 0.69)
-            : Color(red: 0.10, green: 0.39, blue: 0.28)
+            ? Color(red: 0.49, green: 0.72, blue: 0.97)
+            : Color(red: 0.04, green: 0.31, blue: 0.82)
     }
 
     static func canvas(in scheme: ColorScheme) -> Color {
         scheme == .dark
-            ? Color(red: 0.09, green: 0.11, blue: 0.105)
-            : Color(red: 0.949, green: 0.961, blue: 0.948)
+            ? Color(red: 0.075, green: 0.09, blue: 0.125)
+            : Color(red: 0.957, green: 0.953, blue: 0.941)
     }
 
     static func surface(in scheme: ColorScheme) -> Color {
         scheme == .dark
-            ? Color(red: 0.127, green: 0.153, blue: 0.14)
-            : Color(red: 0.993, green: 0.996, blue: 0.989)
+            ? Color(red: 0.11, green: 0.13, blue: 0.175)
+            : Color(red: 0.995, green: 0.993, blue: 0.988)
     }
 }
 

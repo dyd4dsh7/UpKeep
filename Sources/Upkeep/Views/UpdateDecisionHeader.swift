@@ -144,9 +144,8 @@ private struct UpdateReviewLabelStyle: LabelStyle {
     }
 }
 
-/// Hero colours: a deep forest card in dark mode and a light mint card with
-/// forest ink in light mode, so the header never becomes a heavy dark block
-/// on a light canvas.
+/// Hero colours from the app icon: a navy card with light blue in dark mode,
+/// and a pale blue card with the icon's deep blue in light mode.
 struct UpdateHeroPalette {
     let background: [Color]
     let outline: Color
@@ -160,24 +159,24 @@ struct UpdateHeroPalette {
 
     init(scheme: ColorScheme) {
         if scheme == .dark {
-            background = [UpkeepPalette.forest, Color(red: 0.10, green: 0.31, blue: 0.23)]
-            outline = UpkeepPalette.mint.opacity(0.22)
-            eyebrow = UpkeepPalette.mint
+            background = [UpkeepPalette.navy, Color(red: 0.05, green: 0.17, blue: 0.40)]
+            outline = UpkeepPalette.sky.opacity(0.25)
+            eyebrow = UpkeepPalette.sky
             title = .white
-            detail = UpkeepPalette.mint.opacity(0.84)
-            ink = UpkeepPalette.mint
-            tile = UpkeepPalette.forest
-            buttonFill = UpkeepPalette.mint
-            buttonText = UpkeepPalette.forest
+            detail = UpkeepPalette.sky.opacity(0.86)
+            ink = UpkeepPalette.sky
+            tile = UpkeepPalette.navy
+            buttonFill = UpkeepPalette.sky
+            buttonText = UpkeepPalette.navy
         } else {
-            background = [Color(red: 0.89, green: 0.965, blue: 0.905), Color(red: 0.80, green: 0.925, blue: 0.835)]
-            outline = UpkeepPalette.forest.opacity(0.12)
-            eyebrow = Color(red: 0.10, green: 0.39, blue: 0.28)
-            title = UpkeepPalette.forest
-            detail = UpkeepPalette.forest.opacity(0.72)
-            ink = Color(red: 0.10, green: 0.39, blue: 0.28)
-            tile = Color(red: 0.97, green: 0.99, blue: 0.97)
-            buttonFill = Color(red: 0.10, green: 0.39, blue: 0.28)
+            background = [Color(red: 0.90, green: 0.94, blue: 1.0), Color(red: 0.80, green: 0.88, blue: 0.99)]
+            outline = UpkeepPalette.navy.opacity(0.12)
+            eyebrow = UpkeepPalette.blue
+            title = UpkeepPalette.navy
+            detail = UpkeepPalette.navy.opacity(0.72)
+            ink = UpkeepPalette.blue
+            tile = Color(red: 0.98, green: 0.99, blue: 1.0)
+            buttonFill = UpkeepPalette.blue
             buttonText = .white
         }
     }
