@@ -723,6 +723,8 @@ enum SidebarDestination: String, CaseIterable, Identifiable {
         switch self {
         case .appStore: ["/System/Applications/App Store.app"]
         case .testFlight: ["/Applications/TestFlight.app"]
+        case .setapp: ["/Applications/Setapp.app", NSHomeDirectory() + "/Applications/Setapp.app"]
+        case .microsoftAutoUpdate: ["/Library/Application Support/Microsoft/MAU2.0/Microsoft AutoUpdate.app"]
         case .steam: ["/Applications/Steam.app", NSHomeDirectory() + "/Applications/Steam.app"]
         default: []
         }
