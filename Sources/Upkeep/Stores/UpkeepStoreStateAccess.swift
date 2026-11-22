@@ -58,3 +58,19 @@ extension UpkeepStore {
     var diagnosticsLevelFilter: DiagnosticLevelFilter { get { diagnostics.diagnosticsLevelFilter } set { diagnostics.diagnosticsLevelFilter = newValue } }
     var diagnosticsCategoryFilter: DiagnosticCategory? { get { diagnostics.diagnosticsCategoryFilter } set { diagnostics.diagnosticsCategoryFilter = newValue } }
 }
+
+@MainActor
+extension UpkeepStore {
+    var hasInspectorSelection: Bool {
+        selectedApp != nil || updateInspectorSelection != nil || selectedPackageID != nil
+            || selectedDeveloperPackageID != nil || selectedLocalModelID != nil
+    }
+
+    func clearInspectorSelection() {
+        selectedApp = nil
+        updateInspectorSelection = nil
+        selectedPackageID = nil
+        selectedDeveloperPackageID = nil
+        selectedLocalModelID = nil
+    }
+}

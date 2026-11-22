@@ -571,6 +571,7 @@ struct BatchUpdateResult: Identifiable, Hashable, Sendable {
         case updated = "Updated"
         case opened = "Action Required"
         case failed = "Failed"
+        case notStarted = "Not Started"
     }
 
     let item: BatchUpdateItem
@@ -586,6 +587,7 @@ struct BatchUpdateSummary: Hashable, Sendable {
     var updatedCount: Int { results.count { $0.outcome == .updated } }
     var openedCount: Int { results.count { $0.outcome == .opened } }
     var failedCount: Int { results.count { $0.outcome == .failed } }
+    var notStartedCount: Int { results.count { $0.outcome == .notStarted } }
 }
 
 struct BatchUpdateProgress: Equatable, Sendable {

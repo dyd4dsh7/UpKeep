@@ -6,9 +6,11 @@ struct AllAppsView: View {
     let apps: [InstalledApp]
     let title: String
     let systemImage: String
+    @State private var projection = AllAppsProjection()
 
     var body: some View {
         let visibleApps = displayedApps
+        let duplicateBundleIDs = projection.duplicateBundleIDs(in: store.apps, generation: store.library.appGeneration)
         VStack(spacing: 0) {
             if visibleApps.isEmpty {
                 emptyState
@@ -25,7 +27,7 @@ struct AllAppsView: View {
                     } content: {
                         ItemIdentityView(
                             title: app.name,
-                            detail: sourceSummary(for: app) + (store.apps.contains { $0.id != app.id && $0.bundleIdentifier != nil && $0.bundleIdentifier == app.bundleIdentifier } ? " · " + app.url.deletingLastPathComponent().path : ""),
+                            detail: sourceSummary(for: app) + (app.bundleIdentifier.map(duplicateBundleIDs.contains) == true ? " · " + app.url.deletingLastPathComponent().path : ""),
                             isRunning: store.isRunning(app),
                             prereleaseChannel: update?.prereleaseChannel ?? app.prereleaseChannel,
                             prereleaseIsInstalled: update?.prereleaseIsInstalled ?? (app.prereleaseChannel != nil),
@@ -190,12 +192,24 @@ struct AllAppsView: View {
         }
     }
 
-    private var emptyState: some View {
+    @ViewBuilder private var emptyState: some View {
+        if store.isScanning && store.searchText.isEmpty {
+            WorkspaceScanningState(
+                title: store.appListFilter == .updates ? "Checking for updates…" : "Finding apps…",
+                detail: "Results appear here when the current check finishes."
+            )
+        } else {
+            populatedEmptyState
+        }
+    }
+
+    private var populatedEmptyState: some View {
         WorkspaceEmptyState(title: emptyTitle, systemImage: emptySystemImage,
                             description: Text(emptyDescription)) {
             if store.searchText.isEmpty {
                 Button("Check Again") { Task { await store.scan() } }
                     .buttonStyle(.borderedProminent)
+                    .disabled(store.isScanning)
             } else {
                 Button("Clear Search") { store.searchText = "" }
                     .buttonStyle(.borderedProminent)
@@ -214,7 +228,9 @@ struct AllAppsView: View {
         case "TestFlight": "No TestFlight Apps"
         case "Microsoft AutoUpdate": "No Microsoft Apps"
         case "No Source": "Every App Has a Source"
-        default: "No \(title) Apps"
+        case "All Apps": "No Apps Found"
+        case "Other Updaters": "No Apps With Other Updaters"
+        default: title.hasSuffix("Apps") ? "No \(title)" : "No \(title) Apps"
         }
     }
 
@@ -230,6 +246,7 @@ struct AllAppsView: View {
         case "TestFlight": "No installed TestFlight beta apps were detected."
         case "Microsoft AutoUpdate": "No installed apps managed by Microsoft AutoUpdate were detected."
         case "No Source": "Every installed app has a supported update source or update manager."
+        case "All Apps": "Upkeep didn’t find any installed apps. Check again to rescan."
         default: "No installed apps associated with \(title) were detected."
         }
     }
@@ -239,19 +256,37 @@ struct AllAppsView: View {
         return title == "No Source" ? "checkmark.seal" : systemImage
     }
 
+    /// Filtered and sorted once per inventory/filter/sort change, not per body.
     private var displayedApps: [InstalledApp] {
-        apps.filter(matchesFilter).sorted { left, right in
+        let library = store.library
+        let key = AllAppsProjection.Key(
+            apps: apps, appGeneration: library.appGeneration, updateGeneration: library.primaryUpdateGeneration,
+            homebrewGeneration: library.homebrewGeneration, adoptableGeneration: library.adoptableGeneration,
+            filter: store.appListFilter, sortOrder: store.appSortOrder, ascending: store.appSortAscending)
+        return projection.values(for: key, build: sortedFilteredApps)
+    }
+
+    private func sortedFilteredApps() -> [InstalledApp] {
+        let sortOrder = store.appSortOrder
+        // Decorate-sort-undecorate: derive per-app sort keys once.
+        let decorated = apps.filter(matchesFilter).map { app in
+            (app: app,
+             hasUpdate: sortOrder == .recommended ? store.update(for: app) != nil : false,
+             summary: sortOrder == .source ? sourceSummary(for: app) : "")
+        }
+        return decorated.sorted { leftEntry, rightEntry in
+            let left = leftEntry.app, right = rightEntry.app
             let comparison: ComparisonResult
-            switch store.appSortOrder {
+            switch sortOrder {
             case .recommended:
-                let leftHasUpdate = store.update(for: left) != nil
-                let rightHasUpdate = store.update(for: right) != nil
+                let leftHasUpdate = leftEntry.hasUpdate
+                let rightHasUpdate = rightEntry.hasUpdate
                 if leftHasUpdate != rightHasUpdate { return leftHasUpdate }
                 comparison = left.name.localizedStandardCompare(right.name)
             case .name:
                 comparison = left.name.localizedStandardCompare(right.name)
             case .source:
-                comparison = sourceSummary(for: left).localizedStandardCompare(sourceSummary(for: right))
+                comparison = leftEntry.summary.localizedStandardCompare(rightEntry.summary)
             case .installedVersion:
                 comparison = VersionComparator.compare(left.installedVersion, right.installedVersion)
             case .availableVersion:
@@ -271,7 +306,7 @@ struct AllAppsView: View {
                 )
             }
             return store.appSortAscending ? comparison == .orderedAscending : comparison == .orderedDescending
-        }
+        }.map(\.app)
     }
 
     private func matchesFilter(_ app: InstalledApp) -> Bool {
@@ -834,7 +869,11 @@ struct AppDetailView: View {
             }
             return "Managed by \(app.updateManagement.rawValue)"
         }
-        return update == nil ? "Up to date" : "Update available"
+        guard update == nil else { return "Update available" }
+        // Only claim "Up to date" when a source actually answered for this app.
+        if store.sources(for: app).isEmpty { return "No update source" }
+        if store.lastChecked(for: app) == nil { return "Not checked yet" }
+        return "Up to date"
     }
 
     private var statusDescription: String {
@@ -971,5 +1010,39 @@ struct RunningBadge: View {
             .labelStyle(.titleAndIcon)
             .help("This app is currently running")
             .accessibilityLabel("Running")
+    }
+}
+
+/// Holds AllAppsView projections across body evaluations. Mutating it does
+/// not invalidate the view; keys include every input the projection reads.
+@MainActor
+final class AllAppsProjection {
+    struct Key: Equatable {
+        let apps: [InstalledApp]
+        let appGeneration: UInt64
+        let updateGeneration: UInt64
+        let homebrewGeneration: UInt64
+        let adoptableGeneration: UInt64
+        let filter: AppListFilter
+        let sortOrder: AppSortOrder
+        let ascending: Bool
+    }
+
+    private var cache = ListProjectionCache<InstalledApp, Key>()
+    private var duplicates: (generation: UInt64, ids: Set<String>)?
+
+    func values(for key: Key, build: () -> [InstalledApp]) -> [InstalledApp] {
+        cache.values(for: key, build: build)
+    }
+
+    /// Bundle IDs shared by more than one installed app.
+    func duplicateBundleIDs(in apps: [InstalledApp], generation: UInt64) -> Set<String> {
+        if let duplicates, duplicates.generation == generation { return duplicates.ids }
+        var seen = Set<String>(), shared = Set<String>()
+        for bundleID in apps.compactMap(\.bundleIdentifier) where !seen.insert(bundleID).inserted {
+            shared.insert(bundleID)
+        }
+        duplicates = (generation, shared)
+        return shared
     }
 }

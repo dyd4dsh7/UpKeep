@@ -12,6 +12,13 @@ enum CommandRunner {
     }
 
     private static let processGate = SourceRequestGate(globalLimit: 8, perHostLimit: 2, caseInsensitiveKeys: false)
+    /// Network fetches (curl) get their own pool so long-running package-manager
+    /// commands cannot starve publisher requests, and vice versa.
+    private static let networkProcessGate = SourceRequestGate(globalLimit: 8, perHostLimit: 2, caseInsensitiveKeys: false)
+    static let networkAdmissionPrefix = "network:"
+    private static func admissionGate(for key: String) -> SourceRequestGate {
+        key.hasPrefix(networkAdmissionPrefix) ? networkProcessGate : processGate
+    }
     enum Purpose {
         case automatic, inventory, mutation
     }
@@ -59,8 +66,8 @@ enum CommandRunner {
         admissionKey: String? = nil, admissionTimeout: TimeInterval = 120
     ) async throws -> Result {
         do {
-            return try await processGate.withPermit(host: admissionKey ?? executableAdmissionKey(executable),
-                                                   queueTimeout: .seconds(admissionTimeout)) {
+            let key = admissionKey ?? executableAdmissionKey(executable)
+            return try await admissionGate(for: key).withPermit(host: key, queueTimeout: .seconds(admissionTimeout)) {
                 try await runAdmitted(executable, arguments, environment: environment, directory: directory,
                                       timeout: timeout, maximumOutputBytes: maximumOutputBytes)
             }
@@ -133,6 +140,9 @@ enum CommandRunner {
         process.currentDirectoryURL = directory
         process.standardOutput = stdout
         process.standardError = stderr
+        // Event-driven wait: termination and stop requests wake the waiter
+        // instead of polling `isRunning`.
+        process.terminationHandler = { _ in control.markExited() }
         try control.start(process)
         defer { control.finish() }
         let output = Output(limit: max(1, maximumOutputBytes))
@@ -155,11 +165,17 @@ enum CommandRunner {
                 }
             }
         }
-        let started = ContinuousClock.now
-        while process.isRunning {
-            if started.duration(to: .now) >= .seconds(max(0.01, timeout)) { control.stop(.timedOut) }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(max(0.01, timeout)))
+        while !control.hasExited {
+            let now = ContinuousClock.now
+            if now >= deadline { control.stop(.timedOut) }
             control.enforceTermination()
-            Thread.sleep(forTimeInterval: 0.01)
+            // Wake at the deadline, at the SIGKILL grace boundary, or when the
+            // process exits / a stop is requested. Past those points (for example
+            // a process that survives SIGKILL), recheck every 10 ms, never faster.
+            var wake = control.killDeadline ?? deadline
+            if wake <= now { wake = now.advanced(by: .milliseconds(10)) }
+            control.waitForEvent(until: wake)
         }
         process.waitUntilExit()
         control.finishTermination()
@@ -184,12 +200,31 @@ enum CommandRunner {
         private var processGroup: pid_t?
         private var reason: Failure?
         private var stoppedAt: ContinuousClock.Instant?
+        private var exited = false
+        private let events = DispatchSemaphore(value: 0)
         var failure: Failure? { lock.withLock { reason } }
+        var hasExited: Bool { lock.withLock { exited } }
+        /// When a stop was requested, the instant the SIGKILL escalation is due.
+        var killDeadline: ContinuousClock.Instant? {
+            lock.withLock { stoppedAt?.advanced(by: .milliseconds(500)) }
+        }
+        func markExited() {
+            lock.withLock { exited = true }
+            events.signal()
+        }
+        func waitForEvent(until instant: ContinuousClock.Instant) {
+            let remaining = ContinuousClock.now.duration(to: instant)
+            guard remaining > .zero else { return }
+            let parts = remaining.components
+            let nanoseconds = parts.seconds * 1_000_000_000 + parts.attoseconds / 1_000_000_000
+            _ = events.wait(timeout: .now() + .nanoseconds(Int(clamping: nanoseconds)))
+        }
 
         func start(_ process: Process) throws {
             try lock.withLock {
                 if let reason { throw reason }
                 self.process = process
+                exited = false
                 try process.run()
                 // Foundation normally creates a new group. Never signal a group
                 // unless its leader is this exact child, keeping Upkeep's own
@@ -204,12 +239,15 @@ enum CommandRunner {
         }
         func cancel() { stop(.cancelled) }
         func stop(_ reason: Failure) {
-            lock.withLock {
-                guard self.reason == nil else { return }
+            let firstStop = lock.withLock {
+                guard self.reason == nil else { return false }
                 self.reason = reason
                 stoppedAt = .now
                 signal(SIGTERM)
+                return true
             }
+            // Repeated stop requests must not wake the waiter, or it would spin.
+            if firstStop { events.signal() }
         }
         func enforceTermination() {
             lock.withLock {

@@ -3,6 +3,7 @@ import SwiftUI
 struct SetupView: View {
     @EnvironmentObject private var settings: AppSettings
     @StateObject private var state = SetupViewState()
+    @ScaledMetric(relativeTo: .largeTitle) private var titleSize: CGFloat = 29
 
     var body: some View {
         VStack(spacing: 0) {
@@ -65,8 +66,8 @@ struct SetupView: View {
             AppBrandIcon(size: 54)
 
             VStack(alignment: .leading, spacing: 5) {
-                Text("Set up UpKeep")
-                    .font(.system(size: 29, weight: .semibold))
+                Text("Set up Upkeep")
+                    .font(.system(size: titleSize, weight: .semibold))
                     .tracking(-0.9)
                     .accessibilityAddTraits(.isHeader)
                 Text("Choose what to include in update checks.")

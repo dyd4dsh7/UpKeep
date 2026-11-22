@@ -5,6 +5,7 @@ struct UpkeepSidebarView: View {
     @EnvironmentObject private var settings: AppSettings
 
     @Environment(\.colorScheme) private var scheme
+    @ScaledMetric(relativeTo: .title) private var brandSize: CGFloat = 20
 
     @AppStorage("sidebarSourcesExpanded") private var sourcesExpanded = false
 
@@ -75,8 +76,8 @@ struct UpkeepSidebarView: View {
         HStack(spacing: 9) {
             AppBrandIcon(size: 30)
                 .accessibilityHidden(true)
-            Text("UpKeep")
-                .font(.system(size: 20, weight: .semibold))
+            Text("Upkeep")
+                .font(.system(size: brandSize, weight: .semibold))
                 .tracking(-0.6)
                 .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 0)
@@ -107,6 +108,11 @@ struct UpkeepSidebarView: View {
                 }
                 .accessibilityElement(children: .combine)
             }
+            if store.updateCheckState == .notChecked {
+                Button("Check Now") { Task { await store.scan() } }
+                    .buttonStyle(.link)
+                    .font(.callout)
+            }
             SettingsLink {
                 Label("Settings", systemImage: "gearshape")
                     .font(.callout)
@@ -125,7 +131,7 @@ struct UpkeepSidebarView: View {
         case .partial: "Check incomplete"
         case .failed: "Check failed"
         case .disabled: "Checks disabled"
-        case .notChecked: "Awaiting first check"
+        case .notChecked: store.lastChecked == nil ? "Awaiting first check" : "Not checked this session"
         }
     }
 
@@ -151,7 +157,9 @@ struct UpkeepSidebarView: View {
             .otherUpdaters, .homebrewApps, .sparkle, .github, .noSource
         ]
         // Keep the selected destination visible while a scan replaces its inventory.
-        return destinations.filter { store.count(for: $0) > 0 || store.navigation.selection == $0 }
+        // Visibility follows inventory; the badge shows pending updates.
+        let inventory = store.applicationSourceCounts()
+        return destinations.filter { (inventory[$0] ?? 0) > 0 || store.navigation.selection == $0 }
     }
 
     private var packageDestinations: [SidebarDestination] {
@@ -183,7 +191,7 @@ struct UpkeepSidebarView: View {
         .help(destination.rawValue)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(destination.rawValue)
-        .accessibilityValue(count > 0 ? "\(count) items" : "No items")
+        .accessibilityValue(count > 0 ? WorkspaceSummary.count(count, "update", "updates") : "No updates")
     }
 
     private var sidebarPresentationKey: String {

@@ -9,7 +9,17 @@ struct HomebrewView: View {
         let packages = sortedPackages
         PackageCleanupContainer(result: $cleanupResult, contentIdentity: packages.map(\.id)) {
             if HomebrewClient.brewURL == nil {
-                WorkspaceEmptyState("Homebrew not installed", systemImage: "terminal", description: Text("Install Homebrew to manage packages here."))
+                WorkspaceEmptyState(title: "Homebrew not installed", systemImage: "terminal",
+                                    description: Text("Install Homebrew to manage packages here.")) {
+                    if let url = URL(string: "https://brew.sh") {
+                        Link("Get Homebrew at brew.sh", destination: url)
+                    }
+                }
+                    .upkeepStateTransition()
+            } else if packages.isEmpty, store.homebrewPackages.isEmpty,
+                      store.isScanning || store.isWorking(.homebrewInventoryScan) {
+                WorkspaceScanningState(title: "Checking Homebrew…",
+                                       detail: "Installed packages appear here when the check finishes.")
                     .upkeepStateTransition()
             } else if packages.isEmpty {
                 WorkspaceEmptyState("No packages to show", systemImage: "shippingbox",
@@ -24,7 +34,7 @@ struct HomebrewView: View {
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             WorkspaceSummary(title: "Homebrew",
-                detail: "\(WorkspaceSummary.count(packages.count, "package", "packages")) · \(WorkspaceSummary.count(packages.filter(\.isOutdated).count, "update", "updates")) available",
+                detail: "\(WorkspaceSummary.count(packages.count, "package", "packages")) · \(WorkspaceSummary.count(packages.count { $0.isOutdated && !store.isExcluded($0) }, "update", "updates")) available",
                 systemImage: "shippingbox")
         }
         .toolbar { packageToolbar }

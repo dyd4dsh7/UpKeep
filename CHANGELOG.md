@@ -4,6 +4,17 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+- Made Upkeep a single main window that the menu bar, Dock icon, and update notifications reopen after it is closed; the menu bar item and Dock badge now stay current while the window is closed.
+- Added pending updates and “Update All Recommended…” to the menu bar menu, an “Open at login” setting, ⌘F for search, and “Stop After Current Update” for batch updates.
+- Batch review now shows every group the Updates header counts, with per-group selection and the list of apps it will quit; sidebar badges now count pending updates only.
+- Fixed empty states during scans, Escape being taken by the inspector, unconfirmed “Restore All Updates”, and a previous session’s check date being shown as current results.
+- Fixed hidden updates for post-release versions such as `9.9p1`, `1.1.1w`, Homebrew letter suffixes, `-stable`/`-final` tags, and cask versions with a commit hash.
+- Skipping or ignoring an app now also hides its Homebrew cask update, and skips match the same release across sources.
+- Sparkle items on named channels (such as canary or insider) are treated as prereleases, and Sparkle releases are compared by build like Sparkle itself, removing phantom updates and false install failures for build-only feeds.
+- Apps quit for an update are reopened when the update fails but the original app is intact; a manual refresh can no longer overwrite a just-installed version; the newest backup is kept when protected backups use the size budget.
+- App Store lookups use the local storefront and are batched; app details say “Not checked yet” or “No update source” instead of “Up to date” when nothing was checked.
+- Improved responsiveness during scans and in large lists, ran CVE checks concurrently with reuse of fresh results, gave network requests their own process pool, cached Sparkle appcasts briefly, and moved diagnostics and check-history writes off the hot path.
+
 - Fixed optimized CVE tests to use test-owned offline fixtures and updated responsiveness benchmark expectations for the unified update count.
 
 - Switched tests to toolchain-bundled Swift Testing, removing the duplicate Swift Testing/SwiftSyntax package builds and custom runtime linker paths; CI and releases select Xcode 26.6 with Swift 6.3 or newer.

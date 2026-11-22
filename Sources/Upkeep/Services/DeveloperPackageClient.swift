@@ -532,7 +532,7 @@ func scanPython(_ path: String) async -> ManagerScanResult {
         ["-m", "pip", "list", "--outdated", "--format=json", "--disable-pip-version-check"]
     )
     let outdatedValues = try? JSONDecoder().decode([PipOutdated].self, from: outdatedResult.data)
-    let outdated = Dictionary(uniqueKeysWithValues: (outdatedValues ?? []).map { ($0.name.lowercased(), $0.latestVersion) })
+    let outdated = Dictionary((outdatedValues ?? []).map { ($0.name.lowercased(), $0.latestVersion) }, uniquingKeysWith: { first, _ in first })
     let packages = installed.map {
         DeveloperPackage(name: $0.name, currentVersion: $0.version, latestVersion: outdated[$0.name.lowercased()] ?? $0.version, manager: .python, executablePath: path)
     }
@@ -841,7 +841,7 @@ func scanMacPorts(_ path: String) async -> ManagerScanResult {
     guard installedResult.status == 0 else { return failedManagerScan(.macPorts, command: "inventory", result: installedResult) }
     guard outdatedResult.status == 0 else { return failedManagerScan(.macPorts, command: "outdated check", result: outdatedResult) }
     let installed = DeveloperInventoryParsers.parseMacPortsInstalled(installedResult.data)
-    let outdated = Dictionary(uniqueKeysWithValues: DeveloperInventoryParsers.parseMacPortsOutdated(outdatedResult.data).map { ($0.name, $0.latest) })
+    let outdated = Dictionary(DeveloperInventoryParsers.parseMacPortsOutdated(outdatedResult.data).map { ($0.name, $0.latest) }, uniquingKeysWith: { first, _ in first })
     let packages = installed.map {
         DeveloperPackage(
             name: $0.name, currentVersion: $0.version, latestVersion: outdated[$0.name] ?? $0.version,
@@ -859,7 +859,7 @@ func scanNixProfile(_ path: String) async -> ManagerScanResult {
     guard listResult.status == 0 else { return failedManagerScan(.nix, command: "profile inventory", result: listResult) }
     guard updateResult.status == 0 else { return failedManagerScan(.nix, command: "profile update check", result: updateResult) }
     let updates = DeveloperInventoryParsers.parseNixDryRun(updateResult.data)
-    let latestByName = Dictionary(uniqueKeysWithValues: updates.map { ($0.name, $0.latest) })
+    let latestByName = Dictionary(updates.map { ($0.name, $0.latest) }, uniquingKeysWith: { first, _ in first })
     let packages = DeveloperInventoryParsers.parseNixProfileJSON(listResult.data).map {
         DeveloperPackage(
             name: $0.name, currentVersion: $0.version, latestVersion: latestByName[$0.name] ?? $0.version,
@@ -875,7 +875,7 @@ func scanMise(_ path: String) async -> ManagerScanResult {
     let (installedResult, outdatedResult) = await (installedCommand, outdatedCommand)
     guard installedResult.status == 0 else { return failedManagerScan(.mise, command: "tool inventory", result: installedResult) }
     guard outdatedResult.status == 0 else { return failedManagerScan(.mise, command: "tool update check", result: outdatedResult) }
-    let outdated = Dictionary(uniqueKeysWithValues: DeveloperInventoryParsers.parseGenericOutdatedJSON(outdatedResult.data).map { ($0.name, $0.latest) })
+    let outdated = Dictionary(DeveloperInventoryParsers.parseGenericOutdatedJSON(outdatedResult.data).map { ($0.name, $0.latest) }, uniquingKeysWith: { first, _ in first })
     let packages = DeveloperInventoryParsers.parseMiseInstalledJSON(installedResult.data).map {
         DeveloperPackage(
             name: $0.name, currentVersion: $0.version, latestVersion: outdated[$0.name] ?? $0.version,
@@ -1408,12 +1408,22 @@ private struct PackagistResponse: Decodable {
 }
 private struct NugetVersions: Decodable { let versions: [String] }
 
-private actor RegistryRequestCache {
+actor RegistryRequestCache {
     static let shared = RegistryRequestCache()
-    private static let freshnessInterval: TimeInterval = 10 * 60
+    static let freshnessInterval: TimeInterval = 10 * 60
     private struct Entry { let data: Data; let date: Date }
     private var entries: [String: Entry] = [:]
+    private var totalBytes = 0
     private var inFlight: [String: Task<Data?, Never>] = [:]
+    private let maximumEntries: Int
+    private let maximumBytes: Int
+
+    init(maximumEntries: Int = 512, maximumBytes: Int = 32 * 1_024 * 1_024) {
+        self.maximumEntries = max(1, maximumEntries)
+        self.maximumBytes = max(1, maximumBytes)
+    }
+
+    var entryCount: Int { entries.count }
 
     func data(for request: URLRequest, key: String) async -> Data? {
         if let entry = entries[key], Date().timeIntervalSince(entry.date) < Self.freshnessInterval {
@@ -1428,8 +1438,32 @@ private actor RegistryRequestCache {
         inFlight[key] = task
         let value = await task.value
         inFlight[key] = nil
-        if let value { entries[key] = Entry(data: value, date: Date()) }
+        if let value { store(value, for: key) }
         return value
+    }
+
+    func cachedData(for key: String, now: Date = Date()) -> Data? {
+        guard let entry = entries[key], now.timeIntervalSince(entry.date) < Self.freshnessInterval else { return nil }
+        return entry.data
+    }
+
+    /// Inserts a response, then evicts expired entries and, if still over the
+    /// entry or byte cap, the oldest entries.
+    func store(_ data: Data, for key: String, now: Date = Date()) {
+        if let previous = entries.removeValue(forKey: key) { totalBytes -= previous.data.count }
+        for (existingKey, entry) in entries where now.timeIntervalSince(entry.date) >= Self.freshnessInterval {
+            entries[existingKey] = nil
+            totalBytes -= entry.data.count
+        }
+        guard data.count <= maximumBytes else { return }
+        entries[key] = Entry(data: data, date: now)
+        totalBytes += data.count
+        guard entries.count > maximumEntries || totalBytes > maximumBytes else { return }
+        for (oldKey, entry) in entries.sorted(by: { $0.value.date < $1.value.date }) where oldKey != key {
+            guard entries.count > maximumEntries || totalBytes > maximumBytes else { break }
+            entries[oldKey] = nil
+            totalBytes -= entry.data.count
+        }
     }
 }
 

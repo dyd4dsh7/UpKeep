@@ -17,7 +17,8 @@ struct MenuBarHealth: Equatable {
             summary = count == 0 ? "No updates found in enabled sources" : "\(count) update\(count == 1 ? "" : "s") available"
         case .notChecked, .disabled, .checking, .partial, .failed:
             symbol = state.symbol
-            summary = count == 0 ? state.title : "\(count) known updates · \(state.title.lowercased())"
+            let title = state.title(lastChecked: lastChecked)
+            summary = count == 0 ? title : "\(count) known updates · \(title.lowercased())"
         }
     }
 }

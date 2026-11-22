@@ -6,7 +6,11 @@ struct LocalModelsView: View {
     var body: some View {
         let models = sortedModels
         VStack(spacing: 0) {
-            if models.isEmpty {
+            if models.isEmpty, store.isScanning || store.isWorking(.localModelScan) {
+                WorkspaceScanningState(title: "Checking local models…",
+                                       detail: "Models appear here when the check finishes.")
+                    .upkeepStateTransition()
+            } else if models.isEmpty {
                 WorkspaceEmptyState(
                     "No local models found", systemImage: "brain.head.profile",
                     description: Text("Models appear here when Ollama or LM Studio has models installed.")
@@ -20,7 +24,7 @@ struct LocalModelsView: View {
         .upkeepAnimated(for: models.map(\.id))
         .safeAreaInset(edge: .top, spacing: 0) {
             WorkspaceSummary(title: "Local AI Models",
-                detail: "\(WorkspaceSummary.count(models.count, "model", "models")) · \(WorkspaceSummary.count(models.filter(\.isOutdated).count, "update", "updates")) available",
+                detail: "\(WorkspaceSummary.count(models.count, "model", "models")) · \(WorkspaceSummary.count(models.count { $0.isOutdated && !store.isExcluded($0) }, "update", "updates")) available",
                 systemImage: "brain.head.profile")
         }
         .toolbar {

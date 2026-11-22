@@ -7,6 +7,8 @@ struct SourceHealthView: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
+        // Built once per render; row helpers look keys up instead of scanning inventory.
+        let targets = SourceHealthTargets(store: store, keys: settings.sourceCheckFreshness.keys)
         let failures = settings.sourceCheckFreshness.values.count { $0.failure != nil }
         let successes = settings.sourceCheckFreshness.count - failures
         Section("Check Health") {
@@ -31,12 +33,12 @@ struct SourceHealthView: View {
                 if let health = settings.sourceCheckFreshness[key] {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
-                            Label(title(for: key), systemImage: health.failure == nil ? "checkmark.circle" : "exclamationmark.triangle")
+                            Label(title(for: key, targets), systemImage: health.failure == nil ? "checkmark.circle" : "exclamationmark.triangle")
                                 .foregroundStyle(health.failure == nil ? Color.primary : UpkeepColors.warning(in: scheme))
                             Spacer()
-                            if health.failure != nil, canRetry(key) {
-                                Button("Retry") { Task { await retry(key) } }
-                                    .disabled(isRetrying(key))
+                            if health.failure != nil, canRetry(key, targets) {
+                                Button("Retry") { Task { await retry(key, targets) } }
+                                    .disabled(isRetrying(key, targets))
                             }
                         }
                         Text("Attempted \(health.lastAttempt.formatted(date: .abbreviated, time: .shortened))")
@@ -58,24 +60,15 @@ struct SourceHealthView: View {
         }
     }
 
-    private func appTarget(_ key: String) -> (InstalledApp, UpdateSource)? {
-        for app in store.apps {
-            for source in UpdateSource.allCases where key == "app|\(app.id)|\(source.rawValue)" {
-                return (app, source)
-            }
-        }
-        return nil
-    }
-
     private func managerTarget(_ key: String) -> DeveloperPackageManager? {
         DeveloperPackageManager.allCases.first { key == "developer|\($0.rawValue)" }
     }
 
-    private func title(for key: String) -> String {
-        if let package = developerVersionTarget(key) { return "\(package.name) · Available versions" }
-        if let (app, source) = appTarget(key) { return "\(app.name) · \(source.rawValue)" }
+    private func title(for key: String, _ targets: SourceHealthTargets) -> String {
+        if let package = targets.developerVersions[key] { return "\(package.name) · Available versions" }
+        if let (app, source) = targets.apps[key] { return "\(app.name) · \(source.rawValue)" }
         if let manager = managerTarget(key) { return manager.rawValue }
-        if let model = store.localModels.first(where: { key == "model|\($0.id)" }) { return "\(model.name) · \(model.runtime.rawValue)" }
+        if let model = targets.models[key] { return "\(model.name) · \(model.runtime.rawValue)" }
         switch key {
         case "homebrew.inventory": return "Homebrew installed packages"
         case "homebrew.catalog": return "Homebrew app catalogue"
@@ -93,41 +86,65 @@ struct SourceHealthView: View {
         }
     }
 
-    private func runtimeTarget(_ key: String) -> LocalModelRuntime? {
-        if let model = store.localModels.first(where: { key == "model|\($0.id)" }) { return model.runtime }
+    private func runtimeTarget(_ key: String, _ targets: SourceHealthTargets) -> LocalModelRuntime? {
+        if let model = targets.models[key] { return model.runtime }
         return LocalModelRuntime.allCases.first { key == "model.runtime|\($0.rawValue)" }
     }
 
-    private func packageTarget(_ key: String) -> HomebrewPackage? {
-        store.homebrewPackages.first { key == "homebrew|\($0.kind.rawValue)|\($0.token)" }
+    private func canRetry(_ key: String, _ targets: SourceHealthTargets) -> Bool {
+        key == "macos.updates" || key == "macos.installers" || key == "homebrew.inventory" || key == "homebrew.catalog"
+            || targets.apps[key] != nil || managerTarget(key) != nil || runtimeTarget(key, targets) != nil
+            || targets.packages[key] != nil || targets.developerVersions[key] != nil
     }
 
-    private func developerVersionTarget(_ key: String) -> DeveloperPackage? {
-        store.developerPackages.first { key == "developer.versions|\($0.id)" }
-    }
-
-    private func canRetry(_ key: String) -> Bool { key == "macos.updates" || key == "macos.installers" || key == "homebrew.inventory" || key == "homebrew.catalog" || appTarget(key) != nil || managerTarget(key) != nil || runtimeTarget(key) != nil || packageTarget(key) != nil || developerVersionTarget(key) != nil }
-
-    private func isRetrying(_ key: String) -> Bool {
-        if let package = developerVersionTarget(key) { return store.isWorking(.developerRefresh(package.id)) }
+    private func isRetrying(_ key: String, _ targets: SourceHealthTargets) -> Bool {
+        if let package = targets.developerVersions[key] { return store.isWorking(.developerRefresh(package.id)) }
         if key == "macos.updates" || key == "macos.installers" { return store.isScanning || store.isWorking(.macOSSourceScan) }
         if key == "homebrew.catalog" { return store.isScanning || store.isWorking(.homebrewCatalogScan) }
         if key == "homebrew.inventory" { return store.isScanning || store.isWorking(.homebrewInventoryScan) }
-        if let (app, _) = appTarget(key) { return store.isRefreshing(app) }
+        if let (app, _) = targets.apps[key] { return store.isRefreshing(app) }
         if let manager = managerTarget(key) { return store.isWorking(.developerScan(manager)) }
-        if let runtime = runtimeTarget(key) { return store.isWorking(.localModelRuntimeScan(runtime)) }
-        if let package = packageTarget(key) { return store.isWorking(.homebrewRefresh(package.id)) }
+        if let runtime = runtimeTarget(key, targets) { return store.isWorking(.localModelRuntimeScan(runtime)) }
+        if let package = targets.packages[key] { return store.isWorking(.homebrewRefresh(package.id)) }
         return false
     }
 
-    private func retry(_ key: String) async {
-        if let package = developerVersionTarget(key) { await store.refresh(package); return }
+    private func retry(_ key: String, _ targets: SourceHealthTargets) async {
+        if let package = targets.developerVersions[key] { await store.refresh(package); return }
         if key == "macos.updates" || key == "macos.installers" { await store.scanMacOSSource(key == "macos.updates" ? .updates : .installers) }
         else if key == "homebrew.catalog" { await store.scanHomebrewCatalog() }
         else if key == "homebrew.inventory" { await store.scanHomebrewInventory() }
-        else if let (app, source) = appTarget(key) { await store.refresh(app, sources: [source]) }
+        else if let (app, source) = targets.apps[key] { await store.refresh(app, sources: [source]) }
         else if let manager = managerTarget(key) { await store.scanDeveloperPackages(manager: manager) }
-        else if let runtime = runtimeTarget(key) { await store.scanLocalModels(runtime: runtime) }
-        else if let package = packageTarget(key) { await store.refresh(package) }
+        else if let runtime = runtimeTarget(key, targets) { await store.scanLocalModels(runtime: runtime) }
+        else if let package = targets.packages[key] { await store.refresh(package) }
+    }
+}
+
+/// Source-health keys resolved to inventory items, keeping the first match
+/// for a key as the previous linear searches did.
+@MainActor
+struct SourceHealthTargets {
+    let apps: [String: (InstalledApp, UpdateSource)]
+    let models: [String: LocalLLMModel]
+    let packages: [String: HomebrewPackage]
+    let developerVersions: [String: DeveloperPackage]
+
+    init<Keys: Sequence<String>>(store: UpkeepStore, keys: Keys) {
+        // App keys are "app|<app id>|<source>"; resolve only the recorded keys.
+        var apps: [String: (InstalledApp, UpdateSource)] = [:]
+        for key in keys where key.hasPrefix("app|") {
+            let rest = key.dropFirst("app|".count)
+            guard let separator = rest.lastIndex(of: "|"),
+                  let source = UpdateSource(rawValue: String(rest[rest.index(after: separator)...])),
+                  let app = store.app(forID: String(rest[..<separator])) else { continue }
+            apps[key] = (app, source)
+        }
+        self.apps = apps
+        models = Dictionary(store.localModels.map { ("model|\($0.id)", $0) }, uniquingKeysWith: { first, _ in first })
+        packages = Dictionary(store.homebrewPackages.map { ("homebrew|\($0.kind.rawValue)|\($0.token)", $0) },
+                              uniquingKeysWith: { first, _ in first })
+        developerVersions = Dictionary(store.developerPackages.map { ("developer.versions|\($0.id)", $0) },
+                                       uniquingKeysWith: { first, _ in first })
     }
 }

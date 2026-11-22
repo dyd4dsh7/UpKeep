@@ -130,6 +130,9 @@ final class UpkeepStore: ObservableObject {
     private var developerListProjection = ListProjectionCache<DeveloperPackage, ListProjectionKey<DeveloperListFilterKey>>()
     private var homebrewListProjection = ListProjectionCache<HomebrewPackage, ListProjectionKey<HomebrewFilter>>()
     private var primaryCountProjection: (inventory: UInt64, exclusions: UInt64, expiresAt: Date?, value: Int)?
+    private var applicationCountProjection: (apps: UInt64, homebrew: UInt64, updates: UInt64, counts: [SidebarDestination: Int])?
+    private struct VisibleUpdateCountKey: Equatable { let apps, homebrew, updates, exclusions: UInt64 }
+    private var visibleUpdateCountProjection: (key: VisibleUpdateCountKey, expiresAt: Date?, counts: [SidebarDestination: Int])?
     private var searchProjection: (generation: UInt64, query: String, results: GlobalSearchResults)?
     private var versionCache: [String: [String]] = [:]
     private var versionCacheRequests: [String: UUID] = [:]
@@ -225,7 +228,8 @@ final class UpkeepStore: ObservableObject {
     var outdatedDeveloperPackageCount: Int { developerPackages.count { $0.isOutdated && !isExcluded($0) } }
     var outdatedLocalModelCount: Int { localModels.count { $0.isOutdated && !isExcluded($0) } }
     var totalUpdateCount: Int {
-        let inventory = library.primaryUpdateGeneration
+        // Casks match apps by name, so the app list is an input too.
+        let inventory = library.primaryUpdateGeneration &+ library.appGeneration
         let exclusions = settings.exclusionCacheRevision
         let now = Date()
         if let cached = primaryCountProjection, cached.inventory == inventory,
@@ -370,7 +374,10 @@ final class UpkeepStore: ObservableObject {
 
     var filteredHomebrewPackages: [HomebrewPackage] {
         let key = ListProjectionKey(generation: library.homebrewGeneration,
-            relatedGeneration: homebrewFilter == .unmapped ? library.appGeneration : 0,
+            // Casks inherit their app's skip rule, which depends on app updates.
+            // Both counters only grow, so their sum changes whenever either does.
+            relatedGeneration: homebrewFilter == .unmapped ? library.appGeneration
+                : homebrewFilter == .updates ? library.appGeneration &+ library.primaryUpdateGeneration : 0,
             exclusions: homebrewFilter == .updates ? settings.exclusionCacheRevision : 0,
             query: searchText, filter: homebrewFilter)
         return homebrewListProjection.values(for: key,
@@ -423,26 +430,53 @@ final class UpkeepStore: ObservableObject {
     }
 
     func applications(for destination: SidebarDestination) -> [InstalledApp] {
-        apps.filter { app in
-            switch destination {
-            case .allApps: true
-            case .appStore: app.updateManagement == .appStore
-            case .testFlight: app.updateManagement == .testFlight
-            case .setapp: app.updateManagement == .setapp
-            case .microsoftAutoUpdate: app.updateManagement == .microsoftAutoUpdate
-            case .steam: app.updateManagement == .steam
-            case .otherUpdaters:
-                [.adobeCreativeCloud, .jetBrainsToolbox, .spotify, .discord, .epicGames, .tailscale]
-                    .contains(app.updateManagement)
-            case .sparkle: app.updateManagement == .direct && app.sparkleFeedURL != nil
-            case .homebrewApps: homebrewPackage(for: app) != nil
-            case .github: app.updateManagement == .direct && app.githubRepository != nil
-            case .noSource:
-                sources(for: app).isEmpty
-                    && !app.updateManagement.isExternallyManaged
-                    && !app.hasBuiltInUpdater
-            default: false
+        apps.filter { application($0, belongsTo: destination) }
+    }
+
+    /// Source sidebar destinations whose counts come from `applications(for:)`.
+    static let applicationSourceDestinations: [SidebarDestination] = [
+        .appStore, .testFlight, .setapp, .microsoftAutoUpdate, .steam,
+        .otherUpdaters, .homebrewApps, .sparkle, .github, .noSource
+    ]
+
+    /// Counts for every `applicationSourceDestinations` entry, computed in one
+    /// pass over `apps` and cached until apps, Homebrew packages or updates change.
+    func applicationSourceCounts() -> [SidebarDestination: Int] {
+        let key = (apps: library.appGeneration, homebrew: library.homebrewGeneration,
+                   updates: library.primaryUpdateGeneration)
+        if let cached = applicationCountProjection, cached.apps == key.apps,
+           cached.homebrew == key.homebrew, cached.updates == key.updates {
+            return cached.counts
+        }
+        var counts = Dictionary(uniqueKeysWithValues: Self.applicationSourceDestinations.map { ($0, 0) })
+        for app in apps {
+            for destination in Self.applicationSourceDestinations where application(app, belongsTo: destination) {
+                counts[destination, default: 0] += 1
             }
+        }
+        applicationCountProjection = (key.apps, key.homebrew, key.updates, counts)
+        return counts
+    }
+
+    func application(_ app: InstalledApp, belongsTo destination: SidebarDestination) -> Bool {
+        switch destination {
+        case .allApps: true
+        case .appStore: app.updateManagement == .appStore
+        case .testFlight: app.updateManagement == .testFlight
+        case .setapp: app.updateManagement == .setapp
+        case .microsoftAutoUpdate: app.updateManagement == .microsoftAutoUpdate
+        case .steam: app.updateManagement == .steam
+        case .otherUpdaters:
+            [.adobeCreativeCloud, .jetBrainsToolbox, .spotify, .discord, .epicGames, .tailscale]
+                .contains(app.updateManagement)
+        case .sparkle: app.updateManagement == .direct && app.sparkleFeedURL != nil
+        case .homebrewApps: homebrewPackage(for: app) != nil
+        case .github: app.updateManagement == .direct && app.githubRepository != nil
+        case .noSource:
+            sources(for: app).isEmpty
+                && !app.updateManagement.isExternallyManaged
+                && !app.hasBuiltInUpdater
+        default: false
         }
     }
 
@@ -469,18 +503,42 @@ final class UpkeepStore: ObservableObject {
         return [primary] + ordered.filter { $0 != primary }
     }
 
+    /// Sidebar badge: pending updates that are not skipped or ignored. Pages
+    /// without updates of their own (History, CVE Checker) have no badge.
+    /// Source-row visibility uses the inventory `applicationSourceCounts()`.
     func count(for destination: SidebarDestination) -> Int {
         switch destination {
         case .updates: totalUpdateCount
-        case .allApps: apps.count
-        case .adoptable: adoptableApps.count
-        case .homebrewPackages: homebrewPackages.count
-        case .macOSUpdates: macOSUpdates.count
-        case .history: updateHistory.count
-        case .developerPackages: developerPackages.count
-        case .localModels: localModels.count
-        default: applications(for: destination).count
+        case .allApps: visibleUpdates.count
+        case .adoptable: adoptableApps.count { visibleUpdate(for: $0.app) != nil }
+        case .homebrewPackages: outdatedPackageCount
+        case .macOSUpdates: macOSUpdates.count { !$0.isFullInstaller }
+        case .history, .cveChecker: 0
+        case .developerPackages: outdatedDeveloperPackageCount
+        case .localModels: outdatedLocalModelCount
+        default: visibleUpdateSourceCounts()[destination]
+            ?? visibleUpdates.count { application($0.app, belongsTo: destination) }
         }
+    }
+
+    /// Visible (non-excluded) update counts per `applicationSourceDestinations`
+    /// entry, computed in one pass and cached until inventory or exclusions change.
+    func visibleUpdateSourceCounts() -> [SidebarDestination: Int] {
+        let key = VisibleUpdateCountKey(apps: library.appGeneration, homebrew: library.homebrewGeneration,
+            updates: library.primaryUpdateGeneration, exclusions: settings.exclusionCacheRevision)
+        let now = Date()
+        if let cached = visibleUpdateCountProjection, cached.key == key,
+           cached.expiresAt.map({ now < $0 }) ?? true {
+            return cached.counts
+        }
+        var counts = Dictionary(uniqueKeysWithValues: Self.applicationSourceDestinations.map { ($0, 0) })
+        for update in visibleUpdates {
+            for destination in Self.applicationSourceDestinations where application(update.app, belongsTo: destination) {
+                counts[destination, default: 0] += 1
+            }
+        }
+        visibleUpdateCountProjection = (key, settings.nextExclusionExpiration, counts)
+        return counts
     }
 
     func scan() async {
@@ -502,9 +560,13 @@ final class UpkeepStore: ObservableObject {
 
     /// Coalesces inventory changes while a manual or automatic check is active.
     /// A CVE request never holds up the updater's own scan or operation queue.
-    func refreshCVEsAutomatically() {
+    /// Unchanged inventory with fresh, successful results is not re-checked,
+    /// and a changed inventory only re-checks new, changed or failed items.
+    /// `force` re-checks everything (used when automatic checks are enabled).
+    func refreshCVEsAutomatically(force: Bool = false) {
         guard settings.automaticallyCheckCVEs, dependencies.makeCVEClient != nil,
               automaticCVETask == nil, !cveInventory.isEmpty else { return }
+        if !force, cveScanState.isCurrent(for: cveInventory) { return }
         let generation = UUID()
         automaticCVEGeneration = generation
         automaticCVETask = Task { [weak self] in
@@ -521,7 +583,8 @@ final class UpkeepStore: ObservableObject {
             repeat {
                 guard settings.automaticallyCheckCVEs, !Task.isCancelled else { return }
                 let inventory = cveInventory
-                automaticCVEOwnsScan = cveScanState.start(inventory: inventory, client: makeCVEClient())
+                automaticCVEOwnsScan = cveScanState.start(inventory: inventory, client: makeCVEClient(),
+                                                          reuseFreshResults: !force)
                 await cveScanState.waitForCompletion()
                 if inventory == cveInventory { return }
             } while settings.automaticallyCheckCVEs
@@ -530,7 +593,7 @@ final class UpkeepStore: ObservableObject {
 
     func setAutomaticCVEChecking(_ enabled: Bool) {
         settings.automaticallyCheckCVEs = enabled
-        if enabled { refreshCVEsAutomatically() }
+        if enabled { refreshCVEsAutomatically(force: true) }
         else {
             if automaticCVEOwnsScan { cveScanState.cancel() }
             automaticCVETask?.cancel()
@@ -667,10 +730,32 @@ final class UpkeepStore: ObservableObject {
             }
             if let update { candidates.append(contentsOf: update.candidates) }
             candidates = candidates.filter { $0.isNewer(than: app) }
-            updates.removeAll { $0.app.id == appID }
-            if !candidates.isEmpty { updates.append(AvailableUpdate(app: app, candidates: candidates)) }
-            updates.sort { $0.app.name.localizedStandardCompare($1.app.name) == .orderedAscending }
+            // Work on a local copy and publish once, only when something changed.
+            var next = updates
+            next.removeAll { $0.app.id == appID }
+            if !candidates.isEmpty { Self.insertSortedByName(AvailableUpdate(app: app, candidates: candidates), into: &next) }
+            if next != updates { updates = next }
         }
+    }
+
+    /// Equivalent to appending and then stable-sorting by name, without
+    /// re-sorting an already sorted list.
+    static func insertSortedByName(_ update: AvailableUpdate, into list: inout [AvailableUpdate]) {
+        func ascending(_ left: AvailableUpdate, _ right: AvailableUpdate) -> Bool {
+            left.app.name.localizedStandardCompare(right.app.name) == .orderedAscending
+        }
+        guard zip(list, list.dropFirst()).allSatisfy({ !ascending($1, $0) }) else {
+            list.append(update)
+            list.sort(by: ascending)
+            return
+        }
+        // Upper bound: after every element that does not sort after `update`.
+        var low = 0, high = list.count
+        while low < high {
+            let mid = (low + high) / 2
+            if ascending(update, list[mid]) { high = mid } else { low = mid + 1 }
+        }
+        list.insert(update, at: low)
     }
 
     private func scanOnce() async {
@@ -772,6 +857,12 @@ final class UpkeepStore: ObservableObject {
                 + report.localModels.filter { !protectedRuntimes.contains($0.runtime) && !report.failedLocalModelIDs.contains($0.id)
                     && !report.failedLocalModelRuntimes.contains($0.runtime) }.map(exclusionKey(for:)),
             at: report.checkedAt
+        )
+        // Forget check records for items that are no longer installed.
+        settings.pruneCheckRecords(
+            keepingItemKeys: Set(apps.map(exclusionKey(for:)) + homebrewPackages.map(exclusionKey(for:))
+                + developerPackages.map(exclusionKey(for:)) + localModels.map(exclusionKey(for:))),
+            appIDs: Set(apps.map(\.id))
         )
         scanWarnings = reconciledScanWarnings(report.warnings, protectedKeys: protectedKeys)
         if scanState.completedCheckState == .complete,
@@ -882,14 +973,14 @@ final class UpkeepStore: ObservableObject {
         }
 
         let refreshedApp = await dependencies.applicationDiscovery.discover(at: app.url) ?? app
-        guard scanState.latestFullRevision <= revision else { return }
+        guard !isAppRefreshSuperseded(app.id, revision: revision) else { return }
         if let index = apps.firstIndex(where: { $0.id == app.id }) { apps[index] = refreshedApp }
         if selectedApp?.id == app.id { selectedApp = refreshedApp }
 
         var scanSettings = settings.scanSettings
         scanSettings.appSourceFilter = sourceFilter
         let report = await dependencies.scanner.scan(app: refreshedApp, settings: scanSettings)
-        guard scanState.latestFullRevision <= revision else { return }
+        guard !isAppRefreshSuperseded(app.id, revision: revision) else { return }
         let checkedAt = Date()
         recordAppSourceChecks(app: refreshedApp, settings: scanSettings, failed: report.failedSources, warnings: report.warnings, at: checkedAt)
         let enabledSources = enabledUpdateSources(for: refreshedApp).filter { sourceFilter?.contains($0) ?? true }
@@ -932,6 +1023,8 @@ final class UpkeepStore: ObservableObject {
             }
         }
 
+        // An install or newer scan may have claimed this app during the Homebrew request.
+        guard !isAppRefreshSuperseded(app.id, revision: revision) else { return }
         candidates = candidates.filter {
             guard $0.isNewer(than: refreshedApp) else { return false }
             return !$0.requiresHomebrewAdoption
@@ -961,6 +1054,15 @@ final class UpkeepStore: ObservableObject {
             settings.recordCheck(for: exclusionKey(for: refreshedApp), at: checkedAt)
         }
         refreshDiagnostics()
+    }
+
+    /// A per-app refresh must not publish a bundle snapshot older than one an
+    /// install or later scan has already claimed for the same app.
+    private func isAppRefreshSuperseded(_ appID: String, revision: UInt64) -> Bool {
+        guard scanState.latestFullRevision <= revision else { return true }
+        return UpdateSource.allCases.contains {
+            scanState.sourceRevisions["app|\(appID)|\($0.rawValue)", default: 0] > revision
+        }
     }
 
     func scanMacOSSource(_ scope: MacOSScanScope) async {
@@ -1414,14 +1516,16 @@ final class UpkeepStore: ObservableObject {
         setUpdatePhase(.refreshing, for: operationID)
         let installed = await dependencies.applicationDiscovery.discover(at: update.app.url)
         let verification = AppInstallationVerification.evaluate(original: update.app, observed: installed,
-            targetVersion: update.availableVersion, targetBuild: update.primaryCandidate.availableBuildVersion)
+            targetVersion: update.availableVersion, targetBuild: update.primaryCandidate.availableBuildVersion,
+            comparesBuild: update.primaryCandidate.comparesBuildVersion)
         recordOperationVerification(verification == .unverified ? .unverified : verification == .unchanged ? .unchanged : .verified,
                                     for: operationID, commandError: commandError,
                                     verification: verification == .unverified ? nil : installed.map { app in
                                         OperationVerificationDetail(requested: update.availableVersion + (update.primaryCandidate.availableBuildVersion.map { " (build \($0))" } ?? ""),
                                             observed: app.installedVersion + (app.buildVersion.map { " (build \($0))" } ?? ""),
                                             targetReached: AppInstallationVerification.targetReached(observed: app,
-                                                version: update.availableVersion, build: update.primaryCandidate.availableBuildVersion))
+                                                version: update.availableVersion, build: update.primaryCandidate.availableBuildVersion,
+                                                comparesBuild: update.primaryCandidate.comparesBuildVersion))
                                     })
         guard verification != .unverified, let installed else {
             errorMessage = commandError ?? "The installed bundle for \(update.app.name) could not be verified. Its recovery backup was retained."
@@ -1850,7 +1954,13 @@ final class UpkeepStore: ObservableObject {
         case .allPackages: succeeded = await updateAllPackagesNow()
         case let .restore(record): succeeded = await revertNow(record)
         }
-        if succeeded { reopenApplications(confirmation.apps) }
+        if succeeded {
+            reopenApplications(confirmation.apps)
+        } else {
+            // Most failures leave the original bundle in place; don't leave an
+            // app the user was running closed because its update did not complete.
+            await reopenIntactApplications(confirmation.apps)
+        }
     }
 
     func confirmHomebrewAuthorization(_ confirmation: HomebrewAuthorizationConfirmation) async {
@@ -2090,8 +2200,10 @@ final class UpkeepStore: ObservableObject {
         let batchID = OperationID.unifiedBatch
         guard !items.isEmpty, !isWorking(batchID) else { return BatchUpdateSummary(results: []) }
         updateExecutionState.activeOperations.insert(batchID)
+        updateExecutionState.isBatchStopRequested = false
         defer {
             updateExecutionState.activeOperations.remove(batchID)
+            updateExecutionState.isBatchStopRequested = false
             batchUpdateProgress = nil
             for item in items { endUpdateActivity(item.updateOperationID) }
         }
@@ -2112,6 +2224,15 @@ final class UpkeepStore: ObservableObject {
 
         var results: [BatchUpdateResult] = []
         for (index, item) in items.enumerated() {
+            // Stop requests take effect only between items, never mid-install.
+            if updateExecutionState.isBatchStopRequested {
+                for remaining in items[index...] {
+                    results.append(BatchUpdateResult(item: remaining, outcome: .notStarted,
+                        detail: "Not started because the batch was stopped."))
+                    endUpdateActivity(remaining.updateOperationID)
+                }
+                break
+            }
             batchUpdateProgress = BatchUpdateProgress(completed: index, total: items.count, itemName: item.name)
             if let app = batchApp(for: item), isRunning(app) {
                 results.append(BatchUpdateResult(
@@ -2144,12 +2265,14 @@ final class UpkeepStore: ObservableObject {
         }
         batchUpdateProgress = BatchUpdateProgress(completed: items.count, total: items.count, itemName: "Finishing updates")
 
-        let updatedItemIDs = Set(results.compactMap { result in
-            result.outcome == .updated ? result.item.id : nil
-        })
-        reopenApplications(closedApps.filter { app in
+        // Reopen every app the batch quit. Updated apps reopen as before; apps
+        // whose update failed or did not start reopen only if still intact.
+        let updatedItemIDs = Set(results.compactMap { $0.outcome == .updated ? $0.item.id : nil })
+        let updatedApps = closedApps.filter { app in
             items.contains { updatedItemIDs.contains($0.id) && batchApp(for: $0)?.id == app.id }
-        })
+        }
+        reopenApplications(updatedApps)
+        await reopenIntactApplications(closedApps.filter { app in !updatedApps.contains { $0.id == app.id } })
         refreshDiagnostics()
         return BatchUpdateSummary(results: results)
     }
@@ -2267,6 +2390,12 @@ final class UpkeepStore: ObservableObject {
         return nil
     }
 
+    /// Lets the current batch item finish, then reports the rest as not started.
+    func requestBatchStop() {
+        guard isWorking(.unifiedBatch) else { return }
+        updateExecutionState.isBatchStopRequested = true
+    }
+
     func runningAppsForBatch(_ items: [BatchUpdateItem]) -> [InstalledApp] {
         Dictionary(items.compactMap(batchApp(for:)).filter(isRunning).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             .values
@@ -2283,11 +2412,27 @@ final class UpkeepStore: ObservableObject {
     }
 
     func isExcluded(_ update: AvailableUpdate) -> Bool {
-        settings.isExcluded(key: exclusionKey(for: update.app), version: update.exclusionVersion)
+        exclusion(for: update) != nil
     }
 
     func isExcluded(_ package: HomebrewPackage) -> Bool {
-        settings.isExcluded(key: exclusionKey(for: package), version: package.exclusionVersion)
+        exclusion(for: package) != nil
+    }
+
+    /// A cask that installs an app follows that app's skip or ignore rule;
+    /// otherwise hiding the app row would resurface the same update as a cask.
+    private func inheritedAppExclusion(for package: HomebrewPackage) -> UpdateExclusion? {
+        guard package.kind == .cask, let app = matchingApp(for: package) else { return nil }
+        if let ignored = settings.ignoredExclusion(for: exclusionKey(for: app)) { return ignored }
+        guard let update = update(for: app),
+              update.candidates.contains(where: { $0.homebrewToken == package.token }) else { return nil }
+        return exclusion(for: update)
+    }
+
+    private func exclusion(for update: AvailableUpdate) -> UpdateExclusion? {
+        settings.exclusion(for: exclusionKey(for: update.app)) {
+            update.primaryCandidate.matchesExclusionVersion($0)
+        }
     }
 
     func isExcluded(_ package: DeveloperPackage) -> Bool {
@@ -2299,12 +2444,16 @@ final class UpkeepStore: ObservableObject {
     }
 
     func exclusion(for app: InstalledApp, version: String) -> UpdateExclusion? {
-        let candidate = update(for: app)?.candidates.first { $0.availableVersion == version }
-        return settings.exclusion(for: exclusionKey(for: app), version: candidate?.exclusionVersion ?? version)
+        guard let candidate = update(for: app)?.candidates.first(where: { $0.availableVersion == version }) else {
+            return settings.exclusion(for: exclusionKey(for: app), version: version)
+        }
+        // Same matching as isExcluded, so a hidden update always shows its rule.
+        return settings.exclusion(for: exclusionKey(for: app)) { candidate.matchesExclusionVersion($0) }
     }
 
     func exclusion(for package: HomebrewPackage) -> UpdateExclusion? {
         settings.exclusion(for: exclusionKey(for: package), version: package.exclusionVersion)
+            ?? inheritedAppExclusion(for: package)
     }
 
     func exclusion(for package: DeveloperPackage) -> UpdateExclusion? {
@@ -2441,8 +2590,7 @@ final class UpkeepStore: ObservableObject {
     }
 
     func openMainWindow() {
-        NSApp.activate(ignoringOtherApps: true)
-        NSApp.windows.first(where: { $0.canBecomeMain })?.makeKeyAndOrderFront(nil)
+        MainWindow.open()
     }
 
     var selectedDeveloperPackage: DeveloperPackage? {
@@ -2752,9 +2900,27 @@ final class UpkeepStore: ObservableObject {
         refreshRunningApplications()
     }
 
+    /// After a failed or skipped update, reopen only bundles that still carry the
+    /// original identity at the original path. A partial or unverified
+    /// replacement is never launched.
+    private func reopenIntactApplications(_ apps: [InstalledApp]) async {
+        var intact: [InstalledApp] = []
+        for app in apps {
+            guard let identifier = app.bundleIdentifier, !identifier.isEmpty,
+                  let observed = await dependencies.applicationDiscovery.discover(at: app.url),
+                  observed.bundleIdentifier == identifier,
+                  canonicalPath(observed.url) == canonicalPath(app.url) else { continue }
+            intact.append(app)
+        }
+        guard !intact.isEmpty else { return }
+        reopenApplications(intact)
+    }
+
     func reopenApplications(_ apps: [InstalledApp]) {
-        for app in apps where !dependencies.externalOpener.open(app.url) {
-            errorMessage = "\(app.name) was updated, but Upkeep could not reopen it."
+        var reopened = Set<String>()
+        for app in apps where reopened.insert(canonicalPath(app.url)).inserted
+            && !dependencies.externalOpener.open(app.url) {
+            if errorMessage == nil { errorMessage = "Upkeep could not reopen \(app.name)." }
             DiagnosticsStore.shared.record(
                 .warning,
                 category: .update,

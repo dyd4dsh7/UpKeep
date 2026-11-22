@@ -35,6 +35,17 @@ enum UpdateCheckState: Equatable {
         }
     }
 
+    /// `lastChecked` survives relaunch but results do not, so before this
+    /// session's first check the date must not read as current results.
+    func title(lastChecked: Date?) -> String {
+        self == .notChecked && lastChecked != nil ? "Not checked this session" : title
+    }
+
+    func detail(lastChecked: Date?) -> String {
+        guard self == .notChecked, let lastChecked else { return detail }
+        return "Last checked \(lastChecked.formatted(date: .abbreviated, time: .shortened)). Results from earlier sessions aren’t kept — check now to load current updates."
+    }
+
     static func completed(report: ScanReport, settings: ScanSettings) -> Self {
         guard !report.warnings.isEmpty else { return .complete }
         var succeeded = [report.homebrewInventoryStatus, report.homebrewCatalogStatus,

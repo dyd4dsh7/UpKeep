@@ -8,7 +8,11 @@ struct DeveloperPackagesView: View {
     var body: some View {
         let packages = sortedPackages
         PackageCleanupContainer(result: $cleanupResult, contentIdentity: packages.map(\.id)) {
-            if packages.isEmpty {
+            if packages.isEmpty, store.developerPackages.isEmpty, store.isScanning || store.isDeveloperScanRunning {
+                WorkspaceScanningState(title: "Checking developer packages…",
+                                       detail: "Packages appear here when the check finishes.")
+                    .upkeepStateTransition()
+            } else if packages.isEmpty {
                 WorkspaceEmptyState(
                     "No packages found", systemImage: "checkmark.seal.fill",
                     description: Text("Installed package managers are checked automatically.")
@@ -21,7 +25,7 @@ struct DeveloperPackagesView: View {
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             WorkspaceSummary(title: "Developer Packages",
-                detail: "\(WorkspaceSummary.count(packages.count, "package", "packages")) · \(WorkspaceSummary.count(packages.filter(\.isOutdated).count, "update", "updates")) available · \(store.developerManagerFilter.title)",
+                detail: "\(WorkspaceSummary.count(packages.count, "package", "packages")) · \(WorkspaceSummary.count(packages.count { $0.isOutdated && !store.isExcluded($0) }, "update", "updates")) available · \(store.developerManagerFilter.title)",
                 systemImage: "curlybraces.square")
         }
         .toolbar { packageToolbar }

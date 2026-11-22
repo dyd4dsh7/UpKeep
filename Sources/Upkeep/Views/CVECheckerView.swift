@@ -3,6 +3,7 @@ import SwiftUI
 struct CVECheckerView: View {
     @UpkeepStoreReference private var store
     @Environment(\.colorScheme) private var colorScheme
+    @ScaledMetric(relativeTo: .largeTitle) private var titleSize: CGFloat = 27
     let packages: [DeveloperPackage]
     let apps: [InstalledApp]
     let homebrew: [HomebrewPackage]
@@ -25,7 +26,7 @@ struct CVECheckerView: View {
     }
     private var items: [CVEInventoryItem] { state.checkedAt == nil ? inventory : state.inventory }
     private var resultsByID: [String: CVEInventoryResult] {
-        Dictionary(uniqueKeysWithValues: state.results.map { ($0.id, $0) })
+        state.resultsByID
     }
     private var findings: Int { state.results.filter { !$0.advisories.isEmpty }.count }
     private var checked: Int { state.results.filter { $0.supported && $0.failure == nil }.count }
@@ -154,7 +155,7 @@ struct CVECheckerView: View {
                            color: findings > 0 ? UpkeepColors.warning(in: colorScheme) : nil)
             VStack(alignment: .leading, spacing: 5) {
                 Text("CVE Checker")
-                    .font(.system(size: 27, weight: .semibold))
+                    .font(.system(size: titleSize, weight: .semibold))
                     .tracking(-0.85)
                     .accessibilityAddTraits(.isHeader)
                 Text(securityStatus)

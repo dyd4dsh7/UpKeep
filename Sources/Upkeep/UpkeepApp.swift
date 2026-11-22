@@ -3,6 +3,7 @@ import SwiftUI
 
 @main
 struct UpkeepApp: App {
+    @NSApplicationDelegateAdaptor(UpkeepAppDelegate.self) private var appDelegate
     @StateObject private var settings: AppSettings
     @UpkeepState private var store: UpkeepStore
     @StateObject private var updateViewState = UpdateViewState()
@@ -18,17 +19,23 @@ struct UpkeepApp: App {
                 appSettings.completeSetup(.advanced, sidebarViewMode: .advanced)
             }
             _settings = StateObject(wrappedValue: appSettings)
-            _store = UpkeepState(initialValue: UIFixture.makeStore(settings: appSettings, operationState: UIFixture.operationState))
+            let fixtureStore = UIFixture.makeStore(settings: appSettings, operationState: UIFixture.operationState)
+            UpkeepAppDelegate.store = fixtureStore
+            _store = UpkeepState(initialValue: fixtureStore)
             return
         }
         #endif
         let appSettings = AppSettings()
         _settings = StateObject(wrappedValue: appSettings)
-        _store = UpkeepState(initialValue: UpkeepStore(settings: appSettings))
+        let appStore = UpkeepStore(settings: appSettings)
+        UpkeepAppDelegate.store = appStore
+        _store = UpkeepState(initialValue: appStore)
     }
 
     var body: some Scene {
-        WindowGroup {
+        // One main window: closing it keeps Upkeep running, and every "open"
+        // path (menu bar, Dock, notification) reuses or recreates this window.
+        Window("Upkeep", id: MainWindow.id) {
             ContentView()
                 .environment(\.upkeepStoreReference, store)
                 .environmentObject(settings)
@@ -50,7 +57,15 @@ struct UpkeepApp: App {
         .windowToolbarStyle(.unified(showsTitle: true))
         .defaultSize(width: initialWindowSize.width, height: initialWindowSize.height)
         .commands {
-            InspectorCommands()
+            CommandGroup(after: .textEditing) {
+                Button("Find…") { MainWindow.focusSearch() }
+                    .keyboardShortcut("f", modifiers: .command)
+            }
+            CommandGroup(after: .sidebar) {
+                Button("Hide Details") { store.clearInspectorSelection() }
+                    .keyboardShortcut("i", modifiers: [.command, .control])
+                    .disabled(!store.hasInspectorSelection)
+            }
             CommandMenu("Updates") {
                 Button("Check for Updates") {
                     Task { await store.scan() }

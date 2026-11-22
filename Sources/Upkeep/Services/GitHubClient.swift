@@ -73,7 +73,9 @@ struct GitHubClient: Sendable {
                 request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
                 request.setValue("Upkeep/1.0", forHTTPHeaderField: "User-Agent")
                 let (data, http) = try await PublisherHTTPClient.data(for: request)
-                // GitHub uses 404 when a valid repository has no published releases.
+                // Repositories are often inferred from app metadata, so a missing,
+                // renamed or private one (404) means "no releases", not a failed scan.
+                // A user-entered mapping is still rejected because it has no releases.
                 if http.statusCode == 404 { return Data("[]".utf8) }
                 guard http.statusCode == 200 else {
                     throw UpdateSourceError.httpStatus(http.statusCode)
@@ -82,16 +84,22 @@ struct GitHubClient: Sendable {
             }
             return try JSONDecoder().decode([Release].self, from: data)
         } catch {
-            let entries = try await GitHubAtomClient.entries(repository: repository)
-            return entries.map {
-                Release(
-                    tagName: $0.tagName,
-                    htmlUrl: $0.htmlURL,
-                    body: $0.content,
-                    prerelease: VersionComparator.isPrerelease($0.tagName),
-                    draft: false
-                )
-            }
+            return try await atomReleases(repository: repository)
+        }
+    }
+
+    /// The Atom feed has no prerelease flag, so stability falls back to the tag.
+    /// Used only when the API is unavailable (for example, rate limited).
+    private func atomReleases(repository: String) async throws -> [Release] {
+        let entries = try await GitHubAtomClient.entries(repository: repository)
+        return entries.map {
+            Release(
+                tagName: $0.tagName,
+                htmlUrl: $0.htmlURL,
+                body: $0.content,
+                prerelease: VersionComparator.isPrerelease($0.tagName),
+                draft: false
+            )
         }
     }
 

@@ -8,7 +8,8 @@ enum AppInstallationVerification: Equatable, Sendable {
     case changed(targetReached: Bool)
 
     static func evaluate(original: InstalledApp, observed: InstalledApp?,
-                         targetVersion: String, targetBuild: String? = nil) -> Self {
+                         targetVersion: String, targetBuild: String? = nil,
+                         comparesBuild: Bool = false) -> Self {
         guard let identifier = original.bundleIdentifier, !identifier.isEmpty,
               let observed, observed.bundleIdentifier == identifier,
               observed.url.standardizedFileURL == original.url.standardizedFileURL,
@@ -18,10 +19,18 @@ enum AppInstallationVerification: Equatable, Sendable {
         guard observed.installedVersion != original.installedVersion || observed.buildVersion != original.buildVersion else {
             return .unchanged
         }
-        return .changed(targetReached: targetReached(observed: observed, version: targetVersion, build: targetBuild))
+        return .changed(targetReached: targetReached(observed: observed, version: targetVersion,
+                                                     build: targetBuild, comparesBuild: comparesBuild))
     }
 
-    static func targetReached(observed: InstalledApp, version: String, build: String? = nil) -> Bool {
+    /// `comparesBuild` follows Sparkle, whose `sparkle:version` is compared with
+    /// CFBundleVersion. Build-only feeds have no comparable marketing version.
+    static func targetReached(observed: InstalledApp, version: String, build: String? = nil,
+                              comparesBuild: Bool = false) -> Bool {
+        if comparesBuild, let targetBuild = build, !targetBuild.isEmpty,
+           let observedBuild = observed.buildVersion, !observedBuild.isEmpty {
+            return VersionComparator.compare(observedBuild, targetBuild) != .orderedAscending
+        }
         let comparison = VersionComparator.compare(observed.installedVersion, version)
         let reached: Bool
         if comparison == .orderedDescending { reached = true }

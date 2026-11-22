@@ -364,32 +364,45 @@ struct UpdateScanner: Sendable {
     }
 
     private func checkApps(_ apps: [InstalledApp], settings: ScanSettings, progress: @escaping ScanProgressReporter) async -> ApplicationCheckResults {
-        await withTaskGroup(of: AppSourceCheckResult.self) { group in
+        await withTaskGroup(of: [AppSourceCheckResult].self) { group in
+            var appStoreApps: [InstalledApp] = []
+            var total = 0
             for app in apps {
                 for source in enabledSources(for: app, settings: settings) {
+                    total += 1
+                    // App Store lookups are batched into a few iTunes requests.
+                    if source == .appStore {
+                        appStoreApps.append(app)
+                        continue
+                    }
                     group.addTask {
-                        await checkSource(
+                        [await checkSource(
                             app: app,
                             appSource: source,
                             includePrereleases: settings.includePrereleaseUpdates
-                        )
+                        )]
                     }
                 }
+            }
+            if !appStoreApps.isEmpty {
+                let batchedApps = appStoreApps
+                group.addTask { await checkAppStoreBatch(batchedApps) }
             }
             var updates: [AvailableUpdate] = []
             var failedSources: [String: Set<UpdateSource>] = [:]
             var warnings: [ScanWarning] = []
-            let total = apps.reduce(0) { $0 + enabledSources(for: $1, settings: settings).count }
             var completed = 0
-            for await result in group {
-                if let update = result.update { updates.append(update) }
-                if let warning = result.warning {
-                    failedSources[result.appID, default: []].insert(result.source)
-                    warnings.append(warning)
+            for await batch in group {
+                for result in batch {
+                    if let update = result.update { updates.append(update) }
+                    if let warning = result.warning {
+                        failedSources[result.appID, default: []].insert(result.source)
+                        warnings.append(warning)
+                    }
+                    completed += 1
+                    await progress(.appSource(appID: result.appID, source: result.source,
+                        update: result.update, warning: result.warning, completed: completed, total: total))
                 }
-                completed += 1
-                await progress(.appSource(appID: result.appID, source: result.source,
-                    update: result.update, warning: result.warning, completed: completed, total: total))
             }
             return ApplicationCheckResults(
                 updates: updates,
@@ -431,6 +444,26 @@ struct UpdateScanner: Sendable {
             checkSparkle: settings.checkSparkle,
             checkGitHub: settings.checkGitHub
         ).filter { settings.appSourceFilter?.contains($0.source) ?? true }
+    }
+
+    private func checkAppStoreBatch(_ apps: [InstalledApp]) async -> [AppSourceCheckResult] {
+        let startedAt = Date()
+        let outcomes = await dependencies.appStore.updates(for: apps)
+        return apps.map { app in
+            switch outcomes[app.id] ?? .success(nil) {
+            case .success(let update):
+                recordAppSourceCheck(app: app, source: .appStore, update: update, startedAt: startedAt)
+                return AppSourceCheckResult(appID: app.id, source: .appStore, update: update, warning: nil)
+            case .failure(let error):
+                recordAppSourceFailure(app: app, source: .appStore, error: error, startedAt: startedAt)
+                return AppSourceCheckResult(
+                    appID: app.id,
+                    source: .appStore,
+                    update: nil,
+                    warning: scanWarning(.appStore, error: error, itemName: app.name, itemID: app.id)
+                )
+            }
+        }
     }
 
     private func checkSource(

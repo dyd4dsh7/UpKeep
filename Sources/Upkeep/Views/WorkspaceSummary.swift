@@ -3,6 +3,7 @@ import SwiftUI
 /// Shared heading for workspaces, sheets, and settings pages.
 struct WorkspaceSummary<Accessory: View>: View {
     @Environment(\.colorScheme) private var scheme
+    @ScaledMetric(relativeTo: .largeTitle) private var titleSize: CGFloat = 27
     let title: String
     let detail: String
     let systemImage: String
@@ -13,7 +14,7 @@ struct WorkspaceSummary<Accessory: View>: View {
             WorkspaceGlyph(systemImage: systemImage, size: 46)
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.system(size: 27, weight: .semibold))
+                    .font(.system(size: titleSize, weight: .semibold))
                     .tracking(-0.85)
                     .accessibilityAddTraits(.isHeader)
                 if !detail.isEmpty {

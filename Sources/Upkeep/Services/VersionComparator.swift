@@ -35,18 +35,31 @@ enum VersionComparator {
     }
 
     static func isPrerelease(_ version: String) -> Bool {
-        prereleaseChannel(for: version) != nil || parsedVersion(version)?.prerelease != nil
+        prereleaseChannel(for: version) != nil
+    }
+
+    /// Homebrew's stable versions use trailing letters for post-releases
+    /// ("tmux 3.5a", "jpeg 9b"), so a single letter after the last number,
+    /// optionally followed by a revision ("_1"), never marks a prerelease there.
+    static func isHomebrewPrerelease(_ version: String) -> Bool {
+        let release = String(version.split(separator: ",", maxSplits: 1, omittingEmptySubsequences: false)[0])
+        let base = release.replacingOccurrences(of: #"(?<=\d)[A-Za-z](?=(_\d+)?$)"#, with: "",
+                                                options: .regularExpression)
+        return isPrerelease(base)
     }
 
     static func prereleaseChannel(for version: String) -> PrereleaseChannel? {
-        let value = version.lowercased()
+        // Homebrew casks append build metadata after a comma (often a hash).
+        // Only the release part describes stability.
+        let release = version.split(separator: ",", maxSplits: 1, omittingEmptySubsequences: false)[0]
+        let value = release.lowercased()
         if value.contains("release candidate") { return .releaseCandidate }
         if value.contains("nightly") { return .nightly }
         if value.contains("snapshot") { return .snapshot }
         if value.contains("alpha") { return .alpha }
         if value.contains("beta") { return .beta }
         if value.contains("preview") { return .preview }
-        if let label = parsedVersion(version)?.prerelease?.label {
+        if let label = parsedVersion(String(release))?.prerelease?.label {
             switch label {
             case "dev": return .development
             case "nightly": return .nightly
@@ -66,7 +79,12 @@ enum VersionComparator {
         guard let hyphen = value.firstIndex(of: "-") else { return false }
         let release = value[..<hyphen]
         let qualifier = value[value.index(after: hyphen)...]
-        return release.contains(".") && release.last?.isNumber == true && qualifier.first?.isLetter == true
+        guard release.contains("."), release.last?.isNumber == true, qualifier.first?.isLetter == true else {
+            return false
+        }
+        // "-stable", "-final" and "-release" describe a stable build.
+        let label = String(qualifier.prefix(while: \.isLetter))
+        return !ParsedVersion.ignoredLabels.contains(label)
     }
 
     static func compare(_ lhs: String, _ rhs: String) -> ComparisonResult {
@@ -81,6 +99,8 @@ enum VersionComparator {
 
         let coreResult = compareNumericSequences(left.core, right.core)
         if coreResult != .orderedSame { return coreResult }
+        let postResult = compareNumericSequences(left.postRelease, right.postRelease)
+        if postResult != .orderedSame { return postResult }
 
         switch (left.prerelease, right.prerelease) {
         case (nil, nil):
@@ -135,7 +155,15 @@ enum VersionComparator {
 
     private struct ParsedVersion {
         let core: [NumericIdentifier]
+        /// Post-release suffixes such as "3.5a", "9e" or "9.9p1" sort after their base release.
+        let postRelease: [NumericIdentifier]
         let prerelease: Prerelease?
+
+        private struct Token {
+            let identifier: Identifier
+            let attachedToNumber: Bool
+            let group: Int
+        }
 
         init?(_ rawValue: String) {
             var value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -143,42 +171,94 @@ enum VersionComparator {
 
             value = Self.removingVersionPrefix(from: value)
             value = String(value.split(separator: "+", maxSplits: 1, omittingEmptySubsequences: false)[0])
+            // Homebrew cask metadata after a comma may be a commit hash; it is
+            // not a version qualifier. Numeric build metadata still orders.
+            let commaParts = value.split(separator: ",", maxSplits: 1, omittingEmptySubsequences: false)
+            if commaParts.count == 2, commaParts[1].contains(where: \.isLetter) {
+                value = String(commaParts[0])
+            }
 
             let groups = value.split { !$0.isLetter && !$0.isNumber }.map(String.init)
             guard groups.contains(where: { $0.contains(where: \Character.isNumber) }) else { return nil }
 
-            var core: [NumericIdentifier] = []
-            var prerelease: Prerelease?
-
-            for group in groups {
+            var tokens: [Token] = []
+            for (groupIndex, group) in groups.enumerated() {
                 if Self.isPackagingGroup(group) { break }
                 if Self.ignoredLabels.contains(group) { continue }
-                let identifiers = Self.identifiers(in: group)
+                var previousWasNumber = false
+                for identifier in Self.identifiers(in: group) {
+                    if case let .text(label) = identifier, Self.ignoredLabels.contains(label) {
+                        previousWasNumber = false
+                        continue
+                    }
+                    tokens.append(Token(identifier: identifier, attachedToNumber: previousWasNumber, group: groupIndex))
+                    if case .number = identifier { previousWasNumber = true } else { previousWasNumber = false }
+                }
+            }
 
-                for identifier in identifiers {
-                    switch identifier {
-                    case let .number(number):
-                        if prerelease == nil { core.append(number) }
-                        else { prerelease?.identifiers.append(.number(number)) }
-                    case let .text(label):
-                        if Self.ignoredLabels.contains(label) { continue }
-                        // Some package managers include the package name before the version.
-                        guard !core.isEmpty || prerelease != nil else { continue }
-                        if prerelease == nil {
-                            prerelease = Prerelease(label: label)
-                        } else {
-                            prerelease?.identifiers.append(.text(label))
-                        }
+            var core: [NumericIdentifier] = []
+            var postRelease: [NumericIdentifier] = []
+            var prerelease: Prerelease?
+
+            var index = 0
+            tokenLoop: while index < tokens.count {
+                let token = tokens[index]
+                switch token.identifier {
+                case let .number(number):
+                    if prerelease == nil { core.append(number) }
+                    else { prerelease?.identifiers.append(.number(number)) }
+                case let .text(label):
+                    // Some package managers include the package name before the version.
+                    guard !core.isEmpty || prerelease != nil else { break }
+                    if prerelease == nil, token.attachedToNumber,
+                       let post = Self.postReleaseValue(label: label, group: token.group,
+                                                        remaining: tokens[(index + 1)...]) {
+                        postRelease = post
+                        break tokenLoop
+                    }
+                    if prerelease == nil {
+                        prerelease = Prerelease(label: label)
+                    } else {
+                        prerelease?.identifiers.append(.text(label))
                     }
                 }
+                index += 1
             }
 
             guard !core.isEmpty else { return nil }
             self.core = core
+            self.postRelease = postRelease
             self.prerelease = prerelease
         }
 
-        private static let ignoredLabels: Set<String> = [
+        /// A single trailing letter ("1.1.1w", "9e") or "p" plus a number
+        /// ("9.9p1") is a post-release. A bare "a" or "b" ("2.0b") stays an
+        /// alpha or beta, as most app publishers mean it; Homebrew's stable
+        /// formula versions use `isHomebrewPrerelease`. Numbers in later
+        /// groups, such as a Homebrew revision ("1.1.1w_1"), extend it.
+        private static func postReleaseValue(label: String, group: Int,
+                                             remaining: ArraySlice<Token>) -> [NumericIdentifier]? {
+            var rest = remaining
+            var value: [NumericIdentifier]
+            if label.count == 1, label != "a", label != "b",
+               let ascii = label.unicodeScalars.first?.value, (97...122).contains(ascii),
+               rest.first.map({ $0.group != group }) ?? true {
+                value = [NumericIdentifier(String(ascii - 96))]
+            } else if label == "p", let next = rest.first, next.group == group,
+                      case let .number(number) = next.identifier {
+                value = [number]
+                rest = rest.dropFirst()
+            } else {
+                return nil
+            }
+            for token in rest {
+                guard token.group != group, case let .number(number) = token.identifier else { return nil }
+                value.append(number)
+            }
+            return value
+        }
+
+        fileprivate static let ignoredLabels: Set<String> = [
             "app", "build", "final", "release", "stable"
         ]
 

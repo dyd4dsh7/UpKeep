@@ -12,11 +12,7 @@ struct InfoPanel<Header: View, Content: View>: View {
             HStack(alignment: .top, spacing: 8) {
                 header
                 Button {
-                    store.selectedApp = nil
-                    store.updateInspectorSelection = nil
-                    store.selectedPackageID = nil
-                    store.selectedDeveloperPackageID = nil
-                    store.selectedLocalModelID = nil
+                    store.clearInspectorSelection()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .symbolRenderingMode(.hierarchical)
@@ -27,7 +23,7 @@ struct InfoPanel<Header: View, Content: View>: View {
                 .foregroundStyle(.secondary)
                 .help("Close details")
                 .accessibilityLabel("Close details")
-                .keyboardShortcut(.cancelAction)
+                // No Escape shortcut: it would steal Escape from search and text fields.
             }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(UpkeepLayout.pageInset)

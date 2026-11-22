@@ -5,6 +5,7 @@ struct BatchUpdateSheet: View {
     @Environment(\.colorScheme) private var colorScheme
     @UpkeepStoreReference private var store
     @EnvironmentObject private var settings: AppSettings
+    @ScaledMetric(relativeTo: .largeTitle) private var titleSize: CGFloat = 25
     let items: [BatchUpdateItem]
     let isCVEReview: Bool
 
@@ -49,7 +50,7 @@ struct BatchUpdateSheet: View {
             WorkspaceGlyph(systemImage: headerIcon, size: 44, color: headerColor)
             VStack(alignment: .leading, spacing: 4) {
                 Text(headerTitle)
-                    .font(.system(size: 25, weight: .semibold))
+                    .font(.system(size: titleSize, weight: .semibold))
                     .tracking(-0.6)
                     .accessibilityAddTraits(.isHeader)
                 Text(headerSubtitle)
@@ -94,24 +95,50 @@ struct BatchUpdateSheet: View {
         .accessibilityElement(children: .combine)
     }
 
-    private var reviewView: some View {
+    @ViewBuilder private var reviewView: some View {
+        if visibleItems.isEmpty {
+            WorkspaceEmptyState("Nothing to review", systemImage: "checkmark.circle",
+                                description: Text(emptyReviewDetail))
+        } else {
+            populatedReviewView
+        }
+    }
+
+    private var emptyReviewDetail: String {
+        if store.macOSUpdates.contains(where: { !$0.isFullInstaller }) {
+            return "macOS updates install through Software Update, not this review. Other updates may have finished, been skipped, or changed since the list loaded."
+        }
+        return "These updates finished, were skipped, or changed since the list loaded. Close this review and check the Updates list again."
+    }
+
+    private var populatedReviewView: some View {
         VStack(spacing: 0) {
             if isCVEReview {
                 Text("Available updates may not fix every advisory. Finish any external updates in their source app.")
                     .font(.callout).foregroundStyle(.secondary).padding(.horizontal, 20).padding(.top, 14)
             }
-            if !selectedItems.isEmpty || visibleItems.contains(where: { isCVEReview || $0.isRecommendedByDefault }) {
-                HStack {
-                    Button(selectedItems.isEmpty ? (isCVEReview ? "Select All" : "Select Recommended") : "Deselect All") {
-                        state.selectedIDs = selectedItems.isEmpty
-                            ? Set(visibleItems.filter { isCVEReview || $0.isRecommendedByDefault }.map(\.id))
-                            : []
-                    }
-                    .buttonStyle(.link)
-                    Spacer()
+            HStack(spacing: 14) {
+                if !isCVEReview, !recommendedIDs.isEmpty {
+                    Button("Select Recommended") { state.selectedIDs = recommendedIDs }
+                        .disabled(selectedIDs == recommendedIDs)
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 12)
+                Button("Select All") { state.selectedIDs = Set(visibleItems.map(\.id)) }
+                    .disabled(selectedItems.count == visibleItems.count)
+                Button("Deselect All") { state.selectedIDs = [] }
+                    .disabled(selectedItems.isEmpty)
+                Spacer()
+            }
+            .buttonStyle(.link)
+            .padding(.horizontal, 20)
+            .padding(.top, 12)
+
+            if !selectedRunningApps.isEmpty {
+                Label(runningAppsNotice, systemImage: "power")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 9)
             }
 
             if selectedItems.contains(where: \.mayRequireAdministratorPassword) {
@@ -144,20 +171,28 @@ struct BatchUpdateSheet: View {
     private func reviewGroup(_ group: UpdateRiskGroup, items: [BatchUpdateItem]) -> some View {
         let expanded = state.expandedGroups.contains(group)
         return VStack(alignment: .leading, spacing: 0) {
-            BatchGroupHeader(
-                group: group,
-                itemCount: items.count,
-                selectedCount: items.count { state.selectedIDs.contains($0.id) },
-                isExpanded: expanded
-            ) {
-                if expanded {
-                    state.expandedGroups.remove(group)
-                } else {
-                    state.expandedGroups.insert(group)
+            HStack(spacing: 10) {
+                // Mixed state when only some of the group is selected.
+                Toggle(sources: items.map(selectionBinding(for:)), isOn: \.self) { EmptyView() }
+                    .labelsHidden()
+                    .toggleStyle(.checkbox)
+                    .fixedSize()
+                    .accessibilityLabel("Select all \(group.title)")
+                BatchGroupHeader(
+                    group: group,
+                    itemCount: items.count,
+                    selectedCount: items.count { state.selectedIDs.contains($0.id) },
+                    isExpanded: expanded
+                ) {
+                    if expanded {
+                        state.expandedGroups.remove(group)
+                    } else {
+                        state.expandedGroups.insert(group)
+                    }
                 }
             }
             if expanded {
-                Text(group.detail)
+                Text(groupDetail(group))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(.bottom, 10)
@@ -185,6 +220,7 @@ struct BatchUpdateSheet: View {
                     resultGroup(.failed, title: "Couldn’t finish", in: summary)
                     resultGroup(.opened, title: "Finish in source app", in: summary)
                     resultGroup(.updated, title: "Updated", in: summary)
+                    resultGroup(.notStarted, title: "Not started", in: summary)
                 }
                 .padding(20)
             }
@@ -233,11 +269,19 @@ struct BatchUpdateSheet: View {
                 Button("Done") { dismiss() }
                     .keyboardShortcut(.defaultAction)
                     .keyboardShortcut(.cancelAction)
+            } else if state.isRunning {
+                // Never interrupts an install; the rest are reported as not started.
+                Button(isStopRequested ? "Stopping After Current Update…" : "Stop After Current Update") {
+                    store.requestBatchStop()
+                }
+                .disabled(isStopRequested)
+                Button("Updating…", action: {})
+                    .buttonStyle(.borderedProminent)
+                    .disabled(true)
             } else {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                    .disabled(state.isRunning)
-                Button(state.isRunning ? "Updating…" : batchButtonTitle, action: submit)
+                Button(batchButtonTitle, action: submit)
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
                     .disabled(selectedItems.isEmpty || state.isRunning)
@@ -267,14 +311,28 @@ struct BatchUpdateSheet: View {
         )
     }
 
-    private var visibleRiskGroups: [UpdateRiskGroup] {
-        UpdateRiskGroup.allCases.filter { group in
-            isCVEReview || settings.sidebarViewMode == .advanced || ![.prerelease, .dependency, .developer].contains(group)
-        }
+    /// Every group the Updates header counts is reviewable here, in both modes,
+    /// so "N to review" never opens an empty or shorter sheet. Basic mode keeps
+    /// advanced groups collapsed and unselected, with a note.
+    private var visibleRiskGroups: [UpdateRiskGroup] { UpdateRiskGroup.allCases }
+
+    private var visibleItems: [BatchUpdateItem] { items }
+
+    private var selectedIDs: Set<String> { Set(selectedItems.map(\.id)) }
+
+    private var recommendedIDs: Set<String> { Set(visibleItems.filter(\.isRecommendedByDefault).map(\.id)) }
+
+    private var isStopRequested: Bool { store.updateExecutionState.isBatchStopRequested }
+
+    private func groupDetail(_ group: UpdateRiskGroup) -> String {
+        guard !isCVEReview, settings.sidebarViewMode == .basic, group.isAdvanced else { return group.detail }
+        return group.detail + " Usually reviewed in Advanced mode."
     }
 
-    private var visibleItems: [BatchUpdateItem] {
-        items.filter { visibleRiskGroups.contains($0.riskGroup) }
+    private var runningAppsNotice: String {
+        let names = selectedRunningApps.map(\.name).formatted()
+        let pronoun = selectedRunningApps.count == 1 ? "it" : "them"
+        return "Upkeep will quit \(names) before updating and reopen \(pronoun) afterwards."
     }
 
     private var selectedItems: [BatchUpdateItem] { visibleItems.filter { state.selectedIDs.contains($0.id) } }
@@ -299,7 +357,8 @@ struct BatchUpdateSheet: View {
             return WorkspaceSummary.count(summary.results.count, "update reviewed", "updates reviewed")
         }
         if state.isRunning {
-            return store.batchUpdateProgress?.itemName ?? "Preparing selected updates…"
+            let current = store.batchUpdateProgress?.itemName ?? "Preparing selected updates…"
+            return isStopRequested ? "Stopping after \(current)" : current
         }
         return "Choose which updates to run."
     }
@@ -320,11 +379,21 @@ struct BatchUpdateSheet: View {
     }
 
     private func resultIcon(_ outcome: BatchUpdateResult.Outcome) -> String {
-        switch outcome { case .updated: "checkmark.circle.fill"; case .opened: "arrow.up.right.circle.fill"; case .failed: "xmark.circle.fill" }
+        switch outcome {
+        case .updated: "checkmark.circle.fill"
+        case .opened: "arrow.up.right.circle.fill"
+        case .failed: "xmark.circle.fill"
+        case .notStarted: "pause.circle.fill"
+        }
     }
     private func resultColor(_ outcome: BatchUpdateResult.Outcome) -> Color {
-        switch outcome { case .updated: .green; case .opened: .blue; case .failed: .red }
+        switch outcome { case .updated: .green; case .opened: .blue; case .failed: .red; case .notStarted: .secondary }
     }
+}
+
+private extension UpdateRiskGroup {
+    /// Groups Basic mode keeps collapsed and unselected in batch review.
+    var isAdvanced: Bool { [.prerelease, .dependency, .developer].contains(self) }
 }
 
 @MainActor
