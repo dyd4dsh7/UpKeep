@@ -25,3 +25,13 @@ import Testing
         #expect(NSImage(contentsOf: url) != nil)
     }
 }
+
+@MainActor
+@Test func systemSourceIconsComeFromInstalledAppsNotTheBundle() {
+    // Apple and Steam icons are read at runtime and never bundled.
+    for name in ["appstore", "testflight", "steam", "softwareupdate"] {
+        #expect(ThirdPartyLogo.url(named: name) == nil)
+    }
+    #expect(SidebarDestination.appStore.installedAppPaths.first == "/System/Applications/App Store.app")
+    #expect(ThirdPartyLogo.installedAppIcon(atAnyOf: ["/nonexistent/Fixture.app"]) == nil)
+}

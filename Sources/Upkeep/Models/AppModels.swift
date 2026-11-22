@@ -717,6 +717,18 @@ enum SidebarDestination: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Apps whose own icon represents this source. The icon is read from the
+    /// installed app at runtime, never bundled, so it is not redistributed.
+    var installedAppPaths: [String] {
+        switch self {
+        case .appStore: ["/System/Applications/App Store.app"]
+        case .macOSUpdates: ["/System/Library/CoreServices/Software Update.app"]
+        case .testFlight: ["/Applications/TestFlight.app"]
+        case .steam: ["/Applications/Steam.app", NSHomeDirectory() + "/Applications/Steam.app"]
+        default: []
+        }
+    }
+
     var systemImage: String {
         switch self {
         case .updates: "arrow.down.circle"

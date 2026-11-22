@@ -184,7 +184,8 @@ struct UpkeepSidebarView: View {
             Text(destination.rawValue)
                 .lineLimit(1)
         } icon: {
-            if let name = destination.logoName, let logo = ThirdPartyLogo.image(named: name, in: scheme) {
+            if let logo = destination.logoName.flatMap({ ThirdPartyLogo.image(named: $0, in: scheme) })
+                ?? ThirdPartyLogo.installedAppIcon(atAnyOf: destination.installedAppPaths) {
                 Image(nsImage: logo)
                     .resizable()
                     .scaledToFit()

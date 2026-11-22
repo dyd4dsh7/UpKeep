@@ -5,6 +5,7 @@ All notable changes to Upkeep are documented here.
 ## Unreleased
 
 - Restored package-manager, model-runtime, and update-source logos from official sources for every supported tool that publishes one (Homebrew, npm, Node.js, Bun, Deno, Yarn, pnpm, Volta, Python, pipx, uv, RubyGems, Rust, Cargo, Go, Composer, .NET, MacPorts, Nix, mise, GitHub, VS Code, Ollama, LM Studio, and Sparkle), with dark-mode variants and per-logo sources and terms in THIRD_PARTY_NOTICES.md.
+- The App Store, TestFlight, macOS, and Steam source pages show the icon of the installed app, read at runtime rather than bundled.
 
 ## 0.25.0 — 2026-11-22
 

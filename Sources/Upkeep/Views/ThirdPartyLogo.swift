@@ -28,6 +28,21 @@ enum ThirdPartyLogo {
         return image
     }
 
+    private static var installedIcons: [String: NSImage] = [:]
+
+    /// The icon of the first installed app among `paths`, read from the app
+    /// itself (as for any app in Upkeep's lists) rather than bundled.
+    static func installedAppIcon(atAnyOf paths: [String]) -> NSImage? {
+        for path in paths {
+            if let icon = installedIcons[path] { return icon }
+            guard FileManager.default.fileExists(atPath: path) else { continue }
+            let icon = NSWorkspace.shared.icon(forFile: path)
+            installedIcons[path] = icon
+            return icon
+        }
+        return nil
+    }
+
     nonisolated static func url(named name: String) -> URL? {
         Bundle.module.url(forResource: name, withExtension: "png")
             ?? Bundle.module.url(forResource: name, withExtension: "svg")

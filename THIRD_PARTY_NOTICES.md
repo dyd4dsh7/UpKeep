@@ -46,8 +46,15 @@ is not affiliated with, sponsored by, or endorsed by any of these owners. Some
 owners' policies ask that their logo be used only with written permission;
 Upkeep has **not** obtained that permission, and the Terms column says so. If
 you own one of these marks and want it removed, please open an issue and it will
-be replaced with a generic symbol. asdf and fnm publish no official logo, and
-Apple, Steam, Setapp and Microsoft AutoUpdate sources use system symbols.
+be replaced with a generic symbol. asdf and fnm publish no official logo.
+
+The App Store, TestFlight, Software Update (macOS), and Steam source pages show
+the icon of the corresponding app installed on the user's Mac, read at runtime in
+the same way as every other app icon in Upkeep's lists. Those icons are not
+included in this repository or in Upkeep's app package, and remain the property
+of Apple Inc. and Valve Corporation. When the app is not installed, Upkeep shows
+a system symbol. App Store, TestFlight, and macOS are trademarks of Apple Inc.
+Steam is a trademark of Valve Corporation.
 
 | File | Owner | Source | Terms | Changes |
 | --- | --- | --- | --- | --- |
