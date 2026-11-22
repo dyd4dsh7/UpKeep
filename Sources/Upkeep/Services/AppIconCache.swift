@@ -31,3 +31,31 @@ final class AppIconCache {
         return image
     }
 }
+
+/// Memoizes `AppIconIdentity(url:)` (a file stat) so list rows do not stat
+/// their bundle on every body evaluation. A path is re-stat'ed after
+/// `maximumAge`, so a replaced bundle still gets its new icon.
+@MainActor
+final class AppIconIdentityCache {
+    static let shared = AppIconIdentityCache()
+    private var entries: [String: (identity: AppIconIdentity, checkedAt: ContinuousClock.Instant)] = [:]
+    private let maximumAge: Duration
+    private let limit: Int
+    private let resolve: (URL) -> AppIconIdentity
+
+    init(maximumAge: Duration = .seconds(5), limit: Int = 2_048,
+         resolve: @escaping (URL) -> AppIconIdentity = AppIconIdentity.init(url:)) {
+        self.maximumAge = maximumAge
+        self.limit = max(1, limit)
+        self.resolve = resolve
+    }
+
+    func identity(for url: URL, now: ContinuousClock.Instant = .now) -> AppIconIdentity {
+        let key = url.path
+        if let entry = entries[key], entry.checkedAt.duration(to: now) < maximumAge { return entry.identity }
+        let identity = resolve(url)
+        if entries.count >= limit { entries.removeAll(keepingCapacity: true) }
+        entries[key] = (identity, now)
+        return identity
+    }
+}

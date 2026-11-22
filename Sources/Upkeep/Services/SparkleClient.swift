@@ -4,11 +4,7 @@ struct SparkleClient: Sendable {
     func update(for app: InstalledApp, includePrereleases: Bool = false) async throws -> AvailableUpdate? {
         guard let feedURL = app.sparkleFeedURL else { return nil }
         do {
-            var request = URLRequest(url: feedURL)
-            request.timeoutInterval = 15
-            request.setValue("Upkeep/1.0", forHTTPHeaderField: "User-Agent")
-            let (data, http) = try await PublisherHTTPClient.data(for: request)
-            guard 200..<300 ~= http.statusCode else { throw UpdateSourceError.httpStatus(http.statusCode) }
+            let data = try await Self.appcastData(from: feedURL)
 
             let parser = SparkleFeedParser(data: data, baseURL: feedURL)
             guard let item = parser.parse(includePrereleases: includePrereleases) else {
@@ -19,6 +15,27 @@ struct SparkleClient: Sendable {
 
             return item.availableUpdate(for: app, fallbackURL: feedURL)
         } catch { throw UpdateSourceError(error) }
+    }
+
+    /// Appcasts change rarely; repeat scans within this window reuse the
+    /// cached response, matching how GitHub release metadata is cached.
+    static let appcastCacheMaximumAge: TimeInterval = 10 * 60
+
+    static func appcastCacheKey(for feedURL: URL) -> String { "sparkle-" + feedURL.absoluteString }
+
+    private static func appcastData(from feedURL: URL) async throws -> Data {
+        try await PublisherResponseCache.shared.data(
+            for: appcastCacheKey(for: feedURL),
+            maximumAge: appcastCacheMaximumAge
+        ) {
+            var request = URLRequest(url: feedURL)
+            request.timeoutInterval = 15
+            request.setValue("Upkeep/1.0", forHTTPHeaderField: "User-Agent")
+            let (data, http) = try await PublisherHTTPClient.data(for: request)
+            // Only successful responses reach the cache.
+            guard 200..<300 ~= http.statusCode else { throw UpdateSourceError.httpStatus(http.statusCode) }
+            return data
+        }
     }
 }
 
@@ -56,6 +73,10 @@ struct SparkleFeedItem: Equatable {
     }
 
     func isNewer(than app: InstalledApp) -> Bool {
+        // Sparkle compares sparkle:version with CFBundleVersion when both exist.
+        if let buildVersion, !buildVersion.isEmpty, let installedBuild = app.buildVersion, !installedBuild.isEmpty {
+            return VersionComparator.isNewer(buildVersion, than: installedBuild)
+        }
         if hasMarketingVersion {
             let marketingComparison = VersionComparator.compare(version, app.installedVersion)
             if marketingComparison != .orderedSame { return marketingComparison == .orderedDescending }
@@ -108,12 +129,13 @@ final class SparkleFeedParser: XMLTextParser {
                                             maximum: $0.maximumSystemVersion,
                                             hardware: $0.hardwareRequirements) }
             .max { left, right in
+                if let leftBuild = left.buildVersion, let rightBuild = right.buildVersion {
+                    let buildComparison = VersionComparator.compare(leftBuild, rightBuild)
+                    if buildComparison != .orderedSame { return buildComparison == .orderedAscending }
+                }
                 let versionComparison = VersionComparator.compare(left.version, right.version)
                 if versionComparison != .orderedSame { return versionComparison == .orderedAscending }
-                guard let leftBuild = left.buildVersion, let rightBuild = right.buildVersion else {
-                    return left.buildVersion == nil && right.buildVersion != nil
-                }
-                return VersionComparator.compare(leftBuild, rightBuild) == .orderedAscending
+                return left.buildVersion == nil && right.buildVersion != nil
             }
     }
 
@@ -150,10 +172,10 @@ final class SparkleFeedParser: XMLTextParser {
         let enclosureBuildVersion = attributeDict["sparkle:version"] ?? attributeDict["version"]
         if let enclosureBuildVersion { buildVersion = enclosureBuildVersion }
         if let channel = attributeDict["sparkle:channel"] ?? attributeDict["channel"] {
-            sourcePrereleaseChannel = VersionComparator.prereleaseChannel(for: channel)
+            sourcePrereleaseChannel = Self.channel(named: channel) ?? sourcePrereleaseChannel
         }
-        if let shortVersion {
-            version = shortVersion
+        if let shortVersion, !shortVersion.isEmpty {
+            version = Self.marketingVersion(shortVersion, build: enclosureBuildVersion ?? buildVersion)
             hasMarketingVersion = true
         } else if version == nil, let enclosureBuildVersion {
             version = enclosureBuildVersion
@@ -195,7 +217,7 @@ final class SparkleFeedParser: XMLTextParser {
             hardwareRequirements = text
         } else if qualified == "sparkle:shortVersionString" || elementName == "shortVersionString" {
             if !text.isEmpty {
-                version = text
+                version = Self.marketingVersion(text, build: buildVersion)
                 hasMarketingVersion = true
             }
         } else if qualified == "sparkle:version" || elementName == "version" {
@@ -204,7 +226,7 @@ final class SparkleFeedParser: XMLTextParser {
                 if version == nil { version = text }
             }
         } else if qualified == "sparkle:channel" || elementName == "channel" {
-            if !text.isEmpty { sourcePrereleaseChannel = VersionComparator.prereleaseChannel(for: text) }
+            if let channel = Self.channel(named: text) { sourcePrereleaseChannel = channel }
         } else if elementName == "description" {
             releaseNotes = text.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
         } else if elementName == "item" {
@@ -232,6 +254,27 @@ final class SparkleFeedParser: XMLTextParser {
         }
         currentElement = ""
         currentText = ""
+    }
+
+    /// Sparkle offers items on any named channel only to users who opt in.
+    /// Unknown names such as "canary" or "insider" are therefore prereleases.
+    static func channel(named rawName: String) -> PrereleaseChannel? {
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !name.isEmpty, !["default", "release", "stable", "production"].contains(name) else { return nil }
+        return VersionComparator.prereleaseChannel(for: name) ?? .prerelease
+    }
+
+    /// Some feeds annotate shortVersionString with the build, e.g. "1.4.2 (812)".
+    static func marketingVersion(_ value: String, build: String?) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasSuffix(")"), let open = trimmed.lastIndex(of: "(") else { return trimmed }
+        let annotation = trimmed[trimmed.index(after: open)..<trimmed.index(before: trimmed.endIndex)]
+            .trimmingCharacters(in: .whitespaces).lowercased()
+        let normalizedBuild = build?.trimmingCharacters(in: .whitespaces).lowercased()
+        let isBuildAnnotation = annotation == normalizedBuild
+            || annotation.hasPrefix("build") || annotation.allSatisfy(\.isNumber)
+        let base = trimmed[..<open].trimmingCharacters(in: .whitespaces)
+        return isBuildAnnotation && base.contains(where: \.isNumber) ? base : trimmed
     }
 
     override func appendXMLText(_ string: String, parser: XMLParser) {

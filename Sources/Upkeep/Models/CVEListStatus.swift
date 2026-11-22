@@ -47,17 +47,23 @@ extension CVEInventoryItem {
 extension CVEScanState {
     func listStatus(for item: CVEInventoryItem, now: Date = Date()) -> CVEListStatus {
         guard item.target != nil else { return .notCovered }
-        if let result = results.first(where: { $0.id == item.id }) {
-            guard result.item.hasSameCheckIdentity(as: item), let checkedAt,
-                  now.timeIntervalSince(checkedAt) < 86_400 else { return .needsCheck }
-            if result.failure != nil { return .incomplete }
-            if result.advisories.isEmpty { return .noAdvisories }
-            let potential: Bool
-            if case .nvd? = item.target { potential = true } else { potential = false }
-            return .advisories(result.advisoryGroups.count, potential: potential)
+        if let result = result(for: item.id) {
+            if result.item.hasSameCheckIdentity(as: item), isFreshResult(result, now: now) {
+                if result.failure != nil { return .incomplete }
+                if result.advisories.isEmpty { return .noAdvisories }
+                let potential: Bool
+                if case .nvd? = item.target { potential = true } else { potential = false }
+                return .advisories(result.advisoryGroups.count, potential: potential)
+            }
+            // A previous result for another version (or a stale one) is
+            // replaced by the running check when it covers this item.
+            if running && isInCurrentInventory(item) {
+                return checkingItemIDs.contains(item.id) ? .checking : .pending
+            }
+            return .needsCheck
         }
-        if running && inventory.contains(where: { $0.hasSameCheckIdentity(as: item) }) {
-            return currentItemID == item.id ? .checking : .pending
+        if running && isInCurrentInventory(item) {
+            return checkingItemIDs.contains(item.id) ? .checking : .pending
         }
         return checkedAt == nil ? .pending : .needsCheck
     }

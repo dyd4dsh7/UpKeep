@@ -129,6 +129,31 @@ extension WorkspaceEmptyState where Actions == EmptyView {
     }
 }
 
+/// Shown instead of an empty state while a check that could fill the list runs.
+struct WorkspaceScanningState: View {
+    let title: String
+    let detail: String
+
+    var body: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+                .controlSize(.large)
+            Text(title)
+                .font(.title3.weight(.semibold))
+                .accessibilityAddTraits(.isHeader)
+            Text(detail)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .multilineTextAlignment(.center)
+        .padding(20)
+        .frame(maxWidth: 380)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .combine)
+    }
+}
+
 struct WorkspaceDialogFooter<Content: View>: View {
     @ViewBuilder let content: Content
 

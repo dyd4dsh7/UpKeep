@@ -1,6 +1,5 @@
 # Upkeep
 
-[![CI](https://github.com/dyd4dsh7/UpKeep/actions/workflows/ci.yml/badge.svg)](https://github.com/dyd4dsh7/UpKeep/actions/workflows/ci.yml)
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
 
 A native macOS app for keeping applications and developer tools up to date.
@@ -10,10 +9,10 @@ A native macOS app for keeping applications and developer tools up to date.
 ## Install and support
 
 Requires **macOS 14 or newer**. Official download builds target **Apple Silicon**.
-Intel source builds are not currently covered by CI. Download signed, notarized
+Intel source builds are not currently tested. Download signed, notarized
 archives only from [GitHub Releases](https://github.com/dyd4dsh7/UpKeep/releases).
-If no release is listed, use the source-build instructions below; a successful
-CI run or a debug ZIP is not a notarized release.
+If no release is listed, use the source-build instructions below; a debug ZIP
+is not a notarized release.
 
 For a published release, download `Upkeep.zip` and `Upkeep.zip.sha256`, run
 `shasum -a 256 -c Upkeep.zip.sha256` in the download directory, extract the ZIP,
@@ -98,7 +97,7 @@ Upkeep never downloads executables from its own servers. App Store updates open 
 ## Build
 
 Use **Xcode 26.6 or newer (Swift 6.3+)**, or matching Apple Command Line Tools,
-with the **macOS 26 SDK or newer**. CI explicitly selects Xcode 26.6. The build
+with the **macOS 26 SDK or newer**. The build
 SDK is newer than the macOS 14 deployment target because the source uses newer SwiftUI APIs
 behind availability checks. Tests use the Swift Testing bundled with that
 selected toolchain; no external test package, backend override or extra linker
@@ -145,7 +144,7 @@ are limited and do not replace a system backup.
 - Package-manager changes can affect your development environment; arbitrary package
   downgrades and automatic system rollback are not supported.
 - Apple Silicon migration verifies the main executable, not every helper or plugin.
-- macOS 14 is the deployment target; the current CI smoke test runs on macOS 26.
+- macOS 14 is the deployment target; tests and smoke checks run locally on macOS 26.
   This is not evidence of an end-to-end test on every supported macOS version.
 
 ## Contributing and security

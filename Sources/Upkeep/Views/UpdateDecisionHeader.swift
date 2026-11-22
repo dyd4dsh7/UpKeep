@@ -2,6 +2,8 @@ import SwiftUI
 
 struct UpdateDecisionHeader: View {
     @UpkeepStoreReference private var store
+    @ScaledMetric(relativeTo: .largeTitle) private var titleSize: CGFloat = 36
+    @ScaledMetric(relativeTo: .caption) private var eyebrowSize: CGFloat = 11
 
     let review: () -> Void
 
@@ -37,13 +39,13 @@ struct UpdateDecisionHeader: View {
     private var briefing: some View {
         VStack(alignment: .leading, spacing: 9) {
             Label("Update Centre", systemImage: "arrow.down.circle")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: eyebrowSize, weight: .semibold))
                 .textCase(.uppercase)
                 .tracking(1.3)
                 .foregroundStyle(UpkeepPalette.mint)
 
             Text(title)
-                .font(.system(size: 36, weight: .semibold))
+                .font(.system(size: titleSize, weight: .semibold))
                 .tracking(-1.35)
                 .foregroundStyle(.white)
                 .contentTransition(.numericText())
@@ -98,7 +100,9 @@ struct UpdateDecisionHeader: View {
     private var title: String {
         let total = store.totalUpdateCount
         if total > 0 { return "\(WorkspaceSummary.count(total, "update", "updates")) available" }
-        return store.updateCheckState == .complete ? "You’re up to date" : store.updateCheckState.title
+        return store.updateCheckState == .complete
+            ? "You’re up to date"
+            : store.updateCheckState.title(lastChecked: store.lastChecked)
     }
 
     private var detail: String {
@@ -116,7 +120,7 @@ struct UpdateDecisionHeader: View {
         if store.totalUpdateCount > 0 {
             return "Choose an update below to see its installation options."
         }
-        return store.updateCheckState.detail
+        return store.updateCheckState.detail(lastChecked: store.lastChecked)
     }
 
     private var symbol: String {

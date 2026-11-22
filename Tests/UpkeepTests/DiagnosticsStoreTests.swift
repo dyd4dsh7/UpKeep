@@ -9,6 +9,7 @@ import Testing
     let fileURL = directory.appendingPathComponent("diagnostics.json")
     let persistent = DiagnosticsStore(fileURL: fileURL)
     persistent.record(.info, category: .application, "Real app event")
+    persistent.flush()
     let before = try Data(contentsOf: fileURL)
 
     let isolated = DiagnosticsStore(fileURL: fileURL, persistent: false)
@@ -41,6 +42,7 @@ import Testing
         "Authenticated URL": "https://username:password@example.com/feed",
         "Authorization": "Bearer ghp_1234567890abcdefghijklmnop"
     ])
+    store.flush()
 
     let persisted = DiagnosticsStore(fileURL: fileURL).entries()
     #expect(persisted.count == 1)
@@ -66,6 +68,7 @@ import Testing
         store.recordBuffered(.info, category: .scan, "Buffered \(index)")
     }
     store.record(.info, category: .scan, "Flush")
+    store.flush()
 
     let persisted = DiagnosticsStore(fileURL: fileURL).entries()
     #expect(persisted.count == 2_000)
@@ -105,4 +108,33 @@ import Testing
     #expect(loaded[0].message.contains("<redacted>"))
     #expect(!loaded[0].message.contains("ghp_1234567890abcdefghijklmnop"))
     #expect(!loaded[0].metadata.values.joined().contains("super-secret-value"))
+}
+
+@Test func diagnosticsPersistenceIsCoalescedAndEntriesStaySorted() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("upkeep-diagnostics-tests-\(UUID().uuidString)", isDirectory: true)
+    let fileURL = directory.appendingPathComponent("diagnostics.json")
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let store = DiagnosticsStore(fileURL: fileURL)
+    store.record(.info, category: .scan, "First")
+    // The write is deferred to the background queue.
+    #expect(!FileManager.default.fileExists(atPath: fileURL.path))
+    store.record(.info, category: .scan, "Second")
+    store.flush()
+    let persisted = DiagnosticsStore(fileURL: fileURL).entries()
+    #expect(persisted.map(\.message) == ["Second", "First"])
+
+    // Entries loaded out of order are read newest first without sorting on read.
+    let shuffled = [3.0, 1.0, 2.0, 0.0].map {
+        DiagnosticEntry(date: Date(timeIntervalSince1970: $0), level: .info, category: .scan, message: "t\(Int($0))")
+    }
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    let shuffledURL = directory.appendingPathComponent("shuffled.json")
+    try encoder.encode(shuffled).write(to: shuffledURL)
+    let loaded = DiagnosticsStore(fileURL: shuffledURL)
+    #expect(loaded.entries().map(\.message) == ["t3", "t2", "t1", "t0"])
+    loaded.recordBuffered(.info, category: .scan, "now")
+    #expect(loaded.entries().first?.message == "now")
 }

@@ -10,7 +10,7 @@ struct CVEStatusBadge: View {
     var body: some View {
         let status = store.cveScanState.listStatus(for: item)
         if status.showsListBadge {
-            let rating = store.cveScanState.results.first { $0.id == item.id }?.advisoryGroups.compactMap(\.severity)
+            let rating = store.cveScanState.result(for: item.id)?.advisoryGroups.compactMap(\.severity)
             let highest = CVESeverityRating.highest(rating ?? [])
             let tint = isSelected ? Color.primary : CVEColors.severity(highest?.level, in: colorScheme)
             Button { store.showCVEInfo(for: item) } label: {
@@ -47,7 +47,7 @@ struct CVESecuritySummary: View {
     var body: some View {
         let status = store.cveScanState.listStatus(for: item)
         if status.showsListBadge {
-            let groups = store.cveScanState.results.first { $0.id == item.id }?.advisoryGroups ?? []
+            let groups = store.cveScanState.result(for: item.id)?.advisoryGroups ?? []
             GroupBox {
                 VStack(alignment: .leading, spacing: 12) {
                     ViewThatFits(in: .horizontal) {

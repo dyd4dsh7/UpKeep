@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 enum ListDensity: String, CaseIterable, Identifiable, Sendable {
@@ -252,8 +253,24 @@ final class AppSettings: ObservableObject {
     private(set) var exclusionCacheRevision: UInt64 = 0
     private(set) var nextExclusionExpiration: Date?
     private var exclusionsByKey: [String: [UpdateExclusion]] = [:]
+    /// Check-record keys whose UserDefaults write is pending (coalesced).
+    private var pendingCheckPersistence: Set<CheckRecordStorage> = []
+    private var checkPersistenceTask: Task<Void, Never>?
+    private var terminationObserver: NSObjectProtocol?
+    /// Check-record writes within this window are coalesced into one.
+    nonisolated static let checkPersistenceDelay: Duration = .seconds(1)
+    /// Settings instances sharing a UserDefaults object flush pending check
+    /// records before another instance reads them.
+    private static let liveInstances = NSHashTable<AppSettings>.weakObjects()
+
+    private enum CheckRecordStorage: Hashable {
+        case itemLastCheckedDates, sourceCheckFreshness
+    }
 
     init(defaults: UserDefaults = .standard) {
+        for instance in Self.liveInstances.allObjects where instance.defaults === defaults {
+            instance.flushCheckPersistence()
+        }
         self.defaults = defaults
         defaults.register(defaults: [
             "checkOnLaunch": true,
@@ -318,6 +335,18 @@ final class AppSettings: ObservableObject {
         customGitHubRepositories = defaults.dictionary(forKey: "customGitHubRepositories")
             as? [String: String] ?? [:]
         saveExclusions()
+        Self.liveInstances.add(self)
+        terminationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.flushCheckPersistence() }
+        }
+    }
+
+    isolated deinit {
+        // A released instance must not lose coalesced check records.
+        flushCheckPersistence()
+        if let terminationObserver { NotificationCenter.default.removeObserver(terminationObserver) }
     }
 
     func isManagerEnabled(_ manager: DeveloperPackageManager) -> Bool {
@@ -374,6 +403,14 @@ final class AppSettings: ObservableObject {
     func exclusion(for key: String, version: String) -> UpdateExclusion? {
         exclusionsByKey[key]?.first {
             $0.isActive() && ($0.mode == .ignored || ($0.mode == .skipped && $0.version == version))
+        }
+    }
+
+    /// Finds an active rule whose skipped version satisfies `matches`, so equal
+    /// releases written differently by separate sources stay skipped.
+    func exclusion(for key: String, matching matches: (String) -> Bool) -> UpdateExclusion? {
+        exclusionsByKey[key]?.first {
+            $0.isActive() && ($0.mode == .ignored || ($0.mode == .skipped && $0.version.map(matches) == true))
         }
     }
 
@@ -458,15 +495,60 @@ final class AppSettings: ObservableObject {
                 failure: failure.isEmpty ? nil : failure)
         }
         sourceCheckFreshness = freshness
-        if let data = try? JSONEncoder().encode(sourceCheckFreshness) {
+        scheduleCheckPersistence(.sourceCheckFreshness)
+    }
+
+    func recordChecks(for keys: [String], at date: Date = Date()) {
+        guard !keys.isEmpty else { return }
+        // Publish once for the whole batch.
+        var dates = itemLastCheckedDates
+        for key in keys { dates[key] = date }
+        itemLastCheckedDates = dates
+        scheduleCheckPersistence(.itemLastCheckedDates)
+    }
+
+    /// Drops check records for items that are no longer installed.
+    /// `itemKeys` are exclusion keys of every current item; `appIDs` are the
+    /// IDs of installed apps (source records use `app|<id>|<source>`).
+    func pruneCheckRecords(keepingItemKeys itemKeys: Set<String>, appIDs: Set<String>) {
+        let dates = itemLastCheckedDates.filter { itemKeys.contains($0.key) }
+        if dates.count != itemLastCheckedDates.count {
+            itemLastCheckedDates = dates
+            scheduleCheckPersistence(.itemLastCheckedDates)
+        }
+        let freshness = sourceCheckFreshness.filter { key, _ in
+            guard key.hasPrefix("app|"), let separator = key.lastIndex(of: "|"),
+                  separator > key.index(key.startIndex, offsetBy: 3) else { return true }
+            return appIDs.contains(String(key[key.index(key.startIndex, offsetBy: 4)..<separator]))
+        }
+        if freshness.count != sourceCheckFreshness.count {
+            sourceCheckFreshness = freshness
+            scheduleCheckPersistence(.sourceCheckFreshness)
+        }
+    }
+
+    /// Writes pending check records to UserDefaults now.
+    func flushCheckPersistence() {
+        checkPersistenceTask?.cancel()
+        checkPersistenceTask = nil
+        let pending = pendingCheckPersistence
+        pendingCheckPersistence.removeAll()
+        let encoder = JSONEncoder()
+        if pending.contains(.itemLastCheckedDates), let data = try? encoder.encode(itemLastCheckedDates) {
+            defaults.set(data, forKey: "itemLastCheckedDates")
+        }
+        if pending.contains(.sourceCheckFreshness), let data = try? encoder.encode(sourceCheckFreshness) {
             defaults.set(data, forKey: "sourceCheckFreshness")
         }
     }
 
-    func recordChecks(for keys: [String], at date: Date = Date()) {
-        for key in keys { itemLastCheckedDates[key] = date }
-        if let data = try? JSONEncoder().encode(itemLastCheckedDates) {
-            defaults.set(data, forKey: "itemLastCheckedDates")
+    private func scheduleCheckPersistence(_ storage: CheckRecordStorage) {
+        pendingCheckPersistence.insert(storage)
+        guard checkPersistenceTask == nil else { return }
+        checkPersistenceTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.checkPersistenceDelay)
+            guard !Task.isCancelled else { return }
+            self?.flushCheckPersistence()
         }
     }
 

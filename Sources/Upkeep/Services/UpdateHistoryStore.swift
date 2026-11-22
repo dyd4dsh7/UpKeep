@@ -273,7 +273,7 @@ actor UpdateHistoryStore {
         }
         var keptBytes = RecoveryStorage.boundedSum(protectedSizes)
 
-        for record in records.sorted(by: { $0.date > $1.date }) {
+        for (index, record) in records.sorted(by: { $0.date > $1.date }).enumerated() {
             guard keptTotal < maximumBackupsTotal,
                   let originalPath = record.originalAppPath,
                   keptPerApp[originalPath, default: 0] < maximumBackupsPerApp,
@@ -285,7 +285,11 @@ actor UpdateHistoryStore {
             // Unknown sizes are retained rather than deleted based on an estimate.
             // Interrupted-update recovery records are always protected, even over budget.
             if !keptPaths.contains(path), let bytes = measuredBytes(backupURL) {
-                guard bytes <= maximumBackupBytes - min(keptBytes, maximumBackupBytes) else { continue }
+                // The newest backup is what History offers to undo first. Keep it
+                // when it fits the budget on its own, even if protected recovery
+                // backups already use that budget.
+                let fitsRemaining = bytes <= maximumBackupBytes - min(keptBytes, maximumBackupBytes)
+                guard fitsRemaining || (index == 0 && bytes <= maximumBackupBytes) else { continue }
                 keptBytes += bytes
             }
             keptPaths.insert(backupURL.standardizedFileURL.path)

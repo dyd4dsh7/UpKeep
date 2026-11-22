@@ -1985,3 +1985,28 @@ func cancelledDirectMutationReconcilesObservedVersionWithoutReportingSuccess(bat
     #expect((f.store.errorMessage == nil) == batch)
     #expect(!f.store.isUpdating(update))
 }
+
+@MainActor
+@Test func stoppingABatchFinishesTheCurrentItemAndSkipsTheRest() async {
+    let installer = ReviewInstaller(pause: true)
+    let f = ReviewFixture(installer: installer)
+    defer { f.cleanUp() }
+    let app = reviewApp()
+    let update = reviewUpdate(app)
+    let model = reviewModel()
+    f.store.apps = [app]; f.store.updates = [update]; f.store.localModels = [model]
+    let batch = Task { await f.store.performBatchUpdates([.application(update), .model(model)]) }
+    #expect(await eventually { await installer.calls == 1 })
+    f.store.requestBatchStop()
+    #expect(f.store.updateExecutionState.isBatchStopRequested)
+    // The install in progress is never interrupted.
+    await installer.resume()
+    let summary = await batch.value
+    #expect(summary.updatedCount == 1)
+    #expect(summary.notStartedCount == 1)
+    #expect(summary.results.last?.item.id == BatchUpdateItem.model(model).id)
+    #expect(await installer.calls == 1)
+    #expect(!f.store.updateExecutionState.isBatchStopRequested)
+    #expect(!f.store.isWorking(.unifiedBatch))
+    #expect(f.store.updatePhase(for: BatchUpdateItem.model(model).updateOperationID) == nil)
+}

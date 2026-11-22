@@ -5,7 +5,7 @@ import Foundation
 // SwiftBuild in some Command Line Tools releases omits the bundled Testing
 // macro plugin when no -Xswiftc options are supplied. Resolve it from the
 // selected compiler rather than requiring caller flags or a second Testing
-// package. xcrun honors DEVELOPER_DIR and TOOLCHAINS, including CI's Xcode pin.
+// package. xcrun honors DEVELOPER_DIR and TOOLCHAINS when a specific Xcode is selected.
 private func bundledTestingSettings() -> [SwiftSetting] {
     let lookup = Process()
     lookup.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")

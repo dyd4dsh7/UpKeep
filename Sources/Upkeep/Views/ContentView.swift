@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @UpkeepStoreReference private var store
     @EnvironmentObject private var settings: AppSettings
+    @Environment(\.openWindow) private var openWindow
     @UpkeepState private var columnVisibility: NavigationSplitViewVisibility = .all
     @UpkeepState private var sidebarCollapsedForInspector = false
     @UpkeepState private var showingOperations = false
@@ -65,9 +66,9 @@ struct ContentView: View {
         .navigationTitle(navigationTitle)
         .toolbar {
             Button { showingOperations = true } label: {
-                Label("Operations", systemImage: "list.bullet.rectangle")
+                OperationsToolbarLabel(runningCount: store.updateExecutionState.activities.count)
             }
-            .help("Show update operations")
+            .help(operationsHelp)
         }
         .sheet(isPresented: $showingOperations) {
             OperationCentreView(execution: store.updateExecutionState).environment(\.upkeepStoreReference, store)
@@ -82,29 +83,13 @@ struct ContentView: View {
                 .interactiveDismissDisabled()
         }
         .task {
-            MenuBarController.shared.configure(store: store, settings: settings)
+            // The menu bar, Dock and notifications reopen this window through it.
+            MainWindow.openAction = openWindow
             if settings.hasCompletedSetup { await store.start() }
-            refreshDockBadge()
-            refreshMenuBar()
         }
         .onChange(of: settings.hasCompletedSetup) { _, completed in
             guard completed else { return }
             Task { await store.start() }
-        }
-        .onChange(of: store.totalUpdateCount, initial: true) { _, _ in
-            refreshDockBadge()
-            refreshMenuBar()
-        }
-        .onChange(of: store.updateCheckState) { _, _ in refreshMenuBar() }
-        .onChange(of: store.lastChecked) { _, _ in refreshMenuBar() }
-        .onChange(of: settings.showMenuBarItem) { _, _ in
-            refreshMenuBar()
-        }
-        .onChange(of: settings.showMenuBarCount) { _, _ in
-            refreshMenuBar()
-        }
-        .onChange(of: settings.showDockBadge) { _, _ in
-            refreshDockBadge()
         }
         .onChange(of: settings.sidebarViewMode) { _, mode in
             if mode == .basic, !basicSidebarDestinations.contains(store.selection) {
@@ -120,34 +105,18 @@ struct ContentView: View {
                 store.navigation.inventoryReveal = nil
             }
             store.completeCVESoftwareNavigation()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            refreshDockBadge()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
-            AppBrand.refreshDockPresentationIfNeeded(
-                updateCount: settings.showDockBadge ? store.totalUpdateCount : 0
-            )
+            store.completePendingUpdateReveal()
         }
         .alert("The operation couldn’t be completed", isPresented: Binding(
             get: { store.errorMessage != nil }, set: { if !$0 { store.errorMessage = nil } }
         )) { Button("OK", role: .cancel) {} } message: { Text(store.errorMessage ?? "Unknown error") }
     }
 
-    private func refreshMenuBar() {
-        MenuBarController.shared.refresh(
-            updateCount: store.totalUpdateCount,
-            showCount: settings.showMenuBarCount,
-            isVisible: settings.showMenuBarItem,
-            state: store.updateCheckState,
-            lastChecked: store.lastChecked
-        )
-    }
-
-    private func refreshDockBadge() {
-        AppBrand.applyDockPresentation(
-            updateCount: settings.showDockBadge ? store.totalUpdateCount : 0
-        )
+    private var operationsHelp: String {
+        let running = store.updateExecutionState.activities.count
+        return running == 0
+            ? "Show update operations"
+            : "Show update operations (\(WorkspaceSummary.count(running, "operation", "operations")) running)"
     }
 
     private var basicSidebarDestinations: Set<SidebarDestination> {
@@ -221,14 +190,9 @@ struct ContentView: View {
                 default: return store.selectedApp != nil
                 }
             },
+            // Details open by selecting an item; the inspector only closes from here.
             set: { isPresented in
-                if !isPresented {
-                    store.selectedApp = nil
-                    store.updateInspectorSelection = nil
-                    store.selectedPackageID = nil
-                    store.selectedDeveloperPackageID = nil
-                    store.selectedLocalModelID = nil
-                }
+                if !isPresented { store.clearInspectorSelection() }
             }
         )
     }
@@ -312,6 +276,28 @@ struct ContentView: View {
         return store.selection == .homebrewApps ? "Homebrew Apps" : store.selection.rawValue
     }
 
+}
+
+private struct OperationsToolbarLabel: View {
+    let runningCount: Int
+
+    var body: some View {
+        Label {
+            Text("Operations")
+        } icon: {
+            Image(systemName: "list.bullet.rectangle")
+                .overlay(alignment: .topTrailing) {
+                    if runningCount > 0 {
+                        Circle()
+                            .fill(Color.accentColor)
+                            .frame(width: 7, height: 7)
+                            .offset(x: 3, y: -3)
+                            .accessibilityHidden(true)
+                    }
+                }
+        }
+        .accessibilityValue(runningCount > 0 ? "\(runningCount) running" : "")
+    }
 }
 
 extension View {

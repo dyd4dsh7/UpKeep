@@ -1,9 +1,14 @@
+import AppKit
+import ServiceManagement
 import SwiftUI
 import UserNotifications
 
 struct SettingsView: View {
     @EnvironmentObject private var settings: AppSettings
     @UpkeepStoreReference private var store
+    @Environment(\.openWindow) private var openWindow
+    @UpkeepState private var notificationsDenied = false
+    @UpkeepState private var confirmingRestoreAll = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -23,6 +28,10 @@ struct SettingsView: View {
         }
         .frame(width: 830, height: 600)
         .upkeepWorkspaceAppearance()
+        .task {
+            MainWindow.openAction = openWindow
+            await syncNotificationAuthorization(requestIfNeeded: false)
+        }
         .onChange(of: visibleSettingsSections, initial: true) { _, sections in
             if !sections.contains(settings.selectedSection) {
                 settings.selectedSection = .general
@@ -106,6 +115,13 @@ struct SettingsView: View {
     private var general: some View {
         Form {
             Section {
+                LoginItemSettingsRow()
+            } header: {
+                Text("Startup")
+            } footer: {
+                Text("Background checks run only while Upkeep is open.")
+            }
+            Section {
                 SettingsOptionRow(title: "Navigation", systemImage: "sidebar.left") {
                     Picker("Navigation", selection: $settings.sidebarViewMode) {
                         ForEach(SidebarViewMode.allCases) { Text($0.title).tag($0) }
@@ -184,8 +200,23 @@ struct SettingsView: View {
                         .labelsHidden()
                 }
                     .onChange(of: settings.notificationsEnabled) { _, enabled in
-                        if enabled { Task { _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) } }
+                        if enabled { Task { await syncNotificationAuthorization(requestIfNeeded: true) } }
                     }
+                if notificationsDenied {
+                    HStack {
+                        Label("Notifications are turned off for Upkeep in System Settings.",
+                              systemImage: "bell.slash")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Open Notification Settings") {
+                            if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }
+                        .buttonStyle(.link)
+                    }
+                }
             } header: {
                 Text("Automatic Checking")
             }
@@ -332,6 +363,20 @@ struct SettingsView: View {
         .formStyle(.grouped)
     }
 
+    /// Reflects the system permission; a denied request turns the toggle back off.
+    private func syncNotificationAuthorization(requestIfNeeded: Bool) async {
+        guard settings.notificationsEnabled, Bundle.main.bundleIdentifier != nil else {
+            notificationsDenied = false
+            return
+        }
+        var status = await NotificationAuthorization.status()
+        if status == .notDetermined, requestIfNeeded {
+            status = await NotificationAuthorization.request()
+        }
+        notificationsDenied = status == .denied
+        if status == .denied { settings.notificationsEnabled = false }
+    }
+
     private var changelog: some View {
         ChangelogView()
     }
@@ -358,7 +403,18 @@ struct SettingsView: View {
                             .font(.callout.weight(.medium))
                         Spacer()
                         Button("Restore All Updates", systemImage: "arrow.uturn.backward") {
-                            store.restoreAllExclusions()
+                            confirmingRestoreAll = true
+                        }
+                        .confirmationDialog(
+                            "Restore all skipped and ignored updates?",
+                            isPresented: $confirmingRestoreAll
+                        ) {
+                            Button("Restore \(WorkspaceSummary.count(settings.updateExclusions.count, "Exclusion", "Exclusions"))",
+                                   role: .destructive) {
+                                store.restoreAllExclusions()
+                            }
+                        } message: {
+                            Text("Every skipped version and ignored app or package will appear in Updates again.")
                         }
                     }
                     .padding(.horizontal, UpkeepLayout.pageInset)
@@ -639,5 +695,63 @@ private struct DeveloperManagerSettingsRow: View {
                 .labelsHidden()
         }
         .padding(.vertical, 4)
+    }
+}
+
+private enum NotificationAuthorization {
+    static func status() async -> UNAuthorizationStatus {
+        await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+    }
+
+    static func request() async -> UNAuthorizationStatus {
+        _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
+        return await status()
+    }
+}
+
+/// "Open at login" through `SMAppService.mainApp`, reflecting the system state.
+private struct LoginItemSettingsRow: View {
+    @UpkeepState private var status = SMAppService.mainApp.status
+    @UpkeepState private var failure: String?
+
+    var body: some View {
+        SettingsOptionRow(
+            title: "Open at login",
+            detail: detail,
+            systemImage: "power",
+            tint: status == .requiresApproval ? .orange : .accentColor
+        ) {
+            HStack(spacing: 8) {
+                if status == .requiresApproval {
+                    Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
+                        .buttonStyle(.link)
+                }
+                Toggle("Open at login", isOn: Binding(
+                    get: { status == .enabled || status == .requiresApproval },
+                    set: setEnabled
+                ))
+                .labelsHidden()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            status = SMAppService.mainApp.status
+        }
+    }
+
+    private var detail: String? {
+        if let failure { return failure }
+        return status == .requiresApproval
+            ? "Allow Upkeep in System Settings › General › Login Items to finish turning this on."
+            : nil
+    }
+
+    private func setEnabled(_ enabled: Bool) {
+        failure = nil
+        do {
+            if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+        } catch {
+            failure = "Couldn’t change the login item: \(error.localizedDescription)"
+        }
+        status = SMAppService.mainApp.status
     }
 }

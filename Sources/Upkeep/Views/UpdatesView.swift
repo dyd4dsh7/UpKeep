@@ -30,6 +30,9 @@ struct UpdatesView: View {
 
     var body: some View {
         let snapshot = listSnapshot
+        // Resolved once per body; rows compare against it instead of each
+        // re-deriving the sorted application list.
+        let selectedID = selectedItemID(in: snapshot)
         ScrollViewReader { proxy in
             ScrollView {
                 // Eager measurement keeps selection from correcting estimated
@@ -41,7 +44,7 @@ struct UpdatesView: View {
                         if snapshot.isEmpty {
                             emptyState
                         } else {
-                            updateGroups(snapshot)
+                            updateGroups(snapshot, selectedID: selectedID)
                         }
                     }
                 }
@@ -54,7 +57,17 @@ struct UpdatesView: View {
             .focused($updatesFocused)
             .focusEffectDisabled()
             .onMoveCommand { direction in
-                moveSelection(direction, snapshot: snapshot, proxy: proxy)
+                moveSelection(direction, snapshot: snapshot, selectedID: selectedID, proxy: proxy)
+            }
+            // Return opens details (selecting the first row if none); ⌘Return
+            // runs the selected row's primary action; Escape closes details.
+            .onKeyPress(.return, phases: .down) { press in
+                handleReturn(press, snapshot: snapshot, selectedID: selectedID, proxy: proxy)
+            }
+            .onKeyPress(.escape) {
+                guard selectedID != nil else { return .ignored }
+                selectedUpdateItemID.wrappedValue = nil
+                return .handled
             }
         }
         .upkeepAnimated(for: snapshot.identity)
@@ -76,13 +89,13 @@ struct UpdatesView: View {
         }
     }
 
-    private func updateGroups(_ snapshot: UpdateListSnapshot) -> some View {
+    private func updateGroups(_ snapshot: UpdateListSnapshot, selectedID: String?) -> some View {
         VStack(spacing: 14) {
             updateSection("Applications", items: snapshot.applications) { update in
-                selectionRow(id: "app:\(update.app.id)") { UpdateCard(update: update) }
+                selectionRow(id: "app:\(update.app.id)", selectedID: selectedID) { UpdateCard(update: update) }
             }
             updateSection("Homebrew Packages", items: snapshot.homebrewPackages) { package in
-                selectionRow(id: UpdateInspectorSelection.homebrew(package.id).listID) {
+                selectionRow(id: UpdateInspectorSelection.homebrew(package.id).listID, selectedID: selectedID) {
                     HomebrewUpdateCard(package: package)
                 }
             }
@@ -90,12 +103,12 @@ struct UpdatesView: View {
                 MacOSUpdateCard(update: update).padding(.horizontal, 8)
             }
             updateSection("Developer Packages", items: snapshot.developerPackages) { package in
-                selectionRow(id: UpdateInspectorSelection.developer(package.id).listID) {
+                selectionRow(id: UpdateInspectorSelection.developer(package.id).listID, selectedID: selectedID) {
                     DeveloperUpdateCard(package: package)
                 }
             }
             updateSection("AI Models", items: snapshot.models) { model in
-                selectionRow(id: UpdateInspectorSelection.model(model.id).listID) {
+                selectionRow(id: UpdateInspectorSelection.model(model.id).listID, selectedID: selectedID) {
                     LocalModelUpdateCard(model: model)
                 }
             }
@@ -128,12 +141,20 @@ struct UpdatesView: View {
         }
     }
 
-    private func selectionRow<Row: View>(id: String, @ViewBuilder content: () -> Row) -> some View {
-        let isSelected = selectedUpdateItemID.wrappedValue == id
+    private func selectionRow<Row: View>(id: String, selectedID: String?, @ViewBuilder content: () -> Row) -> some View {
+        let isSelected = selectedID == id
         return content()
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(isSelected ? Color.accentColor.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 8))
+            .overlay {
+                // The scroll view's own focus ring is disabled; mark the keyboard row instead.
+                if isSelected && updatesFocused {
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(Color.accentColor, lineWidth: 2)
+                        .allowsHitTesting(false)
+                }
+            }
             .contentShape(Rectangle())
             .onTapGesture {
                 selectedUpdateItemID.wrappedValue = id
@@ -148,18 +169,55 @@ struct UpdatesView: View {
             .id(id)
     }
 
-    private func moveSelection(_ direction: MoveCommandDirection, snapshot: UpdateListSnapshot, proxy: ScrollViewProxy) {
+    private func moveSelection(_ direction: MoveCommandDirection, snapshot: UpdateListSnapshot, selectedID: String?, proxy: ScrollViewProxy) {
         guard direction == .up || direction == .down else { return }
         let ids = snapshot.applications.map { "app:\($0.app.id)" }
             + snapshot.homebrewPackages.map { UpdateInspectorSelection.homebrew($0.id).listID }
             + snapshot.developerPackages.map { UpdateInspectorSelection.developer($0.id).listID }
             + snapshot.models.map { UpdateInspectorSelection.model($0.id).listID }
         guard !ids.isEmpty else { return }
-        let current = selectedUpdateItemID.wrappedValue.flatMap { ids.firstIndex(of: $0) }
+        let current = selectedID.flatMap { ids.firstIndex(of: $0) }
         let next = current.map { min(max(0, $0 + (direction == .down ? 1 : -1)), ids.count - 1) }
             ?? (direction == .down ? 0 : ids.count - 1)
         selectedUpdateItemID.wrappedValue = ids[next]
         proxy.scrollTo(ids[next])
+    }
+
+    private func keyboardRowIDs(_ snapshot: UpdateListSnapshot) -> [String] {
+        snapshot.applications.map { "app:\($0.app.id)" }
+            + snapshot.homebrewPackages.map { UpdateInspectorSelection.homebrew($0.id).listID }
+            + snapshot.developerPackages.map { UpdateInspectorSelection.developer($0.id).listID }
+            + snapshot.models.map { UpdateInspectorSelection.model($0.id).listID }
+    }
+
+    private func handleReturn(_ press: KeyPress, snapshot: UpdateListSnapshot, selectedID: String?,
+                              proxy: ScrollViewProxy) -> KeyPress.Result {
+        guard let selectedID else {
+            guard let first = keyboardRowIDs(snapshot).first else { return .ignored }
+            selectedUpdateItemID.wrappedValue = first
+            proxy.scrollTo(first)
+            return .handled
+        }
+        guard press.modifiers.contains(.command) else { return .handled }
+        performPrimaryAction(for: selectedID, in: snapshot)
+        return .handled
+    }
+
+    /// Same action as the row's primary button, including its confirmations.
+    private func performPrimaryAction(for id: String, in snapshot: UpdateListSnapshot) {
+        if let update = snapshot.applications.first(where: { "app:\($0.app.id)" == id }) {
+            guard !store.isUpdating(update) else { return }
+            Task { await store.performUpdate(update) }
+        } else if let package = snapshot.homebrewPackages.first(where: { UpdateInspectorSelection.homebrew($0.id).listID == id }) {
+            guard !store.isWorking(.homebrewPackage(package.id)) else { return }
+            Task { await store.updatePackage(package) }
+        } else if let package = snapshot.developerPackages.first(where: { UpdateInspectorSelection.developer($0.id).listID == id }) {
+            guard !store.isWorking(.developerPackage(package.id)) else { return }
+            Task { await store.updateDeveloperPackage(package) }
+        } else if let model = snapshot.models.first(where: { UpdateInspectorSelection.model($0.id).listID == id }) {
+            guard !store.isWorking(.localModel(model.id)) else { return }
+            Task { await store.updateLocalModel(model) }
+        }
     }
 
     @ToolbarContentBuilder private var listToolbar: some ToolbarContent {
@@ -224,15 +282,18 @@ struct UpdatesView: View {
         }
     }
 
+    /// The selected row's list ID, resolved against an already built snapshot.
+    private func selectedItemID(in snapshot: UpdateListSnapshot) -> String? {
+        if let selected = store.selectedApp,
+           snapshot.applications.contains(where: { $0.app.id == selected.id }) {
+            return "app:\(selected.id)"
+        }
+        return store.updateInspectorSelection?.listID
+    }
+
     private var selectedUpdateItemID: Binding<String?> {
         Binding(
-            get: {
-                if let selected = store.selectedApp,
-                   appUpdates.contains(where: { $0.app.id == selected.id }) {
-                    return "app:\(selected.id)"
-                }
-                return store.updateInspectorSelection?.listID
-            },
+            get: { selectedItemID(in: listSnapshot) },
             set: { identifier in
                 guard let identifier else {
                     store.selectedApp = nil
@@ -269,7 +330,17 @@ struct UpdatesView: View {
 
     private var appUpdates: [AvailableUpdate] {
         guard viewState.filter == .all || viewState.filter == .applications else { return [] }
-        return store.filteredUpdates.sorted { compareUpdates($0, $1) }
+        let updates = store.filteredUpdates
+        guard viewState.sortOrder == .recommended else { return updates.sorted { compareUpdates($0, $1) } }
+        // Decorate-sort-undecorate: the risk group is derived once per update
+        // instead of twice per comparison.
+        return updates
+            .map { (update: $0, risk: BatchUpdateItem.application($0).riskGroup.rawValue) }
+            .sorted { left, right in
+                if left.risk != right.risk { return left.risk < right.risk }
+                return left.update.app.name.localizedStandardCompare(right.update.app.name) == .orderedAscending
+            }
+            .map(\.update)
     }
 
     private var listSnapshot: UpdateListSnapshot {

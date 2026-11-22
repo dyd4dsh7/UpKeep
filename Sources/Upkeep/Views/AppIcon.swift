@@ -7,7 +7,7 @@ struct AppIcon: View {
     @UpkeepState private var image: NSImage?
 
     var body: some View {
-        let identity = AppIconIdentity(url: url)
+        let identity = AppIconIdentityCache.shared.identity(for: url)
         Group {
             if let image {
                 Image(nsImage: image).resizable().scaledToFit()

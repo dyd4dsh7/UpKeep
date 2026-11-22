@@ -7,7 +7,11 @@ struct AdoptableView: View {
     var body: some View {
         let adoptableApps = sortedAdoptableApps
         VStack(spacing: 0) {
-            if adoptableApps.isEmpty {
+            if adoptableApps.isEmpty, store.isScanning {
+                WorkspaceScanningState(title: "Matching apps with Homebrew…",
+                                       detail: "Adoptable apps appear here when the check finishes.")
+                    .upkeepStateTransition()
+            } else if adoptableApps.isEmpty {
                 WorkspaceEmptyState(
                     "No adoptable apps",
                     systemImage: "shippingbox",

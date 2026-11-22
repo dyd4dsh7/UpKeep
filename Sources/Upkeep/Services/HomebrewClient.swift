@@ -577,7 +577,7 @@ private func packages(from response: InfoResponse, includePrereleases: Bool) -> 
             installedVersion: installed.version,
             currentVersion: current,
             kind: .formula,
-            isOutdated: formula.outdated && (includePrereleases || !VersionComparator.isPrerelease(current)),
+            isOutdated: formula.outdated && (includePrereleases || !VersionComparator.isHomebrewPrerelease(current)),
             isDependency: !installed.installedOnRequest,
             dependencies: formula.dependencies,
             versionScheme: formula.versionScheme ?? 0, tap: formula.tap
@@ -594,7 +594,7 @@ private func packages(from response: InfoResponse, includePrereleases: Bool) -> 
             installedVersion: installed,
             currentVersion: cask.version,
             kind: .cask,
-            isOutdated: cask.outdated && (includePrereleases || !VersionComparator.isPrerelease(cask.version)),
+            isOutdated: cask.outdated && (includePrereleases || !VersionComparator.isHomebrewPrerelease(cask.version)),
             isDependency: false,
             dependencies: [], tap: cask.tap
         )

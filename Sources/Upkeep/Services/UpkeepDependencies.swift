@@ -57,6 +57,24 @@ extension MacOSUpdateScanning {
 
 protocol AppStoreUpdateChecking: Sendable {
     func update(for app: InstalledApp) async throws -> AvailableUpdate?
+    /// Batched check keyed by `InstalledApp.id`; every requested app has an entry.
+    func updates(for apps: [InstalledApp]) async -> [String: Result<AvailableUpdate?, any Error>]
+}
+
+extension AppStoreUpdateChecking {
+    func updates(for apps: [InstalledApp]) async -> [String: Result<AvailableUpdate?, any Error>] {
+        await withTaskGroup(of: (String, Result<AvailableUpdate?, any Error>).self) { group in
+            for app in apps {
+                group.addTask {
+                    do { return (app.id, .success(try await update(for: app))) }
+                    catch { return (app.id, .failure(error)) }
+                }
+            }
+            var outcomes: [String: Result<AvailableUpdate?, any Error>] = [:]
+            for await (id, outcome) in group { outcomes[id] = outcome }
+            return outcomes
+        }
+    }
 }
 
 protocol SparkleUpdateChecking: Sendable {

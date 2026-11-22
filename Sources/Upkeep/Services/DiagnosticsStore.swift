@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 func formattedDiagnosticDuration(since date: Date, now: Date = Date()) -> String {
@@ -134,8 +135,9 @@ enum DiagnosticRedactor {
     }
 }
 
-// SAFETY: Every access to cachedEntries and persistence is serialized by lock;
-// fileURL is immutable after initialization.
+// SAFETY: Every access to cachedEntries and persistScheduled is serialized by
+// lock; fileURL and persistenceQueue are immutable after initialization. File
+// writes are serialized on persistenceQueue.
 final class DiagnosticsStore: @unchecked Sendable {
     // Only the packaged app owns the user's persistent diagnostics. SwiftPM
     // tests and standalone review harnesses must not write fixture failures to it.
@@ -143,15 +145,30 @@ final class DiagnosticsStore: @unchecked Sendable {
         persistent: Bundle.main.bundleIdentifier == InstalledApp.upkeepBundleIdentifier
     )
     private static let maximumEntries = 2_000
+    /// Persisted records within this window are coalesced into one write.
+    static let persistenceDelay: TimeInterval = 1
 
     private let lock = NSLock()
     private let fileURL: URL?
+    private let persistenceQueue = DispatchQueue(label: "Upkeep.DiagnosticsStore.persistence", qos: .utility)
+    /// Ascending by date; maintained on insert so reads never sort.
     private var cachedEntries: [DiagnosticEntry]
+    private var persistScheduled = false
+    private var terminationObserver: NSObjectProtocol?
 
     init(fileURL: URL? = nil, persistent: Bool = true) {
         let resolvedURL = persistent ? (fileURL ?? Self.defaultFileURL()) : nil
         self.fileURL = resolvedURL
         self.cachedEntries = resolvedURL.map(Self.load(from:)) ?? []
+        if resolvedURL != nil {
+            terminationObserver = NotificationCenter.default.addObserver(
+                forName: NSApplication.willTerminateNotification, object: nil, queue: nil
+            ) { [weak self] _ in self?.flush() }
+        }
+    }
+
+    deinit {
+        if let terminationObserver { NotificationCenter.default.removeObserver(terminationObserver) }
     }
 
     func record(
@@ -172,17 +189,24 @@ final class DiagnosticsStore: @unchecked Sendable {
         append(DiagnosticEntry(level: level, category: category, message: message, metadata: metadata), persist: false)
     }
 
+    /// Newest first.
     func entries() -> [DiagnosticEntry] {
         lock.lock()
         defer { lock.unlock() }
-        return cachedEntries.sorted { $0.date > $1.date }
+        return cachedEntries.reversed()
     }
 
     func clear() {
         lock.lock()
         cachedEntries.removeAll()
-        persistLocked()
         lock.unlock()
+        flush()
+    }
+
+    /// Writes the current entries now, on the persistence queue, and waits.
+    func flush() {
+        guard fileURL != nil else { return }
+        persistenceQueue.sync { writeCurrentEntries() }
     }
 
     func exportText() -> String {
@@ -207,8 +231,15 @@ final class DiagnosticsStore: @unchecked Sendable {
         return lines.joined(separator: "\n") + "\n"
     }
 
-    private func persistLocked() {
+    /// Runs on persistenceQueue. Snapshots under the lock, encodes and writes outside it.
+    private func writeCurrentEntries(onlyIfScheduled: Bool = false) {
         guard let fileURL else { return }
+        lock.lock()
+        // A flush may already have written everything this write was scheduled for.
+        if onlyIfScheduled && !persistScheduled { lock.unlock(); return }
+        let snapshot = cachedEntries
+        persistScheduled = false
+        lock.unlock()
         do {
             try FileManager.default.createDirectory(
                 at: fileURL.deletingLastPathComponent(),
@@ -217,7 +248,7 @@ final class DiagnosticsStore: @unchecked Sendable {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
             encoder.outputFormatting = [.sortedKeys]
-            try encoder.encode(cachedEntries).write(to: fileURL, options: .atomic)
+            try encoder.encode(snapshot).write(to: fileURL, options: .atomic)
         } catch {
             // Diagnostics must never interrupt update checks or update operations.
         }
@@ -225,12 +256,28 @@ final class DiagnosticsStore: @unchecked Sendable {
 
     private func append(_ entry: DiagnosticEntry, persist: Bool) {
         lock.lock()
-        cachedEntries.append(entry)
+        if let last = cachedEntries.last, entry.date < last.date {
+            // Upper bound keeps insertion order among equal dates.
+            var low = 0, high = cachedEntries.count
+            while low < high {
+                let mid = (low + high) / 2
+                if entry.date < cachedEntries[mid].date { high = mid } else { low = mid + 1 }
+            }
+            cachedEntries.insert(entry, at: low)
+        } else {
+            cachedEntries.append(entry)
+        }
         if cachedEntries.count > Self.maximumEntries {
             cachedEntries.removeFirst(cachedEntries.count - Self.maximumEntries)
         }
-        if persist { persistLocked() }
+        let schedule = persist && fileURL != nil && !persistScheduled
+        if schedule { persistScheduled = true }
         lock.unlock()
+        if schedule {
+            persistenceQueue.asyncAfter(deadline: .now() + Self.persistenceDelay) { [weak self] in
+                self?.writeCurrentEntries(onlyIfScheduled: true)
+            }
+        }
     }
 
     private static func load(from url: URL) -> [DiagnosticEntry] {
@@ -238,7 +285,11 @@ final class DiagnosticsStore: @unchecked Sendable {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let decoded = (try? decoder.decode([DiagnosticEntry].self, from: data)) ?? []
-        return decoded.suffix(maximumEntries).map {
+        // Stable ascending order by date, as maintained by `append`.
+        let ordered = decoded.enumerated().sorted {
+            $0.element.date != $1.element.date ? $0.element.date < $1.element.date : $0.offset < $1.offset
+        }.map(\.element)
+        return ordered.suffix(maximumEntries).map {
             DiagnosticEntry(
                 id: $0.id,
                 date: $0.date,

@@ -210,6 +210,8 @@ final class UpkeepNavigationState: ObservableObject {
     var pendingRunningAppConfirmation: RunningAppConfirmation? { willSet { objectWillChange.send() } }
     var pendingHomebrewAuthorizationConfirmation: HomebrewAuthorizationConfirmation? { willSet { objectWillChange.send() } }
     var isShowingBatchReview = false { willSet { objectWillChange.send() } }
+    /// Applied after a destination change clears the previous inspector selection.
+    @ObservationIgnored var pendingUpdateReveal: PendingUpdateTarget?
 }
 
 @MainActor
@@ -246,6 +248,8 @@ final class UpkeepUpdateExecutionState: ObservableObject {
     private(set) var activities: [OperationID: UpdateActivity] = [:] { willSet { objectWillChange.send() } }
     private(set) var completedOperations: [CompletedOperation] = [] { willSet { objectWillChange.send() } }
     var batchUpdateProgress: BatchUpdateProgress? { willSet { objectWillChange.send() } }
+    /// Checked between batch items; never interrupts an install in progress.
+    var isBatchStopRequested = false { willSet { objectWillChange.send() } }
     var appManagementPermissionCheck: AppManagementPermissionCheck? { willSet { objectWillChange.send() } }
     var runningBundleIdentifiers = Set<String>() { willSet { objectWillChange.send() } }
     var runningApplicationPaths = Set<String>() { willSet { objectWillChange.send() } }
