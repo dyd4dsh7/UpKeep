@@ -50,6 +50,8 @@ enum ReleaseNotesHTML {
                 writer.text(line + "\n")
                 continue
             }
+            // Table rows must stay on one line, so `<br>` and block tags become spaces.
+            writer.isInTableRow = trimmed.hasPrefix("|")
             var index = line.startIndex
             for match in line.matches(of: /(`+[^`]*`+)|<(\/?)([a-zA-Z][a-zA-Z0-9]*)([^>]*)>/) {
                 writer.text(String(line[index..<match.range.lowerBound]))
@@ -126,6 +128,7 @@ enum ReleaseNotesHTML {
         /// Markdown mode: text between tags is already Markdown, so it is kept verbatim
         /// instead of being whitespace-collapsed, entity-decoded, and escaped.
         let preservesText: Bool
+        var isInTableRow = false
         private var output = ""
         private var atLineStart = true
         /// Set after a tag ends a line, so the source line's own newline is not added too.
@@ -173,6 +176,16 @@ enum ReleaseNotesHTML {
             guard ReleaseNotesHTML.htmlTagNames.contains(name) else {
                 if preservesText { text(original) }
                 return
+            }
+            if isInTableRow {
+                switch name {
+                case "b", "strong", "i", "em", "a": break
+                case "br", "p", "div", "li", "hr":
+                    text(" ")
+                    return
+                default:
+                    return
+                }
             }
             switch name {
             case "h1", "h2", "h3", "h4", "h5", "h6":

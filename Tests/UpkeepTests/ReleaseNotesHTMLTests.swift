@@ -150,3 +150,9 @@ private func rendered(_ html: String) -> String {
     #expect(ReleaseNotesHTML.isHTML(body))
     #expect(ReleaseNotesHTML.markdown(fromMarkdownWithHTML: body) == "# Changelog\n\n**Changelog**\n\n- One")
 }
+
+@Test func githubTableRowsKeepLineBreakTagsOnOneLine() {
+    let body = "| Platform | Notes |\n|---|---|\n| Mac | Fast<br>Native |\n\nDone<br>"
+    #expect(ReleaseNotesHTML.markdown(fromMarkdownWithHTML: body)
+        == "| Platform | Notes |\n|---|---|\n| Mac | Fast Native |\n\nDone")
+}

@@ -51,3 +51,36 @@ import Testing
     let codeRuns = text.runs.filter { $0.inlinePresentationIntent?.contains(.code) == true }
     #expect(codeRuns.map { String(text[$0.range].characters) }.joined() == "# not a heading- not a bullet")
 }
+
+@Test func releaseNotesQuoteBlocksGetABarAndKeepTheirFormatting() {
+    let text = ReleaseNotesFormatter.attributedString(from: "> ## Heads up\n> Read this.\n>\n> - item\n> > deeper")
+    #expect(String(text.characters) == "▎ Heads up\n▎ Read this.\n▎\n▎ • item\n▎ ▎ deeper")
+}
+
+@Test func releaseNotesGitHubAlertsBecomeBoldTitles() {
+    let text = ReleaseNotesFormatter.attributedString(from: "> [!WARNING]\n> Back up first.")
+    #expect(String(text.characters) == "▎ Warning\n▎ Back up first.")
+    let boldText = text.runs
+        .filter { $0.inlinePresentationIntent?.contains(.stronglyEmphasized) == true }
+        .map { String(text[$0.range].characters) }
+        .joined()
+    #expect(boldText == "Warning")
+}
+
+@Test func releaseNotesTableRowsBecomeLabelledBullets() throws {
+    let notes = """
+    | Arch | Mac | Linux |
+    |------|:---:|-------|
+    | arm64 | [DMG](https://example.com/a.dmg) | |
+    | x86 \\| 64 | `a|b` | Tar   Zip |
+    After
+    """
+    let text = ReleaseNotesFormatter.attributedString(from: notes)
+    #expect(String(text.characters) == "• arm64 · Mac: DMG\n• x86 | 64 · Mac: a|b · Linux: Tar Zip\nAfter")
+    #expect(text.runs.compactMap(\.link) == [try #require(URL(string: "https://example.com/a.dmg"))])
+}
+
+@Test func releaseNotesPipesWithoutADelimiterRowAreNotATable() {
+    let text = ReleaseNotesFormatter.attributedString(from: "Use a | b\nfor pipes")
+    #expect(String(text.characters) == "Use a | b\nfor pipes")
+}
