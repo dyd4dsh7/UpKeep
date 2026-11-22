@@ -651,7 +651,9 @@ struct AppDetailView: View {
                 }
                 VStack(alignment: .leading, spacing: 8) {
                     let notes = update.releaseNotes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                    Text(notes.isEmpty ? "No release notes available" : notes)
+                    Text(notes.isEmpty
+                         ? AttributedString("No release notes available")
+                         : ReleaseNotesFormatter.attributedString(from: notes))
                         .lineLimit(showsFullReleaseNotes ? nil : 10)
                         .font(.callout)
                         .lineSpacing(3)

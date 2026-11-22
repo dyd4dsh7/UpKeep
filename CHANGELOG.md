@@ -4,6 +4,8 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+- Release notes in **What’s New** now render Markdown: headings show as bold text and list items as bullets instead of raw `#` and `-` markers. Only web links in release notes are clickable.
+
 ## 0.25.6 — 2026-11-22
 
 - Documented Upkeep's own update checks and its on-disk caches in the privacy policy (PRIVACY.md).
