@@ -7,8 +7,24 @@ enum ReleaseNotesFormatter {
     static func attributedString(from notes: String) -> AttributedString {
         var lines: [AttributedString] = []
         var previousWasBlank = true
-        for rawLine in notes.components(separatedBy: .newlines) {
+        var fence: String?
+        // Split on Characters so a CRLF (as GitHub sends) is one line break, not two.
+        for rawSubstring in notes.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline) {
+            let rawLine = String(rawSubstring)
             let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if let open = fence {
+                if line.hasPrefix(open) {
+                    fence = nil
+                } else {
+                    lines.append(code(rawLine))
+                    previousWasBlank = false
+                }
+                continue
+            }
+            if let marker = line.prefixMatch(of: /`{3,}|~{3,}/) {
+                fence = String(marker.output)
+                continue
+            }
             if line.isEmpty || isHorizontalRule(line) {
                 if !previousWasBlank { lines.append(AttributedString()) }
                 previousWasBlank = true
@@ -69,6 +85,13 @@ enum ReleaseNotesFormatter {
             }
         }
         return parsed
+    }
+
+    /// Fenced code is shown as written, in the code font, without Markdown parsing.
+    private static func code(_ line: String) -> AttributedString {
+        var text = AttributedString(line)
+        text.inlinePresentationIntent = .code
+        return text
     }
 
     private static func bold(_ text: AttributedString) -> AttributedString {

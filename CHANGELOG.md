@@ -4,6 +4,7 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+- GitHub release notes keep their structure in **What’s New**: HTML inside the Markdown (collapsible `<details>` sections, `<br>`, images, and links) is converted instead of shown as raw tags, release notes from the GitHub Atom fallback keep their headings and lists, fenced code blocks show as code without their ``` markers, and Windows line endings no longer add a blank line after every line.
 - Added **Check for Upkeep updates** in Settings › General to turn off Upkeep's automatic update check; **Check for Upkeep Updates…** still works. The privacy policy now lists Google's Chrome version service and the caches left behind when removing Upkeep.
 - Sparkle release notes written in HTML keep their structure in **What’s New**: headings, paragraphs, line breaks, bulleted and numbered lists, bold and italic text, and web links are converted instead of running together when tags are removed. Feeds that declare Markdown notes are shown as written.
 - Fixed the app details for TestFlight, Setapp, and other externally managed apps repeating the same explanation twice under **Managed by**.

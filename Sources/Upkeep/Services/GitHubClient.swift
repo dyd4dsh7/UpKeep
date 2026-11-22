@@ -51,7 +51,7 @@ struct GitHubClient: Sendable {
                 app: app,
                 availableVersion: version,
                 source: .github,
-                releaseNotes: release.body,
+                releaseNotes: release.body.map(ReleaseNotesHTML.markdown(fromMarkdownWithHTML:)),
                 actionURL: Self.installableAsset(in: release, for: app)?.downloadURL
                     ?? URL(string: release.htmlUrl),
                 homebrewToken: nil,

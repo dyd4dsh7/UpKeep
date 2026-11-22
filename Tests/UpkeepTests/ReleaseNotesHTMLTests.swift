@@ -88,3 +88,65 @@ private func rendered(_ html: String) -> String {
     #expect(try notes("<description sparkle:format=\"markdown\"><![CDATA[# Fixes\n\n- One <b>raw</b>]]></description>")
         == "# Fixes\n\n- One <b>raw</b>")
 }
+
+@Test func githubMarkdownWithHTMLConvertsTagsAndKeepsMarkdown() {
+    let body = "## Changes\r\n\r\n- Fix <b>sync</b><br>\r\n  on Wi-Fi\r\n- Faster `<br>` parsing\r\n\r\n"
+        + "<details>\r\n<summary>Full log</summary>\r\n\r\n* one\r\n* two\r\n</details>\r\n\r\n"
+        + "<p align=\"center\"><img src=\"https://example.com/x.png\" width=\"200\"></p>\r\n"
+        + "See <https://example.com> and <a href=\"https://example.com/pr/1\">#1</a>."
+    #expect(ReleaseNotesHTML.markdown(fromMarkdownWithHTML: body) == """
+    ## Changes
+
+    - Fix **sync**
+      on Wi-Fi
+    - Faster `<br>` parsing
+
+    **Full log**
+
+    * one
+    * two
+
+    See <https://example.com> and [#1](<https://example.com/pr/1>).
+    """)
+}
+
+@Test func githubMarkdownWithHTMLLeavesFencedCodeAlone() {
+    let body = "<p>Example:</p>\n\n```html\n<div>kept</div>\n```\nDone<br>"
+    #expect(ReleaseNotesHTML.markdown(fromMarkdownWithHTML: body)
+        == "Example:\n\n```html\n<div>kept</div>\n```\nDone")
+}
+
+@Test func githubMarkdownWithoutHTMLIsUnchanged() {
+    let body = "## Fixes\r\n\r\n- See <https://example.com>\r\n- 2 < 3"
+    #expect(ReleaseNotesHTML.markdown(fromMarkdownWithHTML: body) == body)
+}
+
+@Test func releaseNotesTreatCRLFAsOneLineBreak() {
+    let text = ReleaseNotesFormatter.attributedString(from: "## Fixes\r\n\r\n- One\r\n- Two")
+    #expect(String(text.characters) == "Fixes\n\n• One\n• Two")
+}
+
+@Test func githubAtomContentKeepsReleaseStructure() throws {
+    let xml = """
+    <?xml version="1.0" encoding="UTF-8"?>
+    <feed xmlns="http://www.w3.org/2005/Atom">
+      <entry>
+        <link rel="alternate" type="text/html" href="https://github.com/owner/app/releases/tag/v2.0"/>
+        <title>v2.0</title>
+        <content type="html">&lt;h2&gt;Fixes&lt;/h2&gt;
+    &lt;ul&gt;
+    &lt;li&gt;One&lt;/li&gt;
+    &lt;li&gt;Two &amp;amp; three&lt;/li&gt;
+    &lt;/ul&gt;</content>
+      </entry>
+    </feed>
+    """
+    let entries = try GitHubAtomClient.entries(data: try #require(xml.data(using: .utf8)))
+    #expect(entries.first?.content == "## Fixes\n\n- One\n- Two & three")
+}
+
+@Test func detailsAloneCountsAsHTML() {
+    let body = "# Changelog\r\n <details>\r\n <summary>Changelog</summary>\r\n\r\n- One\r\n</details>"
+    #expect(ReleaseNotesHTML.isHTML(body))
+    #expect(ReleaseNotesHTML.markdown(fromMarkdownWithHTML: body) == "# Changelog\n\n**Changelog**\n\n- One")
+}

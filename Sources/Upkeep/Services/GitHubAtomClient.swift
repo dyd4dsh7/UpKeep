@@ -83,11 +83,8 @@ private final class GitHubAtomParser: XMLTextParser {
         if elementName == "title" {
             title = text
         } else if elementName == "content" {
-            content = text.replacingOccurrences(
-                of: "<[^>]+>",
-                with: "",
-                options: .regularExpression
-            )
+            // Atom content is GitHub's rendered HTML, not the release's Markdown.
+            content = ReleaseNotesHTML.markdown(fromHTML: text)
         } else if elementName == "entry" {
             guard entries.count < Self.maximumEntries else {
                 parser.abortParsing()

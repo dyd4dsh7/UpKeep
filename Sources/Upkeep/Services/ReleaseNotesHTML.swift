@@ -7,30 +7,85 @@ enum ReleaseNotesHTML {
     /// True when the text contains common HTML tags. Plain text and Markdown (including
     /// `<https://…>` autolinks) are left alone.
     static func isHTML(_ text: String) -> Bool {
-        let knownTag = /<\/?(?:p|br|hr|ul|ol|li|h[1-6]|div|span|b|strong|i|em|a|code|pre|blockquote|table|tr|td|th|section|font|small|img)\b[^>]*>/
-            .ignoresCase()
-        return text.contains(knownTag)
+        text.matches(of: /<\/?([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>/).contains {
+            htmlTagNames.contains($0.output.1.lowercased())
+        }
     }
 
     static func markdown(fromHTML html: String) -> String {
-        let source = html
-            .replacing(/<!--[\s\S]*?-->/, with: "")
-            .replacing(/<script\b[^>]*>[\s\S]*?<\/script\s*>/.ignoresCase(), with: "")
-            .replacing(/<style\b[^>]*>[\s\S]*?<\/style\s*>/.ignoresCase(), with: "")
-        var writer = Writer()
+        let source = removingHiddenContent(html)
+        var writer = Writer(preservesText: false)
         var index = source.startIndex
         for match in source.matches(of: /<(\/?)([a-zA-Z][a-zA-Z0-9]*)([^>]*)>/) {
             writer.text(String(source[index..<match.range.lowerBound]))
             writer.tag(
                 name: match.output.2.lowercased(),
                 isClosing: !match.output.1.isEmpty,
-                attributes: String(match.output.3)
+                attributes: String(match.output.3),
+                original: String(match.output.0)
             )
             index = match.range.upperBound
         }
         writer.text(String(source[index...]))
         return writer.result
     }
+
+    /// GitHub release bodies are Markdown that may embed HTML such as `<details>`,
+    /// `<br>`, or `<img>`. Converts those tags and leaves the Markdown, code spans,
+    /// fenced code blocks, and autolinks such as `<https://…>` as written.
+    static func markdown(fromMarkdownWithHTML text: String) -> String {
+        guard isHTML(text) else { return text }
+        let source = removingHiddenContent(text)
+        var writer = Writer(preservesText: true)
+        var fence: Substring?
+        for line in source.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline) {
+            let trimmed = line.drop { $0 == " " || $0 == "\t" }
+            if let open = fence {
+                if trimmed.hasPrefix(open) { fence = nil }
+                writer.text(line + "\n")
+                continue
+            }
+            if let marker = trimmed.prefixMatch(of: /`{3,}|~{3,}/) {
+                fence = marker.output
+                writer.text(line + "\n")
+                continue
+            }
+            var index = line.startIndex
+            for match in line.matches(of: /(`+[^`]*`+)|<(\/?)([a-zA-Z][a-zA-Z0-9]*)([^>]*)>/) {
+                writer.text(String(line[index..<match.range.lowerBound]))
+                if match.output.1 != nil {
+                    writer.text(String(match.output.0))
+                } else if let name = match.output.3 {
+                    writer.tag(
+                        name: name.lowercased(),
+                        isClosing: match.output.2?.isEmpty == false,
+                        attributes: String(match.output.4 ?? ""),
+                        original: String(match.output.0)
+                    )
+                }
+                index = match.range.upperBound
+            }
+            writer.text(String(line[index...]) + "\n")
+        }
+        return writer.result
+    }
+
+    private static func removingHiddenContent(_ text: String) -> String {
+        text
+            .replacing(/<!--[\s\S]*?-->/, with: "")
+            .replacing(/<script\b[^>]*>[\s\S]*?<\/script\s*>/.ignoresCase(), with: "")
+            .replacing(/<style\b[^>]*>[\s\S]*?<\/style\s*>/.ignoresCase(), with: "")
+    }
+
+    /// Tags that are dropped (or converted) rather than kept as text. Anything else in
+    /// angle brackets, such as a Markdown autolink, is kept when text is preserved.
+    private static let htmlTagNames: Set<String> = [
+        "a", "abbr", "b", "blockquote", "br", "center", "code", "dd", "del", "details", "div",
+        "dl", "dt", "em", "font", "footer", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hr",
+        "i", "img", "ins", "kbd", "li", "mark", "ol", "p", "picture", "pre", "s", "section",
+        "small", "source", "span", "strike", "strong", "sub", "summary", "sup", "table",
+        "tbody", "td", "tfoot", "th", "thead", "tr", "u", "ul", "video"
+    ]
 
     static func decodeEntities(_ text: String) -> String {
         guard text.contains("&") else { return text }
@@ -68,8 +123,13 @@ enum ReleaseNotesHTML {
             var isOpen = false
         }
 
+        /// Markdown mode: text between tags is already Markdown, so it is kept verbatim
+        /// instead of being whitespace-collapsed, entity-decoded, and escaped.
+        let preservesText: Bool
         private var output = ""
         private var atLineStart = true
+        /// Set after a tag ends a line, so the source line's own newline is not added too.
+        private var tagEndedLine = false
         private var inlineMarkers: [InlineMarker] = []
         private var lists: [ListKind] = []
         private var links: [String?] = []
@@ -81,12 +141,23 @@ enum ReleaseNotesHTML {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
+        init(preservesText: Bool) {
+            self.preservesText = preservesText
+        }
+
         mutating func text(_ raw: String) {
-            let collapsed = raw.replacing(/\s+/, with: " ")
-            var text = Self.escapeMarkdown(ReleaseNotesHTML.decodeEntities(collapsed))
-            if atLineStart { text = String(text.drop { $0 == " " }) }
+            var text = raw
+            if preservesText, tagEndedLine {
+                text = String(text.drop { $0.isNewline })
+            }
+            if !preservesText {
+                let collapsed = raw.replacing(/\s+/, with: " ")
+                text = Self.escapeMarkdown(ReleaseNotesHTML.decodeEntities(collapsed))
+                if atLineStart { text = String(text.drop { $0 == " " }) }
+            }
             guard !text.isEmpty else { return }
-            let leading = text.prefix { $0 == " " }
+            tagEndedLine = false
+            let leading = text.prefix { $0.isWhitespace }
             let visible = text.dropFirst(leading.count)
             output += leading
             guard !visible.isEmpty else { return }
@@ -95,10 +166,14 @@ enum ReleaseNotesHTML {
                 inlineMarkers[index].isOpen = true
             }
             output += visible
-            atLineStart = false
+            atLineStart = output.last?.isNewline == true
         }
 
-        mutating func tag(name: String, isClosing: Bool, attributes: String) {
+        mutating func tag(name: String, isClosing: Bool, attributes: String, original: String) {
+            guard ReleaseNotesHTML.htmlTagNames.contains(name) else {
+                if preservesText { text(original) }
+                return
+            }
             switch name {
             case "h1", "h2", "h3", "h4", "h5", "h6":
                 breakLines(2)
@@ -107,12 +182,25 @@ enum ReleaseNotesHTML {
                 }
             case "p", "blockquote", "pre", "table":
                 breakLines(2)
-            case "div", "section", "header", "footer", "tr", "dl", "dt", "dd":
+            case "div", "section", "header", "footer", "tr", "dl", "dt", "dd", "center":
                 breakLines(1)
+            case "details":
+                breakLines(2)
+            case "summary":
+                if isClosing {
+                    closeInline("b")
+                    breakLines(2)
+                } else {
+                    breakLines(2)
+                    openInline("b", opening: "**", closing: "**")
+                }
+            case "td", "th":
+                if isClosing { output += " " }
             case "br":
                 closeOpenMarkersForLineBreak()
                 output += "\n"
                 atLineStart = true
+                tagEndedLine = true
             case "hr":
                 breakLines(2)
                 output += "---"
@@ -187,6 +275,7 @@ enum ReleaseNotesHTML {
             let existing = output.reversed().prefix { $0 == "\n" }.count
             if existing < count { output += String(repeating: "\n", count: count - existing) }
             atLineStart = true
+            tagEndedLine = true
         }
 
         private mutating func trimTrailingSpaces() {

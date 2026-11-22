@@ -44,3 +44,10 @@ import Testing
     let notes = "Bug fixes and performance improvements.\nVersion 2 adds sync."
     #expect(String(ReleaseNotesFormatter.attributedString(from: notes).characters) == notes)
 }
+
+@Test func releaseNotesShowFencedCodeWithoutFencesOrMarkdown() {
+    let text = ReleaseNotesFormatter.attributedString(from: "Audit:\n\n```text\n# not a heading\n- not a bullet\n```\nDone")
+    #expect(String(text.characters) == "Audit:\n\n# not a heading\n- not a bullet\nDone")
+    let codeRuns = text.runs.filter { $0.inlinePresentationIntent?.contains(.code) == true }
+    #expect(codeRuns.map { String(text[$0.range].characters) }.joined() == "# not a heading- not a bullet")
+}
