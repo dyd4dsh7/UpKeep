@@ -1,7 +1,9 @@
 import Foundation
 
 struct MozillaUpdateClient: Sendable {
-    func update(for app: InstalledApp) async throws -> AvailableUpdate? {
+    /// Browser channels follow the installed build. `includePrereleases` only
+    /// applies to Electron feeds, whose manifest can offer any version.
+    func update(for app: InstalledApp, includePrereleases: Bool = false) async throws -> AvailableUpdate? {
         do {
             let latest: String?
             let comparisonLatest: String?
@@ -31,6 +33,14 @@ struct MozillaUpdateClient: Sendable {
                 latest = brave?.display
                 comparisonLatest = brave?.product
                 sourceName = "Brave"
+            } else if let manifestURL = app.electronUpdateFeedURL {
+                latest = ElectronUpdateFeed.offeredVersion(
+                    try await ElectronUpdateFeed.latestVersion(from: manifestURL),
+                    installedVersion: app.installedVersion,
+                    includePrereleases: includePrereleases
+                )
+                comparisonLatest = latest
+                sourceName = app.name
             } else {
                 return nil
             }

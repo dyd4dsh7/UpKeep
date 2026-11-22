@@ -4,6 +4,11 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+- Electron apps that update from their developer's own server (electron-updater's generic provider) are now checked. Upkeep reads the app's release manifest (such as `latest-mac.yml`), hides prereleases from stable installs unless **Include prereleases** is on, waits for staged rollouts to finish, and hands the update to the app's built-in updater.
+- ChatGPT is now checked through the Sparkle feed packaged in the app. It sets its feed at runtime, so Upkeep previously found no update source for it.
+- Chrome and Brave no longer show **No update source** in app details while they are up to date.
+- UTM, PureMac, BlitzTree, and Spotifast installed from GitHub are now checked against their GitHub releases.
+
 ## 0.25.7 — 2026-11-23
 
 - Release notes in **What’s New** keep their formatting instead of showing raw markup. Markdown headings show as bold text and lists as bullets, table rows become bullets with labelled values, quote blocks get a bar, GitHub alerts such as `[!WARNING]` show as a bold title, and code blocks show without their ``` markers. Images, including badges inside links, are left out, and only web links are clickable.

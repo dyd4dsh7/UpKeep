@@ -67,7 +67,8 @@ If a release has no build attached, [build from source](#build-from-source).
 | Source | How Upkeep checks |
 | --- | --- |
 | **Mac App Store** | App Store metadata for production installs |
-| **Sparkle** | Appcast feeds declared by the app or its runtime preferences |
+| **Sparkle** | Appcast feeds declared by the app, its runtime preferences, or a trusted mapping |
+| **Electron update servers** | The release manifest (such as `latest-mac.yml`) of apps that use electron-updater's generic provider |
 | **Homebrew** | Installed formulae and casks, including dependencies |
 | **GitHub Releases** | Repos found in app or Electron update metadata, trusted mappings, or a repo you verify |
 | **macOS** | Apple's Software Update catalog and full installers |

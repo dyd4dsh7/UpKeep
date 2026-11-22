@@ -119,6 +119,7 @@ enum AppDiscovery {
             mozillaUpdateChannel: mozillaUpdate.channel,
             chromiumUpdateChannel: chromiumUpdateChannel,
             braveUpdateChannel: braveUpdateChannel,
+            electronUpdateFeedURL: electronUpdate.feedURL,
             steamAppID: steamAppID,
             managedUpdateStatus: managedStatus,
             installedAt: dates?.creationDate,
@@ -259,14 +260,33 @@ enum AppDiscovery {
         return String(contents[range])
     }
 
+    /// Each entry was checked against the repository's source (bundle ID) and
+    /// its releases (a macOS ZIP or DMG asset).
     private static let trustedGitHubRepositories: [String: String] = [
         "com.github.githubclient": "desktop/desktop",
         "com.electron.ollama": "ollama/ollama",
         "com.microsoft.vscode": "microsoft/vscode",
         "com.microsoft.vscodeinsiders": "microsoft/vscode",
+        "com.puremac.app": "momenbasel/PureMac",
+        "com.utmapp.utm": "utmapp/UTM",
+        "dev.ahmed.blitztree": "ahmedkhaleel2004/blitztree",
         "eu.exelban.stats": "exelban/stats",
-        "io.github.marticliment.unigetui": "Devolutions/UniGetUI"
+        "io.github.marticliment.unigetui": "Devolutions/UniGetUI",
+        "rocks.spotifast.spotifast": "crmne/spotifast"
     ]
+
+    /// Sparkle apps that set their feed at runtime instead of in Info.plist.
+    /// Each feed URL is declared inside the app bundle itself.
+    private static let trustedSparkleFeeds: [String: URL] = [
+        // ChatGPT (Codex) packages this as `codexSparkleFeedUrl` in app.asar. Production
+        // builds ask a per-installation backend appcast first and use this feed as their
+        // fallback; Upkeep uses it because the backend needs the app's installation ID.
+        "com.openai.codex": URL(string: "https://persistent.oaistatic.com/codex-app-prod/appcast.xml")!
+    ]
+
+    static func trustedSparkleFeedURL(bundleIdentifier: String?) -> URL? {
+        bundleIdentifier.flatMap { trustedSparkleFeeds[$0.lowercased()] }
+    }
 
     static func trustedGitHubRepository(bundleIdentifier: String?) -> String? {
         guard let identifier = bundleIdentifier?.lowercased() else { return nil }
@@ -310,6 +330,7 @@ enum AppDiscovery {
             .compactMap { $0 }
             .compactMap(URL.init(string:))
             .first { $0.scheme?.lowercased() == "https" }
+            ?? trustedSparkleFeedURL(bundleIdentifier: bundleIdentifier)
     }
 
     private static func managedUpdateStatus(
@@ -434,19 +455,19 @@ enum AppDiscovery {
 
     private static func electronUpdateMetadata(
         at appURL: URL
-    ) -> (repository: String?, isConfigured: Bool) {
+    ) -> (repository: String?, feedURL: URL?, isConfigured: Bool) {
         let resources = appURL.appendingPathComponent("Contents/Resources", isDirectory: true)
         for filename in ["app-update.yml", "app-update.yaml"] {
             let configURL = resources.appendingPathComponent(filename)
             guard let contents = try? String(contentsOf: configURL, encoding: .utf8) else { continue }
             guard contents.range(of: #"provider:\s*github"#, options: .regularExpression) != nil else {
-                return (nil, true)
+                return (nil, ElectronUpdateFeed.manifestURL(fromConfig: contents), true)
             }
             let owner = yamlValue(named: "owner", in: contents)
             let repo = yamlValue(named: "repo", in: contents)
-            return (owner.flatMap { owner in repo.map { "\(owner)/\($0)" } }, true)
+            return (owner.flatMap { owner in repo.map { "\(owner)/\($0)" } }, nil, true)
         }
-        return (nil, false)
+        return (nil, nil, false)
     }
 
     private static func yamlValue(named key: String, in contents: String) -> String? {

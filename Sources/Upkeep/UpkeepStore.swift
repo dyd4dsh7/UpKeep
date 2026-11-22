@@ -488,7 +488,7 @@ final class UpkeepStore: ObservableObject {
         if app.updateManagement == .appStore { detected.insert(.appStore) }
         if homebrewPackage(for: app) != nil { detected.insert(.homebrew) }
         if app.updateManagement == .direct {
-            if app.mozillaUpdateChannel != nil { detected.insert(.developer) }
+            if app.usesDeveloperUpdateService { detected.insert(.developer) }
             if app.sparkleFeedURL != nil { detected.insert(.sparkle) }
             if app.githubRepository != nil { detected.insert(.github) }
         }

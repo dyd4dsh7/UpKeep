@@ -16,6 +16,8 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
     let mozillaUpdateChannel: MozillaUpdateChannel?
     let chromiumUpdateChannel: ChromiumUpdateChannel?
     let braveUpdateChannel: BraveUpdateChannel?
+    /// `latest-mac.yml` for Electron apps using electron-updater's generic provider.
+    let electronUpdateFeedURL: URL?
     let steamAppID: String?
     let managedUpdateStatus: ManagedUpdateStatus?
     let installedAt: Date?
@@ -26,6 +28,11 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
         architecture.needsMigration(onAppleSilicon: AppArchitectureInspector.isAppleSilicon)
     }
     var prereleaseChannel: PrereleaseChannel? { VersionComparator.prereleaseChannel(for: installedVersion) }
+    /// Checked through a publisher's own version service (the `.developer` source).
+    var usesDeveloperUpdateService: Bool {
+        mozillaUpdateChannel != nil || chromiumUpdateChannel != nil
+            || braveUpdateChannel != nil || electronUpdateFeedURL != nil
+    }
 
     init(
         name: String,
@@ -42,6 +49,7 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
         mozillaUpdateChannel: MozillaUpdateChannel? = nil,
         chromiumUpdateChannel: ChromiumUpdateChannel? = nil,
         braveUpdateChannel: BraveUpdateChannel? = nil,
+        electronUpdateFeedURL: URL? = nil,
         steamAppID: String? = nil,
         managedUpdateStatus: ManagedUpdateStatus? = nil,
         installedAt: Date? = nil,
@@ -61,6 +69,7 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
         self.hasBuiltInUpdater = hasBuiltInUpdater ?? (
             sparkleFeedURL != nil || mozillaUpdateChannel != nil
                 || chromiumUpdateChannel != nil || braveUpdateChannel != nil
+                || electronUpdateFeedURL != nil
         )
         self.mozillaUpdateProduct = mozillaUpdateChannel == nil
             ? nil
@@ -68,6 +77,7 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
         self.mozillaUpdateChannel = mozillaUpdateChannel
         self.chromiumUpdateChannel = chromiumUpdateChannel
         self.braveUpdateChannel = braveUpdateChannel
+        self.electronUpdateFeedURL = electronUpdateFeedURL
         self.steamAppID = steamAppID
         self.managedUpdateStatus = managedUpdateStatus
         self.installedAt = installedAt
@@ -105,6 +115,7 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
             mozillaUpdateChannel: mozillaUpdateChannel,
             chromiumUpdateChannel: chromiumUpdateChannel,
             braveUpdateChannel: braveUpdateChannel,
+            electronUpdateFeedURL: electronUpdateFeedURL,
             steamAppID: steamAppID,
             managedUpdateStatus: managedUpdateStatus,
             installedAt: installedAt,

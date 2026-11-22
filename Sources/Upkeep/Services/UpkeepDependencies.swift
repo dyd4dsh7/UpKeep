@@ -86,7 +86,7 @@ protocol GitHubUpdateChecking: Sendable {
 }
 
 protocol MozillaUpdateChecking: Sendable {
-    func update(for app: InstalledApp) async throws -> AvailableUpdate?
+    func update(for app: InstalledApp, includePrereleases: Bool) async throws -> AvailableUpdate?
 }
 
 protocol HomebrewManaging: Sendable {

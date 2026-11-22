@@ -27,11 +27,7 @@ func enabledAppUpdateSources(
         return checkAppStore ? [.appStore] : []
     case .direct:
         var sources: [AppUpdateSource] = []
-        if app.mozillaUpdateChannel != nil
-            || app.chromiumUpdateChannel != nil
-            || app.braveUpdateChannel != nil {
-            sources.append(.developer)
-        }
+        if app.usesDeveloperUpdateService { sources.append(.developer) }
         if checkSparkle, app.sparkleFeedURL != nil { sources.append(.sparkle) }
         if checkGitHub, app.githubRepository != nil { sources.append(.github) }
         return sources
@@ -479,7 +475,10 @@ struct UpdateScanner: Sendable {
             case .appStore:
                 update = try await dependencies.appStore.update(for: app)
             case .developer:
-                update = try await dependencies.mozilla.update(for: app)
+                update = try await dependencies.mozilla.update(
+                    for: app,
+                    includePrereleases: includePrereleases
+                )
             case .sparkle:
                 update = try await dependencies.sparkle.update(
                     for: app,

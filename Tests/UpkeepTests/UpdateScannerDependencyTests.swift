@@ -231,7 +231,7 @@ private struct ScannerGitHub: GitHubUpdateChecking {
 
 private struct ScannerMozilla: MozillaUpdateChecking {
     let calls: ScannerCallRecorder
-    func update(for app: InstalledApp) async throws -> AvailableUpdate? {
+    func update(for app: InstalledApp, includePrereleases: Bool) async throws -> AvailableUpdate? {
         await calls.record(.developer)
         return AvailableUpdate(
             app: app, availableVersion: "1.1.0", source: .developer,

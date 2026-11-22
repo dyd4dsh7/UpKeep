@@ -515,7 +515,9 @@ struct AppDetailView: View {
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 } else if candidate.requiresInAppInstallation {
-                                    Text("This update uses a package installer and must be started from the app.")
+                                    Text(candidate.source == .sparkle
+                                        ? "This update uses a package installer and must be started from the app."
+                                        : "This update is installed by the app's built-in updater.")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -715,6 +717,7 @@ struct AppDetailView: View {
                 GridRow { detailLabel("Update management"); Text(app.updateManagement.rawValue) }
                 GridRow { detailLabel("App Store receipt"); Text(app.hasAppStoreReceipt ? "Present" : "Not found") }
                 if let feed = app.sparkleFeedURL { GridRow { detailLabel("Sparkle feed"); Link(feed.host() ?? feed.absoluteString, destination: feed) } }
+                if let feed = app.electronUpdateFeedURL { GridRow { detailLabel("Update server"); Link(feed.host() ?? feed.absoluteString, destination: feed) } }
                 if let repository = app.githubRepository,
                    let url = URL(string: "https://github.com/\(repository)") {
                     GridRow { detailLabel("GitHub"); Link(repository, destination: url) }

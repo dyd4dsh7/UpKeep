@@ -50,6 +50,33 @@ import Testing
     #expect(app.allowsHomebrewAdoption)
 }
 
+@Test func applicationDiscoveryReadsElectronGenericProviderFeed() async throws {
+    let fileManager = FileManager.default
+    let root = fileManager.temporaryDirectory
+        .appendingPathComponent("Upkeep-ElectronGeneric-\(UUID().uuidString)", isDirectory: true)
+    let appURL = root.appendingPathComponent("Electron App.app", isDirectory: true)
+    let contentsURL = appURL.appendingPathComponent("Contents", isDirectory: true)
+    let resourcesURL = contentsURL.appendingPathComponent("Resources", isDirectory: true)
+    try fileManager.createDirectory(at: resourcesURL, withIntermediateDirectories: true)
+    defer { try? fileManager.removeItem(at: root) }
+
+    try writeTestAppInfo(version: "1.0.0", to: contentsURL.appendingPathComponent("Info.plist"))
+    try """
+        provider: generic
+        url: https://downloads.example.com/desktop
+        """.write(
+            to: resourcesURL.appendingPathComponent("app-update.yml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+    let app = try #require(await AppDiscovery.discover(at: appURL))
+
+    #expect(app.hasBuiltInUpdater)
+    #expect(app.githubRepository == nil)
+    #expect(app.electronUpdateFeedURL?.absoluteString == "https://downloads.example.com/desktop/latest-mac.yml")
+}
+
 @Test func applicationDiscoveryRecognizesEmbeddedUpdaterFramework() async throws {
     let fileManager = FileManager.default
     let root = fileManager.temporaryDirectory
