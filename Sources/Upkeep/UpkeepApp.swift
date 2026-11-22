@@ -20,6 +20,7 @@ struct UpkeepApp: App {
             }
             _settings = StateObject(wrappedValue: appSettings)
             let fixtureStore = UIFixture.makeStore(settings: appSettings, operationState: UIFixture.operationState)
+            if let route = UIFixture.route { fixtureStore.navigation.selection = route }
             UpkeepAppDelegate.store = fixtureStore
             _store = UpkeepState(initialValue: fixtureStore)
             return

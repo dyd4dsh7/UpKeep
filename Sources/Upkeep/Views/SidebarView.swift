@@ -53,8 +53,10 @@ struct UpkeepSidebarView: View {
             }
 
             if settings.sidebarViewMode == .advanced, !sourceDestinations.isEmpty {
-                Section("Sources", isExpanded: $sourcesExpanded) {
+                Section(isExpanded: $sourcesExpanded) {
                     ForEach(sourceDestinations, id: \.self) { item($0) }
+                } header: {
+                    WorkspaceSectionLabel(title: "Sources")
                 }
             }
         }

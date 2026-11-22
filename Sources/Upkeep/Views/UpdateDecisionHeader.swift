@@ -2,7 +2,8 @@ import SwiftUI
 
 struct UpdateDecisionHeader: View {
     @UpkeepStoreReference private var store
-    @ScaledMetric(relativeTo: .largeTitle) private var titleSize: CGFloat = 36
+    @Environment(\.colorScheme) private var scheme
+    @ScaledMetric(relativeTo: .largeTitle) private var titleSize: CGFloat = 30
     @ScaledMetric(relativeTo: .caption) private var eyebrowSize: CGFloat = 11
 
     let review: () -> Void
@@ -12,8 +13,8 @@ struct UpdateDecisionHeader: View {
             HStack(spacing: 0) {
                 briefing
                     .frame(maxWidth: .infinity, alignment: .leading)
-                UpdateArtwork(symbol: symbol)
-                    .frame(width: 218)
+                UpdateArtwork(symbol: symbol, palette: palette)
+                    .frame(width: 200)
                     .frame(maxHeight: .infinity)
             }
             .fixedSize(horizontal: false, vertical: true)
@@ -21,17 +22,15 @@ struct UpdateDecisionHeader: View {
             briefing.frame(maxWidth: .infinity, alignment: .leading)
         }
         .background {
-            LinearGradient(
-                colors: [UpkeepPalette.forest, Color(red: 0.10, green: 0.31, blue: 0.23)],
-                startPoint: .topLeading, endPoint: .bottomTrailing
-            )
+            LinearGradient(colors: palette.background, startPoint: .topLeading, endPoint: .bottomTrailing)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 17))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay {
-            RoundedRectangle(cornerRadius: 17)
-                .strokeBorder(UpkeepPalette.mint.opacity(0.22))
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(palette.outline)
                 .allowsHitTesting(false)
         }
+        .environment(\.updateHeroPalette, palette)
         .accessibilityElement(children: .contain)
         .upkeepAnimated(for: store.totalUpdateCount)
     }
@@ -42,26 +41,28 @@ struct UpdateDecisionHeader: View {
                 .font(.system(size: eyebrowSize, weight: .semibold))
                 .textCase(.uppercase)
                 .tracking(1.3)
-                .foregroundStyle(UpkeepPalette.mint)
+                .foregroundStyle(palette.eyebrow)
 
             Text(title)
                 .font(.system(size: titleSize, weight: .semibold))
-                .tracking(-1.35)
-                .foregroundStyle(.white)
+                .tracking(-1.1)
+                .foregroundStyle(palette.title)
                 .contentTransition(.numericText())
                 .accessibilityAddTraits(.isHeader)
 
             Text(detail)
                 .font(.callout)
-                .foregroundStyle(UpkeepPalette.mint.opacity(0.84))
+                .foregroundStyle(palette.detail)
                 .fixedSize(horizontal: false, vertical: true)
 
             primaryAction
                 .buttonStyle(UpdateReviewButtonStyle())
-                .padding(.top, 7)
+                .padding(.top, 5)
         }
-        .padding(24)
+        .padding(20)
     }
+
+    private var palette: UpdateHeroPalette { UpdateHeroPalette(scheme: scheme) }
 
     @ViewBuilder private var primaryAction: some View {
         if batchCount > 0 {
@@ -143,37 +144,93 @@ private struct UpdateReviewLabelStyle: LabelStyle {
     }
 }
 
+/// Hero colours: a deep forest card in dark mode and a light mint card with
+/// forest ink in light mode, so the header never becomes a heavy dark block
+/// on a light canvas.
+struct UpdateHeroPalette {
+    let background: [Color]
+    let outline: Color
+    let eyebrow: Color
+    let title: Color
+    let detail: Color
+    let ink: Color
+    let tile: Color
+    let buttonFill: Color
+    let buttonText: Color
+
+    init(scheme: ColorScheme) {
+        if scheme == .dark {
+            background = [UpkeepPalette.forest, Color(red: 0.10, green: 0.31, blue: 0.23)]
+            outline = UpkeepPalette.mint.opacity(0.22)
+            eyebrow = UpkeepPalette.mint
+            title = .white
+            detail = UpkeepPalette.mint.opacity(0.84)
+            ink = UpkeepPalette.mint
+            tile = UpkeepPalette.forest
+            buttonFill = UpkeepPalette.mint
+            buttonText = UpkeepPalette.forest
+        } else {
+            background = [Color(red: 0.89, green: 0.965, blue: 0.905), Color(red: 0.80, green: 0.925, blue: 0.835)]
+            outline = UpkeepPalette.forest.opacity(0.12)
+            eyebrow = Color(red: 0.10, green: 0.39, blue: 0.28)
+            title = UpkeepPalette.forest
+            detail = UpkeepPalette.forest.opacity(0.72)
+            ink = Color(red: 0.10, green: 0.39, blue: 0.28)
+            tile = Color(red: 0.97, green: 0.99, blue: 0.97)
+            buttonFill = Color(red: 0.10, green: 0.39, blue: 0.28)
+            buttonText = .white
+        }
+    }
+}
+
+private struct UpdateHeroPaletteKey: EnvironmentKey {
+    static let defaultValue = UpdateHeroPalette(scheme: .dark)
+}
+
+extension EnvironmentValues {
+    var updateHeroPalette: UpdateHeroPalette {
+        get { self[UpdateHeroPaletteKey.self] }
+        set { self[UpdateHeroPaletteKey.self] = newValue }
+    }
+}
+
 private struct UpdateReviewButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var enabled
     @Environment(\.isFocused) private var focused
+    @Environment(\.updateHeroPalette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.callout.weight(.semibold))
-            .foregroundStyle(UpkeepPalette.forest)
+            .foregroundStyle(palette.buttonText)
             .padding(.horizontal, 14)
-            .frame(minHeight: 34)
-            .background(UpkeepPalette.mint.opacity(configuration.isPressed ? 0.78 : 1), in: RoundedRectangle(cornerRadius: 8))
+            .frame(minHeight: 32)
+            .background(palette.buttonFill.opacity(configuration.isPressed ? 0.82 : 1), in: RoundedRectangle(cornerRadius: 8))
             .opacity(enabled ? 1 : 0.55)
             .overlay {
+                // Insetting by -3 grows the radius to 11: concentric with the 8pt fill.
                 RoundedRectangle(cornerRadius: 8)
                     .inset(by: -3)
-                    .strokeBorder(focused ? UpkeepPalette.mint : .clear, lineWidth: 2)
+                    .strokeBorder(focused ? palette.buttonFill : .clear, lineWidth: 2)
             }
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.96 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
             .fixedSize()
     }
 }
 
 private struct UpdateArtwork: View {
     let symbol: String
+    let palette: UpdateHeroPalette
 
     var body: some View {
         ZStack {
             Canvas { context, size in
                 let center = CGPoint(x: size.width * 0.62, y: size.height * 0.5)
-                let ink = UpkeepPalette.mint
+                let ink = palette.ink
 
-                for radius: CGFloat in [62, 88, 116, 145] {
+                for radius: CGFloat in [52, 74, 98, 124] {
                     let orbit = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
                     context.stroke(Path(ellipseIn: orbit), with: .color(ink.opacity(0.23)), lineWidth: 1)
                 }
@@ -185,25 +242,25 @@ private struct UpdateArtwork: View {
                 guides.addLine(to: CGPoint(x: center.x, y: size.height - 10))
                 context.stroke(guides, with: .color(ink.opacity(0.15)), style: StrokeStyle(lineWidth: 1, dash: [3, 5]))
 
-                for (radius, angle) in [(62.0, 2.6), (88.0, -2.15), (116.0, 1.95), (145.0, -0.8)] {
+                for (radius, angle) in [(52.0, 2.6), (74.0, -2.15), (98.0, 1.95), (124.0, -0.8)] {
                     let x = center.x + cos(angle) * radius
                     let y = center.y + sin(angle) * radius
                     context.fill(Path(ellipseIn: CGRect(x: x - 2.5, y: y - 2.5, width: 5, height: 5)), with: .color(ink.opacity(0.85)))
                 }
             }
-            .frame(width: 218)
-            .frame(minHeight: 172)
+            .frame(width: 200)
+            .frame(minHeight: 140)
 
             Image(systemName: symbol)
-                .font(.system(size: 32, weight: .medium))
-                .foregroundStyle(UpkeepPalette.mint)
+                .font(.system(size: 27, weight: .medium))
+                .foregroundStyle(palette.ink)
                 .contentTransition(.symbolEffect(.replace))
-                .frame(width: 77, height: 77)
-                .background(UpkeepPalette.forest, in: RoundedRectangle(cornerRadius: 20))
+                .frame(width: 64, height: 64)
+                .background(palette.tile, in: RoundedRectangle(cornerRadius: 17))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 20).strokeBorder(UpkeepPalette.mint.opacity(0.6))
+                    RoundedRectangle(cornerRadius: 17).strokeBorder(palette.ink.opacity(0.5))
                 }
-                .offset(x: 26)
+                .offset(x: 24)
         }
         .accessibilityHidden(true)
     }

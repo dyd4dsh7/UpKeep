@@ -12,6 +12,12 @@ enum UIFixture {
         return ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix(prefix) })
             .flatMap { OperationState(rawValue: String($0.dropFirst(prefix.count))) } ?? .completed
     }
+    /// Opens a sidebar page for visual QA, e.g. `--ui-fixture-route=Homebrew`.
+    static var route: SidebarDestination? {
+        let prefix = "--ui-fixture-route="
+        return ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix(prefix) })
+            .flatMap { SidebarDestination(rawValue: String($0.dropFirst(prefix.count))) }
+    }
     static var showsProgress: Bool {
         ProcessInfo.processInfo.arguments.contains("--ui-fixture-slow")
     }
