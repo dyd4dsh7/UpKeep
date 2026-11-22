@@ -217,6 +217,10 @@ final class AppSettings: ObservableObject {
     private let defaults: UserDefaults
 
     @Published var automaticallyCheckCVEs: Bool { didSet { save(automaticallyCheckCVEs, "automaticallyCheckCVEs") } }
+    /// Whether Upkeep checks GitHub for its own updates without being asked.
+    @Published var automaticallyCheckForUpkeepUpdates: Bool {
+        didSet { save(automaticallyCheckForUpkeepUpdates, "automaticallyCheckForUpkeepUpdates") }
+    }
     @Published var checkOnLaunch: Bool { didSet { save(checkOnLaunch, "checkOnLaunch") } }
     @Published var refreshInterval: RefreshInterval { didSet { save(refreshInterval.rawValue, "refreshInterval") } }
     @Published var dailyRefreshTimeMinutes: Int { didSet { save(dailyRefreshTimeMinutes, "dailyRefreshTimeMinutes") } }
@@ -275,6 +279,7 @@ final class AppSettings: ObservableObject {
         defaults.register(defaults: [
             "checkOnLaunch": true,
             "automaticallyCheckCVEs": true,
+            "automaticallyCheckForUpkeepUpdates": true,
             "refreshInterval": RefreshInterval.everySixHours.rawValue,
             "dailyRefreshTimeMinutes": 9 * 60,
             "showMenuBarItem": true,
@@ -301,6 +306,7 @@ final class AppSettings: ObservableObject {
             defaults.set(true, forKey: "didRestoreSwiftUIMenuBarItem")
         }
         automaticallyCheckCVEs = defaults.bool(forKey: "automaticallyCheckCVEs")
+        automaticallyCheckForUpkeepUpdates = defaults.bool(forKey: "automaticallyCheckForUpkeepUpdates")
         checkOnLaunch = defaults.bool(forKey: "checkOnLaunch")
         refreshInterval = RefreshInterval(rawValue: defaults.integer(forKey: "refreshInterval")) ?? .everySixHours
         dailyRefreshTimeMinutes = defaults.integer(forKey: "dailyRefreshTimeMinutes")

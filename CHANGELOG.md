@@ -4,6 +4,7 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+- Added **Check for Upkeep updates** in Settings › General to turn off Upkeep's automatic update check; **Check for Upkeep Updates…** still works. The privacy policy now lists Google's Chrome version service and the caches left behind when removing Upkeep.
 - Sparkle release notes written in HTML keep their structure in **What’s New**: headings, paragraphs, line breaks, bulleted and numbered lists, bold and italic text, and web links are converted instead of running together when tags are removed. Feeds that declare Markdown notes are shown as written.
 - Fixed the app details for TestFlight, Setapp, and other externally managed apps repeating the same explanation twice under **Managed by**.
 - Release notes in **What’s New** now render Markdown: headings show as bold text and list items as bullets instead of raw `#` and `-` markers. Only web links in release notes are clickable.

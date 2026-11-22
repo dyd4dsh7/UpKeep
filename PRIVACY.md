@@ -14,27 +14,30 @@ and version queries, or model identifiers/digests to the relevant service.
 Those services also receive normal connection metadata such as your IP address.
 
 Examples include Apple App Store and Software Update services, developer Sparkle
-feeds, GitHub, Mozilla, Homebrew, language package registries, Ollama's registry,
-and Hugging Face. Opening an external updater or a project page invokes that
-service's own privacy policy. Package managers and model runtimes continue to
-manage their own authentication and storage.
+feeds, GitHub, Mozilla, Google's Chrome version service (which receives only the
+platform and release channel), Homebrew, language package registries, Ollama's
+registry, and Hugging Face. Opening an external updater or a project page invokes
+that service's own privacy policy. Package managers and model runtimes continue
+to manage their own authentication and storage.
 
 CVE checks run after launch, scheduled, and manual inventory refreshes when
 **Automatically check CVEs** is enabled in Settings (enabled by default). They
 also run when you choose **Check CVEs**. Turning off automatic CVE checks leaves
-manual checks available. Registry package names, ecosystems, and installed versions go to
-`api.osv.dev`. Curated application product/vendor identities, installed versions,
-and a macOS CPE target go to `services.nvd.nist.gov`. Homebrew formula matching
-downloads the shared advisory index from `formulae.brew.sh`; individual formula
-names are matched locally. Local paths, bundle identifiers, and installation
-contexts are not sent. The index stays in memory during a check; displayed results remain in memory
-for the app session, shared by the CVE Checker and list badges. Opening advisory links contacts OSV, NVD, or GitHub.
+manual checks available. Registry package names, ecosystems, and installed
+versions go to `api.osv.dev`. Curated application product/vendor identities,
+installed versions, and a macOS CPE target go to `services.nvd.nist.gov`. Homebrew
+formula matching downloads the shared advisory index from `formulae.brew.sh`;
+individual formula names are matched locally. Local paths, bundle identifiers,
+and installation contexts are not sent. The index stays in memory during a check;
+displayed results remain in memory for the app session, shared by the CVE Checker
+and list badges. Opening advisory links contacts OSV, NVD, or GitHub.
 
 Upkeep checks for its own updates at most every six hours while it is open, and
 whenever you choose **Check for Upkeep Updates…**. Each check asks
 `api.github.com` for this project's published releases; it sends no app, package,
 or personal data beyond normal connection metadata. An update is downloaded from
-GitHub only when you choose to install it.
+GitHub only when you choose to install it. Turn off **Check for Upkeep updates**
+in Settings › General to stop the automatic checks; the menu item still works.
 
 ## What stays on the Mac
 
@@ -65,6 +68,6 @@ cleanup can modify your applications or development environment; review the
 operation before confirming it. Backups do not cover every package manager or
 replace a system backup.
 
-Removing Upkeep does not automatically remove its preferences, logs, history, or
-backups. Quit the app before removing its local data; deleting the backup directory
-also removes Upkeep's ability to restore those versions.
+Removing Upkeep does not automatically remove its preferences, logs, history,
+backups, or caches. Quit the app before removing its local data; deleting the
+backup directory also removes Upkeep's ability to restore those versions.

@@ -162,6 +162,15 @@ struct SettingsView: View {
                 }
 
                 SettingsOptionRow(
+                    title: "Check for Upkeep updates",
+                    detail: "Ask GitHub for new Upkeep releases at most every 6 hours. Upkeep › Check for Upkeep Updates… always works.",
+                    systemImage: "arrow.down.app"
+                ) {
+                    Toggle("Check for Upkeep updates", isOn: $settings.automaticallyCheckForUpkeepUpdates)
+                        .labelsHidden()
+                }
+
+                SettingsOptionRow(
                     title: "Background checks",
                     detail: backgroundCheckDetail,
                     systemImage: "clock.arrow.circlepath"

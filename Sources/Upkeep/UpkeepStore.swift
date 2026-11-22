@@ -1250,6 +1250,7 @@ final class UpkeepStore: ObservableObject {
         }
         controller.includePrereleases = { [weak self] in self?.settings.scanSettings.includePrereleaseUpdates ?? false }
         controller.notificationsEnabled = { [weak self] in self?.settings.notificationsEnabled ?? false }
+        controller.automaticChecksEnabled = { [weak self] in self?.settings.automaticallyCheckForUpkeepUpdates ?? true }
     }
 
     func scheduleNextRefresh() {

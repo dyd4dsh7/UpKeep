@@ -27,6 +27,8 @@ final class SelfUpdateController: ObservableObject {
     /// Whether prerelease versions of Upkeep should be offered.
     var includePrereleases: @MainActor () -> Bool = { false }
     var notificationsEnabled: @MainActor () -> Bool = { false }
+    /// Settings › General › Check for Upkeep updates; menu checks always run.
+    var automaticChecksEnabled: @MainActor () -> Bool = { true }
 
     private let defaults: UserDefaults
     /// Only the packaged app checks GitHub; tests and fixtures never do.
@@ -58,7 +60,7 @@ final class SelfUpdateController: ObservableObject {
     // MARK: Checking
 
     func checkAutomatically(now: Date = Date()) {
-        guard isEnabled, phase != .checking, !isInstalling else { return }
+        guard isEnabled, automaticChecksEnabled(), phase != .checking, !isInstalling else { return }
         if let last = defaults.object(forKey: "selfUpdateLastCheck") as? Date,
            now.timeIntervalSince(last) < Self.automaticInterval { return }
         Task { await check(userInitiated: false) }

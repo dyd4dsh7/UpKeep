@@ -179,3 +179,23 @@ private func fixtureApp(in root: URL, identifier: String = InstalledApp.upkeepBu
     #expect(helper.terminationStatus == 0)
     #expect(String(decoding: try Data(contentsOf: target.appendingPathComponent("marker")), as: UTF8.self) == "new")
 }
+
+@MainActor
+@Test func turningOffUpkeepUpdateChecksStopsAutomaticChecks() async throws {
+    let suite = "UpkeepTests.SelfUpdateToggle.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+
+    let settings = AppSettings(defaults: defaults)
+    #expect(settings.automaticallyCheckForUpkeepUpdates, "Checks are on by default")
+    settings.automaticallyCheckForUpkeepUpdates = false
+    #expect(AppSettings(defaults: defaults).automaticallyCheckForUpkeepUpdates == false, "The choice persists")
+
+    // Enabled as if packaged; the setting alone must keep it offline.
+    let controller = SelfUpdateController(defaults: defaults, isEnabled: true)
+    controller.automaticChecksEnabled = { settings.automaticallyCheckForUpkeepUpdates }
+    controller.checkAutomatically()
+    await Task.yield()
+    #expect(controller.phase == .idle)
+    #expect(defaults.object(forKey: "selfUpdateLastCheck") == nil)
+}
