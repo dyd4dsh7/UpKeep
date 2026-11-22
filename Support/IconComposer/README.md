@@ -1,11 +1,11 @@
 # Upkeep Icon Composer artwork
 
-These full-canvas SVG layers are the editable source artwork for `Support/AppIcon.icon`.
+The full-canvas SVG layers in `Support/AppIcon.icon/Assets/` are the editable source artwork for `Support/AppIcon.icon`.
 
 In Icon Composer:
 
 1. Create a macOS icon named `AppIcon` with a warm white canvas (`#FAF9F7`).
-2. Import `01-loop-arrow.svg` and `02-down-arrow.svg` in that order.
+2. Import `Assets/01-loop-arrow.svg` and `Assets/02-down-arrow.svg` in that order.
 3. Keep both layers opaque; apply subtle automatic specular highlights and low refraction.
 4. For Dark, use a near-black blue canvas (`#17191D`) and preserve the blue artwork.
 5. For Mono, map the loop to the primary tone and the down arrow to a lighter secondary tone.
