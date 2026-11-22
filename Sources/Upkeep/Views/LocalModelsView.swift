@@ -13,7 +13,7 @@ struct LocalModelsView: View {
             } else if models.isEmpty {
                 WorkspaceEmptyState(
                     "No local models found", systemImage: "brain.head.profile",
-                    description: Text("Models appear here when Ollama or LM Studio has models installed.")
+                    description: Text("Models appear here when Ollama, LM Studio, or the Hugging Face cache has models installed.")
                 )
                 .upkeepStateTransition()
             } else {
@@ -162,15 +162,24 @@ struct LocalModelDetail: View {
                         }
                     }
                     DisclosureGroup("How updates work") {
-                    Text(model.runtime == .ollama
-                         ? "Upkeep compares the installed manifest digest with Ollama’s registry, then uses ollama pull to update."
-                         : "Upkeep compares the local model file with its Hugging Face repository, then uses LM Studio’s lms get command to refresh it.")
+                    Text(howUpdatesWork(model.runtime))
                         .font(.callout).foregroundStyle(.secondary)
                         .padding(.top, 8)
                     }
                 }
         } else {
             WorkspaceEmptyState("Select a model", systemImage: "brain.head.profile")
+        }
+    }
+
+    private func howUpdatesWork(_ runtime: LocalModelRuntime) -> String {
+        switch runtime {
+        case .ollama:
+            "Upkeep compares the installed manifest digest with Ollama’s registry, then uses ollama pull to update."
+        case .lmStudio:
+            "Upkeep compares the local model file with its Hugging Face repository, then uses LM Studio’s lms get command to refresh it."
+        case .huggingFace:
+            "Upkeep compares the cached revision with the repository’s main branch on Hugging Face, then uses hf download to refresh the files already in the cache. Install the Hugging Face CLI (hf) to update from Upkeep."
         }
     }
 

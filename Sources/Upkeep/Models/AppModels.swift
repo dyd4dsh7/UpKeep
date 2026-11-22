@@ -783,17 +783,20 @@ enum SidebarDestination: String, CaseIterable, Identifiable {
 enum LocalModelRuntime: String, Codable, CaseIterable, Identifiable, Sendable {
     case ollama = "Ollama"
     case lmStudio = "LM Studio"
+    case huggingFace = "Hugging Face"
     var id: Self { self }
     var systemImage: String {
         switch self {
         case .ollama: "circle.hexagongrid.fill"
         case .lmStudio: "brain.head.profile.fill"
+        case .huggingFace: "shippingbox.fill"
         }
     }
     var assetName: String {
         switch self {
         case .ollama: "ollama"
         case .lmStudio: "lmstudio"
+        case .huggingFace: "huggingface"
         }
     }
 }
@@ -947,12 +950,15 @@ enum DeveloperPackageManager: String, Codable, CaseIterable, Identifiable, Senda
     case asdf = "asdf"
     case volta = "Volta"
     case fnm = "fnm"
+    case dockerImages = "Docker Images"
     var id: Self { self }
+    /// Docker images change by content digest, not by a comparable version.
+    var comparesDigests: Bool { self == .dockerImages }
     var belongsToJavaScriptEcosystem: Bool {
         switch self {
         case .node, .bun, .deno, .npm, .pnpm, .yarn, .volta, .fnm: true
         case .vsCode, .uv, .pipx, .python, .rubyGems, .rustup, .cargo,
-             .githubCLI, .go, .composer, .dotnet, .macPorts, .nix, .mise, .asdf: false
+             .githubCLI, .go, .composer, .dotnet, .macPorts, .nix, .mise, .asdf, .dockerImages: false
         }
     }
     var assetName: String {
@@ -980,6 +986,7 @@ enum DeveloperPackageManager: String, Codable, CaseIterable, Identifiable, Senda
         case .asdf: "asdf"
         case .volta: "volta"
         case .fnm: "fnm"
+        case .dockerImages: "docker"
         }
     }
     var packageLabel: String {
@@ -1004,6 +1011,7 @@ enum DeveloperPackageManager: String, Codable, CaseIterable, Identifiable, Senda
         case .nix: "Nix profile package"
         case .mise, .asdf: "Managed developer tool"
         case .volta, .fnm: "Managed JavaScript runtime"
+        case .dockerImages: "Docker image"
         }
     }
     var homepage: URL? {
@@ -1031,6 +1039,7 @@ enum DeveloperPackageManager: String, Codable, CaseIterable, Identifiable, Senda
         case .asdf: URL(string: "https://asdf-vm.com")
         case .volta: URL(string: "https://volta.sh")
         case .fnm: URL(string: "https://github.com/Schniz/fnm")
+        case .dockerImages: URL(string: "https://hub.docker.com")
         }
     }
 }
@@ -1065,16 +1074,22 @@ struct DeveloperPackage: Identifiable, Hashable, Sendable {
         self.installationContext = installationContext
         self.canUpdateAutomatically = canUpdateAutomatically
     }
-    var isOutdated: Bool { VersionComparator.isNewer(latestVersion, than: currentVersion) }
+    var isOutdated: Bool {
+        manager.comparesDigests
+            ? latestVersion != currentVersion
+            : VersionComparator.isNewer(latestVersion, than: currentVersion)
+    }
     var availablePrereleaseChannel: PrereleaseChannel? {
-        VersionComparator.prereleaseChannel(for: latestVersion)
+        manager.comparesDigests ? nil : VersionComparator.prereleaseChannel(for: latestVersion)
     }
     var prereleaseChannel: PrereleaseChannel? {
-        availablePrereleaseChannel
+        if manager.comparesDigests { return nil }
+        return availablePrereleaseChannel
             ?? VersionComparator.prereleaseChannel(for: currentVersion)
     }
     var prereleaseIsInstalled: Bool {
-        availablePrereleaseChannel == nil && VersionComparator.isPrerelease(currentVersion)
+        !manager.comparesDigests
+            && availablePrereleaseChannel == nil && VersionComparator.isPrerelease(currentVersion)
     }
 
     func replacingLatestVersion(with version: String) -> DeveloperPackage {

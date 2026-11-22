@@ -77,6 +77,9 @@ enum DeveloperPackageUninstallAdapters {
             return command(package, ["uninstall", package.registryIdentifier ?? package.name])
         case .fnm:
             return command(package, ["uninstall", package.currentVersion])
+        case .dockerImages:
+            // Containers may still use the image; leave removal to Docker.
+            throw AdapterError.unsupportedPackage(package.name)
         }
     }
 

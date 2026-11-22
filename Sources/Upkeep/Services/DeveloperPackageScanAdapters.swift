@@ -62,7 +62,8 @@ enum DeveloperPackageScanAdapters {
         .mise: adapter(.mise) { path, _ in await scanMise(path) },
         .asdf: adapter(.asdf) { path, _ in await scanASDF(path) },
         .volta: adapter(.volta) { path, _ in await scanVolta(path) },
-        .fnm: adapter(.fnm) { path, _ in await scanFNM(path) }
+        .fnm: adapter(.fnm) { path, _ in await scanFNM(path) },
+        .dockerImages: adapter(.dockerImages) { path, _ in await scanDockerImages(path) }
     ]
 
     private static func adapter(

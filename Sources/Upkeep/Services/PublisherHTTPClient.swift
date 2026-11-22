@@ -357,7 +357,9 @@ enum PublisherCurlTransport {
             throw PublisherHTTPClient.HTTPError.invalidDestination
         }
         let method = request.httpMethod ?? "GET"
-        guard ["GET", "POST"].contains(method) else {
+        // HEAD reads only headers, e.g. registry manifest digests, which do not
+        // count toward Docker Hub's pull limit the way manifest GETs do.
+        guard ["GET", "POST", "HEAD"].contains(method) else {
             throw PublisherHTTPClient.HTTPError.invalidDestination
         }
         let port = url.port ?? 443
@@ -367,7 +369,10 @@ enum PublisherCurlTransport {
             "--proto", "=https",
             "--proto-redir", "=https",
             "--noproxy", "*",
-            "--request", method,
+        ]
+        // `--request HEAD` makes curl wait for a body; `--head` does not.
+        arguments += method == "HEAD" ? ["--head"] : ["--request", method]
+        arguments += [
             "--max-time", String(max(1, request.timeoutInterval)),
             "--max-filesize", String(maximumBytes),
             "--dump-header", headerURL.path,

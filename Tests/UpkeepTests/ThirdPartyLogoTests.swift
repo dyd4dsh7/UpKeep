@@ -10,11 +10,12 @@ import Testing
 }
 
 @Test func everyDeveloperManagerWithAnOfficialLogoHasOne() {
-    // asdf and fnm publish no official logo, so they keep a system symbol.
-    for manager in DeveloperPackageManager.allCases where ![.asdf, .fnm].contains(manager) {
+    // asdf and fnm publish no official logo, so they keep a system symbol. Docker
+    // and Hugging Face logos are not bundled until their brand terms are reviewed.
+    for manager in DeveloperPackageManager.allCases where ![.asdf, .fnm, .dockerImages].contains(manager) {
         #expect(ThirdPartyLogo.bundledNames.contains(manager.assetName), "No logo for \(manager.rawValue)")
     }
-    for runtime in LocalModelRuntime.allCases {
+    for runtime in LocalModelRuntime.allCases where runtime != .huggingFace {
         #expect(ThirdPartyLogo.bundledNames.contains(runtime.assetName), "No logo for \(runtime.rawValue)")
     }
 }

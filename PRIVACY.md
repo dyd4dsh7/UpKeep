@@ -17,7 +17,9 @@ Examples include Apple App Store and Software Update services, developer Sparkle
 feeds and Electron update servers, GitHub, Mozilla, Google's Chrome version
 service (which receives only the platform and release channel), the Microsoft
 Edge, JetBrains, Zoom, Slack, and 1Password release services (which receive only
-a product code or platform), Homebrew, language package registries, Ollama's
+a product code or platform), Homebrew, language package registries, Docker image
+registries (which receive image names and digests, and only official names for
+unqualified images), GitHub's copy of Docker's official image list, Ollama's
 registry, and Hugging Face. Opening an external updater or a project page
 invokes that service's own privacy policy. Package managers and model runtimes
 continue to manage their own authentication and storage.

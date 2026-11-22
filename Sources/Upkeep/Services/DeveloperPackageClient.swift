@@ -68,6 +68,8 @@ struct DeveloperPackageClient: Sendable {
         appendDetected(.asdf, named: "asdf", extra: [homePath(".asdf/bin/asdf")], enabledManagers: enabledManagers, to: &tools)
         appendDetected(.volta, named: "volta", extra: [homePath(".volta/bin/volta")], enabledManagers: enabledManagers, to: &tools)
         appendDetected(.fnm, named: "fnm", extra: [homePath(".local/share/fnm/fnm")], enabledManagers: enabledManagers, to: &tools)
+        appendDetected(.dockerImages, named: "docker", extra: ["/Applications/Docker.app/Contents/Resources/bin/docker"],
+            enabledManagers: enabledManagers, to: &tools)
 
         var seenTargets = Set<String>()
         tools = tools.filter { seenTargets.insert("\($0.0.rawValue):\($0.1)").inserted }
@@ -146,7 +148,7 @@ struct DeveloperPackageClient: Sendable {
     }
 
     private func includingPrereleaseUpdates(in packages: [DeveloperPackage]) async -> [DeveloperPackage] {
-        let passthroughManagers: Set<DeveloperPackageManager> = [.node, .bun, .deno, .yarn]
+        let passthroughManagers: Set<DeveloperPackageManager> = [.node, .bun, .deno, .yarn, .dockerImages]
         let passthrough = packages.filter { passthroughManagers.contains($0.manager) }
         let grouped = Dictionary(grouping: packages.filter { !passthroughManagers.contains($0.manager) }) {
             "\($0.manager.rawValue):\($0.registryIdentifier ?? $0.name)"
@@ -227,6 +229,8 @@ struct DeveloperPackageClient: Sendable {
             discovered = await visualStudioMarketplaceVersions(extensionID: package.registryIdentifier ?? package.name)
         case .rustup, .macPorts, .nix, .mise, .asdf, .volta, .fnm:
             discovered = [package.currentVersion, package.latestVersion]
+        case .dockerImages:
+            discovered = []
         case .githubCLI:
             discovered = await latestPublisherReleaseVersions(repository: package.registryIdentifier ?? package.name)
         case .go where package.registryIdentifier == "go-runtime":
@@ -320,6 +324,8 @@ func selectableDeveloperPackageVersions(
     package: DeveloperPackage,
     includePrereleases: Bool
 ) -> [String] {
+    // A tag only pulls its current digest; digests have no version order.
+    if package.manager.comparesDigests { return [package.latestVersion] }
     var allowed = includePrereleases
         ? discovered
         : discovered.filter { !VersionComparator.isPrerelease($0) }
@@ -770,6 +776,106 @@ func scanGitHubCLIExtensions(_ path: String) async -> ManagerScanResult {
         packages: packages,
         warning: updatesResult.status == 0 ? nil : commandWarning(.githubCLI, command: "extension update check", result: updatesResult)
     )
+}
+
+struct DockerImageRow: Equatable, Sendable {
+    let reference: DockerImageReference
+    let digest: String
+}
+
+/// Reads `docker image ls --format '{{json .}}'` lines.
+func parseDockerImageList(_ data: Data) -> [DockerImageRow] {
+    struct Line: Decodable {
+        let repository: String
+        let tag: String
+        let digest: String?
+        enum CodingKeys: String, CodingKey { case repository = "Repository", tag = "Tag", digest = "Digest" }
+    }
+    var seen = Set<String>()
+    return String(decoding: data, as: UTF8.self).split(whereSeparator: \.isNewline).compactMap { line in
+        guard let row = try? JSONDecoder().decode(Line.self, from: Data(line.utf8)),
+              let digest = row.digest, digest.hasPrefix("sha256:"),
+              let reference = DockerImageReference.parse(repository: row.repository, tag: row.tag),
+              seen.insert(reference.pullReference).inserted
+        else { return nil }
+        return DockerImageRow(reference: reference, digest: digest)
+    }
+}
+
+/// A stopped Docker daemon is normal on a Mac, so it is not a failed check.
+func dockerDaemonIsUnavailable(_ output: Data) -> Bool {
+    let text = String(decoding: output, as: UTF8.self)
+    return text.contains("Cannot connect to the Docker daemon") || text.contains("Is the docker daemon running")
+        || text.contains("error during connect")
+}
+
+func scanDockerImages(_ path: String, registry: DockerImageRegistry = DockerImageRegistry()) async -> ManagerScanResult {
+    let listResult = await captureDeveloperCommandAsync(
+        URL(fileURLWithPath: path),
+        ["image", "ls", "--digests", "--no-trunc", "--format", "{{json .}}"]
+    )
+    guard listResult.status == 0 else {
+        if dockerDaemonIsUnavailable(listResult.data) {
+            return ManagerScanResult(manager: .dockerImages, packages: [], warning: nil)
+        }
+        return failedManagerScan(.dockerImages, command: "image inventory", result: listResult)
+    }
+    var rows = parseDockerImageList(listResult.data)
+    var listWarning: String?
+    if rows.contains(where: { $0.reference.isDockerHub && $0.reference.repository.hasPrefix("library/") }) {
+        let official: Set<String>
+        do { official = try await registry.officialImageNames() } catch {
+            official = []
+            listWarning = "Docker Images could not load the official image list, so official images were not checked."
+        }
+        rows = rows.filter { row in
+            guard row.reference.isDockerHub, row.reference.repository.hasPrefix("library/") else { return true }
+            return official.contains(String(row.reference.repository.dropFirst("library/".count)))
+        }
+    }
+    let checked = await withTaskGroup(of: (DockerImageRow, Result<DockerRegistryState, Error>).self) { group in
+        var results: [(DockerImageRow, Result<DockerRegistryState, Error>)] = []
+        var iterator = rows.makeIterator()
+        func enqueue() {
+            guard let row = iterator.next() else { return }
+            group.addTask {
+                do { return (row, .success(try await registry.state(of: row.reference, localDigest: row.digest))) }
+                catch { return (row, .failure(error)) }
+            }
+        }
+        for _ in 0..<4 { enqueue() }
+        for await result in group {
+            results.append(result)
+            enqueue()
+        }
+        return results
+    }
+    var packages: [DeveloperPackage] = []
+    var failures: [String] = []
+    for (row, result) in checked {
+        switch result {
+        case .success(.notFromRegistry):
+            continue
+        case let .success(.checked(latest)):
+            packages.append(DeveloperPackage(
+                name: row.reference.pullReference,
+                currentVersion: shortImageDigest(row.digest),
+                latestVersion: shortImageDigest(latest),
+                manager: .dockerImages,
+                executablePath: path,
+                registryIdentifier: row.reference.pullReference
+            ))
+        case .failure:
+            failures.append(row.reference.pullReference)
+        }
+    }
+    let warning = failures.isEmpty ? listWarning
+        : "Docker Images registry checks failed for \(failures.count) image\(failures.count == 1 ? "" : "s")."
+    return ManagerScanResult(manager: .dockerImages, packages: packages, warning: warning)
+}
+
+func shortImageDigest(_ digest: String) -> String {
+    String(digest.replacingOccurrences(of: "sha256:", with: "").prefix(12))
 }
 
 func scanGoTools(_ path: String) async -> ManagerScanResult {

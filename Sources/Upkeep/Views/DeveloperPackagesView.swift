@@ -519,6 +519,7 @@ private struct DeveloperPackageDetailContent: View {
         case .asdf: return URL(string: "https://asdf-vm.com")
         case .volta: return URL(string: "https://volta.sh")
         case .fnm: return URL(string: "https://github.com/Schniz/fnm")
+        case .dockerImages: return DockerImageReference.pageURL(forPullReference: identifier)
         }
     }
 

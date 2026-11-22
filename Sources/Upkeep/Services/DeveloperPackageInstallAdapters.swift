@@ -93,7 +93,8 @@ enum DeveloperPackageInstallAdapters {
             )
         },
         .volta: adapter { command($0, ["install", "\($0.registryIdentifier ?? $0.name)@\($1)"]) },
-        .fnm: adapter { command($0, ["install", $1]) }
+        .fnm: adapter { command($0, ["install", $1]) },
+        .dockerImages: adapter { package, _ in command(package, ["pull", package.registryIdentifier ?? package.name]) }
     ]
 
     private static func adapter(

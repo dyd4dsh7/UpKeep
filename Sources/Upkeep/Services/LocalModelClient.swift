@@ -25,6 +25,7 @@ struct LocalModelClient: Sendable {
         await withTaskGroup(of: ModelRuntimeScanResult.self) { group in
             group.addTask { await scanOllama() }
             group.addTask { await scanLMStudio() }
+            group.addTask { await scanHuggingFaceCache() }
             var results: [ModelRuntimeScanResult] = []
             for await result in group {
                 if let progress { await progress(report(from: [result]), [result.runtime]) }
@@ -39,6 +40,7 @@ struct LocalModelClient: Sendable {
         switch runtime {
         case .ollama: result = await scanOllama()
         case .lmStudio: result = await scanLMStudio()
+        case .huggingFace: result = await scanHuggingFaceCache()
         }
         return report(from: [result])
     }
@@ -69,7 +71,48 @@ struct LocalModelClient: Sendable {
         case .lmStudio:
             guard let path = model.executablePath else { throw ModelError.runtimeUnavailable("LM Studio") }
             try await run(URL(fileURLWithPath: path), ["get", model.updateReference, "--yes"])
+        case .huggingFace:
+            guard let path = model.executablePath else { throw ModelError.runtimeUnavailable("The Hugging Face CLI (hf)") }
+            // Refresh only the files already cached, at the repository's main revision.
+            let files = huggingFaceCachedFiles(repository: model.updateReference)
+            try await run(URL(fileURLWithPath: path), ["download", model.updateReference] + files)
         }
+    }
+
+    private func scanHuggingFaceCache() async -> ModelRuntimeScanResult {
+        let executable = executable(named: "hf", extra: [
+            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/hf").path
+        ]) ?? executable(named: "huggingface-cli", extra: [
+            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/huggingface-cli").path
+        ])
+        let entries = huggingFaceCacheEntries(roots: huggingFaceCacheRoots())
+        let results = await withTaskGroup(of: (LocalLLMModel, Bool).self) { group in
+            for entry in entries {
+                group.addTask {
+                    let latest = await huggingFaceMainRevision(entry.repository)
+                    return (LocalLLMModel(
+                        id: "huggingface:\(entry.repository)", name: entry.repository, variant: nil,
+                        runtime: .huggingFace, installedRevision: String(entry.revision.prefix(7)),
+                        latestRevision: String((latest ?? entry.revision).prefix(7)),
+                        sizeBytes: entry.sizeBytes, modifiedAt: entry.modifiedAt,
+                        homepage: URL(string: "https://huggingface.co/\(entry.repository)"),
+                        executablePath: executable, updateReference: entry.repository,
+                        isOutdated: latest.map { $0 != entry.revision } ?? false
+                    ), latest == nil)
+                }
+            }
+            var models: [(LocalLLMModel, Bool)] = []
+            for await model in group { models.append(model) }
+            return models
+        }
+        let failedIDs = results.filter { $0.1 }.map { $0.0.id }
+        return ModelRuntimeScanResult(
+            runtime: .huggingFace,
+            models: results.map { $0.0 },
+            failedModelIDs: failedIDs,
+            runtimeFailed: false,
+            warning: failedIDs.isEmpty ? nil : "Hugging Face checks failed for \(failedIDs.count) cached model\(failedIDs.count == 1 ? "" : "s")."
+        )
     }
 
     private func scanOllama() async -> ModelRuntimeScanResult {
@@ -218,6 +261,100 @@ private func lmStudioModelRoots() -> [URL] {
         home.appendingPathComponent("Library/Application Support/LM Studio/models", isDirectory: true)
     ]
     return uniqueExistingDirectories(roots)
+}
+
+/// huggingface_hub's cache: HF_HUB_CACHE, then HF_HOME/hub, then
+/// ~/.cache/huggingface/hub. GUI apps rarely inherit these variables.
+func huggingFaceCacheRoots(environment: [String: String] = ProcessInfo.processInfo.environment) -> [URL] {
+    func path(_ value: String) -> URL { URL(fileURLWithPath: (value as NSString).expandingTildeInPath, isDirectory: true) }
+    var roots: [URL] = []
+    if let cache = environment["HF_HUB_CACHE"] ?? environment["HUGGINGFACE_HUB_CACHE"], !cache.isEmpty {
+        roots.append(path(cache))
+    }
+    if let home = environment["HF_HOME"], !home.isEmpty { roots.append(path(home).appendingPathComponent("hub", isDirectory: true)) }
+    if let xdg = environment["XDG_CACHE_HOME"], !xdg.isEmpty {
+        roots.append(path(xdg).appendingPathComponent("huggingface/hub", isDirectory: true))
+    }
+    roots.append(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".cache/huggingface/hub", isDirectory: true))
+    return uniqueExistingDirectories(roots)
+}
+
+struct HuggingFaceCacheEntry: Equatable, Sendable {
+    let repository: String
+    let revision: String
+    let sizeBytes: Int64?
+    let modifiedAt: Date?
+}
+
+/// Model repositories that track `main`. Datasets, spaces, and models
+/// downloaded at a pinned revision (no refs/main) are not checked.
+func huggingFaceCacheEntries(roots: [URL]) -> [HuggingFaceCacheEntry] {
+    let fileManager = FileManager.default
+    var seen = Set<String>()
+    return roots.flatMap { root -> [HuggingFaceCacheEntry] in
+        let folders = (try? fileManager.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
+        return folders.compactMap { folder in
+            let name = folder.lastPathComponent
+            guard name.hasPrefix("models--") else { return nil }
+            let parts = name.dropFirst("models--".count).components(separatedBy: "--")
+            guard parts.count == 2, parts.allSatisfy({ !$0.isEmpty }) else { return nil }
+            let repository = parts.joined(separator: "/")
+            let ref = folder.appendingPathComponent("refs/main")
+            guard seen.insert(repository).inserted,
+                  let revision = (try? String(contentsOf: ref, encoding: .utf8))?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                  revision.count == 40, revision.allSatisfy(\.isHexDigit),
+                  fileManager.fileExists(atPath: folder.appendingPathComponent("snapshots/\(revision)").path)
+            else { return nil }
+            let modified = (try? ref.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            return HuggingFaceCacheEntry(
+                repository: repository, revision: revision,
+                sizeBytes: directorySize(folder.appendingPathComponent("blobs", isDirectory: true)),
+                modifiedAt: modified
+            )
+        }
+    }
+}
+
+/// Relative paths in the cached main snapshot, so an update refreshes the same files.
+func huggingFaceCachedFiles(repository: String, roots: [URL] = huggingFaceCacheRoots()) -> [String] {
+    let folderName = "models--" + repository.replacingOccurrences(of: "/", with: "--")
+    for root in roots {
+        let folder = root.appendingPathComponent(folderName, isDirectory: true)
+        guard let revision = (try? String(contentsOf: folder.appendingPathComponent("refs/main"), encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines) else { continue }
+        let snapshot = folder.appendingPathComponent("snapshots/\(revision)", isDirectory: true).standardizedFileURL
+        guard let enumerator = FileManager.default.enumerator(at: snapshot, includingPropertiesForKeys: nil) else { continue }
+        return enumerator.compactMap { $0 as? URL }
+            .filter { (try? $0.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink == true }
+            .map { String($0.standardizedFileURL.path.dropFirst(snapshot.path.count + 1)) }
+            .sorted()
+    }
+    return []
+}
+
+private func directorySize(_ url: URL) -> Int64? {
+    let keys: Set<URLResourceKey> = [.isRegularFileKey, .fileSizeKey]
+    guard let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: Array(keys)) else { return nil }
+    return enumerator.compactMap { $0 as? URL }.reduce(into: Int64(0)) { total, file in
+        guard let values = try? file.resourceValues(forKeys: keys), values.isRegularFile == true else { return }
+        total += Int64(values.fileSize ?? 0)
+    }
+}
+
+private func huggingFaceMainRevision(_ repository: String) async -> String? {
+    guard let encoded = repository.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+          let url = URL(string: "https://huggingface.co/api/models/\(encoded)/revision/main") else { return nil }
+    var request = URLRequest(url: url)
+    request.timeoutInterval = 20
+    request.setValue("Upkeep/1.0", forHTTPHeaderField: "User-Agent")
+    struct Revision: Decodable { let sha: String }
+    guard let (data, response) = try? await PublisherHTTPClient.data(for: request),
+          200..<300 ~= response.statusCode,
+          let revision = try? JSONDecoder().decode(Revision.self, from: data),
+          revision.sha.count == 40
+    else { return nil }
+    return revision.sha
 }
 
 private func uniqueExistingDirectories(_ urls: [URL]) -> [URL] {

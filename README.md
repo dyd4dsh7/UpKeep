@@ -25,8 +25,8 @@
 
 ## Why Upkeep
 
-- **One list for everything.** Apps, Homebrew, macOS, packages from 23 developer
-  tools (npm, pip, Cargo, Go, and more), and local AI models share one
+- **One list for everything.** Apps, Homebrew, macOS, packages from 24 developer
+  tools (npm, pip, Cargo, Go, Docker, and more), and local AI models share one
   **All Updates** view, with a live count in the toolbar, menu bar, and Dock.
 - **Uses what you already have.** Upkeep works through the tools installed on your
   Mac. Homebrew and developer checks are opt-in.
@@ -73,8 +73,8 @@ If a release has no build attached, [build from source](#build-from-source).
 | **Homebrew** | Installed formulae and casks, including dependencies |
 | **GitHub Releases** | Repos found in app or Electron update metadata, trusted mappings, or a repo you verify |
 | **macOS** | Apple's Software Update catalog and full installers |
-| **Developer packages** | Global packages from 23 managers, including npm, pnpm, Yarn, Bun, pip, uv, RubyGems, Cargo, and Go |
-| **Local AI models** | Ollama registry manifests and LM Studio's Hugging Face repos |
+| **Developer packages** | Global packages from 24 managers, including npm, pnpm, Yarn, Bun, pip, uv, RubyGems, Cargo, Go, and Docker images |
+| **Local AI models** | Ollama registry manifests, LM Studio's Hugging Face repos, and the Hugging Face cache |
 
 Apps with their own updater are recognised and handed to it: TestFlight, Setapp,
 Microsoft AutoUpdate, Steam, Adobe Creative Cloud, JetBrains Toolbox, Epic Games,
@@ -137,9 +137,19 @@ Upkeep lists global packages for the managers you have installed:
 - **Ruby and Rust:** RubyGems, Rustup, and Cargo
 - **Other tools:** Go, Composer, .NET tools, GitHub CLI, and VS Code extensions
 - **System managers:** MacPorts, Nix, mise, and asdf
+- **Containers:** Docker images pulled from a public registry
 
 It keeps the executable path it found (such as an NVM Node install) when
 updating, and lets you pick a specific published version.
+
+Docker images are compared by content digest and updated with `docker pull`.
+Upkeep only lists an image when its registry recognises the local digest, so
+local builds are never flagged or overwritten, even when they share a public
+image's name. Unqualified names are checked only when they are on Docker's
+official image list, so local project names are not sent to Docker Hub.
+Upkeep uses HEAD requests, which do not count toward Docker Hub's pull limit.
+It doesn't sign in to registries, so private images aren't listed, and a
+stopped Docker daemon is skipped quietly.
 
 **Cleanup** for Homebrew, npm, pnpm, and uv starts with a dry run, shows the
 estimated size (or says when a manager can't predict it), asks before cleaning,
@@ -200,6 +210,12 @@ executable is checked, not every helper.
 Upkeep finds installed Ollama and LM Studio models and compares them with their
 registry or Hugging Face source. Updates run through `ollama pull` or `lms get`,
 so credentials and storage stay with your runtime.
+
+Models in the Hugging Face cache (`~/.cache/huggingface/hub`, or `HF_HUB_CACHE`
+and `HF_HOME`), such as MLX models, are compared with their repository's `main`
+branch. Updates run `hf download` for the files already cached, so the Hugging
+Face CLI must be installed. Models downloaded at a pinned revision are left
+alone, and gated or private models can't be checked without signing in.
 
 ## Privacy and permissions
 
