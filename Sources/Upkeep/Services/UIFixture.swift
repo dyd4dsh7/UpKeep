@@ -18,6 +18,16 @@ enum UIFixture {
         return ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix(prefix) })
             .flatMap { SidebarDestination(rawValue: String($0.dropFirst(prefix.count))) }
     }
+    /// Opens Settings on a section for visual QA, e.g. `--ui-fixture-settings=Sources`.
+    static var settingsSection: SettingsSection? {
+        let prefix = "--ui-fixture-settings="
+        return ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix(prefix) })
+            .flatMap { SettingsSection(rawValue: String($0.dropFirst(prefix.count))) }
+    }
+    /// Opens the batch review sheet for visual QA.
+    static var showsBatchReview: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-fixture-batch")
+    }
     static var showsProgress: Bool {
         ProcessInfo.processInfo.arguments.contains("--ui-fixture-slow")
     }

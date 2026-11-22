@@ -21,6 +21,7 @@ struct UpkeepApp: App {
             _settings = StateObject(wrappedValue: appSettings)
             let fixtureStore = UIFixture.makeStore(settings: appSettings, operationState: UIFixture.operationState)
             if let route = UIFixture.route { fixtureStore.navigation.selection = route }
+            if let section = UIFixture.settingsSection { appSettings.selectedSection = section }
             UpkeepAppDelegate.store = fixtureStore
             _store = UpkeepState(initialValue: fixtureStore)
             return
@@ -50,6 +51,9 @@ struct UpkeepApp: App {
                             NSApp.appearance = NSAppearance(named: .aqua)
                         } else if ProcessInfo.processInfo.arguments.contains("--ui-fixture-dark") {
                             NSApp.appearance = NSAppearance(named: .darkAqua)
+                        }
+                        if UIFixture.showsBatchReview {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { store.isShowingBatchReview = true }
                         }
                     }
                     #endif

@@ -92,7 +92,7 @@ struct MacOSUpdatesView: View {
                     } header: {
                         Text("Full macOS Installers")
                     } footer: {
-                        Text("Installers offered by Apple for clean installs, upgrades, and recovery media.")
+                        SettingsFooter("Installers offered by Apple for clean installs, upgrades, and recovery media.")
                     }
                 }
             }

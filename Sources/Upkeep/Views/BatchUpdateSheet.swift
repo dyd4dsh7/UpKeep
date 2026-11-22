@@ -128,7 +128,8 @@ struct BatchUpdateSheet: View {
                     .disabled(selectedItems.isEmpty)
                 Spacer()
             }
-            .buttonStyle(.link)
+            // `.link` is always system blue; this keeps the sheet's green tint.
+            .buttonStyle(TintedLinkButtonStyle())
             .padding(.horizontal, 20)
             .padding(.top, 12)
 
@@ -408,6 +409,18 @@ private final class BatchUpdateSheetState: ObservableObject {
     }
 }
 
+/// A text button in the accent tint that dims when disabled or pressed.
+private struct TintedLinkButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(Color.accentColor)
+            .opacity(isEnabled ? (configuration.isPressed ? 0.6 : 1) : 0.4)
+            .contentShape(Rectangle())
+    }
+}
+
 private struct BatchGroupHeader: View {
     let group: UpdateRiskGroup
     let itemCount: Int
@@ -426,17 +439,15 @@ private struct BatchGroupHeader: View {
                     .font(.callout.weight(.semibold))
                     .foregroundStyle(.primary)
                 Spacer()
-                if selectedCount > 0 {
-                    Text("\(selectedCount) selected")
-                        .font(.caption2.weight(.medium).monospacedDigit())
-                        .foregroundStyle(Color.accentColor)
-                }
-                Text("\(itemCount)")
+                // One count: "2 of 3" while some are selected, otherwise the total.
+                Text(selectedCount > 0 ? "\(selectedCount) of \(itemCount)" : "\(itemCount)")
                     .font(.caption.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(selectedCount > 0 ? Color.accentColor : .secondary)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 3)
-                    .background(.quaternary, in: Capsule())
+                    .background(selectedCount > 0 ? AnyShapeStyle(Color.accentColor.opacity(0.14)) : AnyShapeStyle(.quaternary),
+                                in: Capsule())
+                    .contentTransition(.numericText())
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
@@ -446,7 +457,8 @@ private struct BatchGroupHeader: View {
             .padding(.vertical, 5)
         }
         .buttonStyle(.borderless)
-        .accessibilityLabel("\(group.title), \(WorkspaceSummary.count(itemCount, "update", "updates"))")
+        .accessibilityLabel("\(group.title), \(WorkspaceSummary.count(itemCount, "update", "updates"))"
+            + (selectedCount > 0 ? ", \(selectedCount) selected" : ""))
         .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
         .accessibilityHint(group.detail)
     }

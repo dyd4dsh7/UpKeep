@@ -4,6 +4,7 @@ struct ContentView: View {
     @UpkeepStoreReference private var store
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
     @UpkeepState private var columnVisibility: NavigationSplitViewVisibility = .all
     @UpkeepState private var sidebarCollapsedForInspector = false
     @UpkeepState private var showingOperations = false
@@ -83,6 +84,9 @@ struct ContentView: View {
                 .interactiveDismissDisabled()
         }
         .task {
+            #if DEBUG
+            if UIFixture.settingsSection != nil { openSettings() }
+            #endif
             // The menu bar, Dock and notifications reopen this window through it.
             MainWindow.openAction = openWindow
             if settings.hasCompletedSetup { await store.start() }

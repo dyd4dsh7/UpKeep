@@ -50,9 +50,6 @@ struct SettingsView: View {
 
     private var settingsNavigation: some View {
         VStack(alignment: .leading, spacing: 9) {
-            WorkspaceSectionLabel(title: "Settings")
-                .padding(.horizontal, 13)
-                .padding(.top, 16)
             List(selection: settingsSelection) {
                 Section {
                     ForEach(visibleSettingsSections.filter { [.general, .sources, .developer, .ignored].contains($0) }) {
@@ -72,6 +69,7 @@ struct SettingsView: View {
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
             .accessibilityLabel("Settings sections")
+            .padding(.top, 10)
         }
         .padding(.horizontal, 8)
         .background(.regularMaterial)
@@ -119,10 +117,11 @@ struct SettingsView: View {
             } header: {
                 Text("Startup")
             } footer: {
-                Text("Background checks run only while Upkeep is open.")
+                SettingsFooter("Background checks run only while Upkeep is open.")
             }
             Section {
-                SettingsOptionRow(title: "Navigation", systemImage: "sidebar.left") {
+                SettingsOptionRow(title: "Navigation", detail: settings.sidebarViewMode.detail,
+                                  systemImage: "sidebar.left") {
                     Picker("Navigation", selection: $settings.sidebarViewMode) {
                         ForEach(SidebarViewMode.allCases) { Text($0.title).tag($0) }
                     }
@@ -130,7 +129,8 @@ struct SettingsView: View {
                     .pickerStyle(.segmented)
                     .frame(width: 190)
                 }
-                SettingsOptionRow(title: "List density", systemImage: "line.3.horizontal") {
+                SettingsOptionRow(title: "List density", detail: settings.listDensity.detail,
+                                  systemImage: "line.3.horizontal") {
                     Picker("List density", selection: $settings.listDensity) {
                         ForEach(ListDensity.allCases) { Text($0.title).tag($0) }
                     }
@@ -140,8 +140,6 @@ struct SettingsView: View {
                 }
             } header: {
                 Text("Appearance")
-            } footer: {
-                Text(settings.sidebarViewMode.detail)
             }
             Section {
                 SettingsOptionRow(
@@ -355,7 +353,7 @@ struct SettingsView: View {
                 } header: {
                     Text("App Management")
                 } footer: {
-                    Text("macOS App Management controls whether Upkeep can update or delete other apps. The check opens one eligible app file for modification but does not write, truncate, or change it.")
+                    SettingsFooter("macOS App Management controls whether Upkeep can update or delete other apps. The check opens one eligible app file for modification but does not write, truncate, or change it.")
                 }
             }
             SourceHealthView(settings: settings)
@@ -628,6 +626,21 @@ struct SettingsView: View {
     }
 
 
+}
+
+/// Grouped-form footers trail-align on macOS; keep explanations under their card.
+struct SettingsFooter: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 10) // Aligns with the grouped-form section headers.
+    }
 }
 
 private struct SettingsOptionRow<Control: View>: View {
