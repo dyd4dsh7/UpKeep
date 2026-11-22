@@ -94,7 +94,30 @@ enum DeveloperPackageInstallAdapters {
         },
         .volta: adapter { command($0, ["install", "\($0.registryIdentifier ?? $0.name)@\($1)"]) },
         .fnm: adapter { command($0, ["install", $1]) },
-        .dockerImages: adapter { package, _ in command(package, ["pull", package.registryIdentifier ?? package.name]) }
+        .dockerImages: adapter { package, _ in command(package, ["pull", package.registryIdentifier ?? package.name]) },
+        // registryIdentifier is "environment/dependency"; pixi updates whole environments.
+        .pixi: adapter { package, _ in
+            command(package, ["global", "update", String((package.registryIdentifier ?? package.name).split(separator: "/").first ?? "")])
+        },
+        .krew: adapter { package, _ in command(package, ["upgrade", package.registryIdentifier ?? package.name]) },
+        .juliaup: adapter { package, _ in command(package, ["update", package.registryIdentifier ?? package.name]) },
+        .opam: adapter { command($0, ["install", "-y", "\($0.registryIdentifier ?? $0.name).\($1)"]) },
+        .dart: adapter { command($0, ["pub", "global", "activate", $0.registryIdentifier ?? $0.name, $1]) },
+        .poetry: adapter { command($0, ["self", "update", $1]) },
+        .flutter: adapter { package, _ in command(package, ["upgrade"]) },
+        .ghcup: adapter { command($0, ["install", $0.registryIdentifier ?? $0.name, $1, "--set"]) },
+        .swiftly: adapter { package, _ in command(package, ["update", package.registryIdentifier ?? package.currentVersion, "--assume-yes"]) },
+        .conda: adapter { command($0, ["install", "-n", "base", "-y", "\($0.registryIdentifier ?? $0.name)=\($1)"]) },
+        .sdkman: adapter { package, version in
+            // `sdk` is a bash function. stdin from /dev/null answers its only
+            // prompt ("set as default?") with the default, Yes.
+            .command(
+                executable: URL(fileURLWithPath: "/bin/bash"),
+                arguments: ["-c", #"source "$1" && sdk install "$2" "$3" < /dev/null"#, "upkeep-sdkman",
+                    package.executablePath, package.registryIdentifier ?? package.name, version],
+                failureMessage: "SDKMAN! update failed"
+            )
+        }
     ]
 
     private static func adapter(

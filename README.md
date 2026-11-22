@@ -25,8 +25,8 @@
 
 ## Why Upkeep
 
-- **One list for everything.** Apps, Homebrew, macOS, packages from 24 developer
-  tools (npm, pip, Cargo, Go, Docker, and more), and local AI models share one
+- **One list for everything.** Apps, Homebrew, macOS, packages from 35 developer
+  tools (npm, pip, Cargo, Go, Docker, Conda, and more), and local AI models share one
   **All Updates** view, with a live count in the toolbar, menu bar, and Dock.
 - **Uses what you already have.** Upkeep works through the tools installed on your
   Mac. Homebrew and developer checks are opt-in.
@@ -73,7 +73,7 @@ If a release has no build attached, [build from source](#build-from-source).
 | **Homebrew** | Installed formulae and casks, including dependencies |
 | **GitHub Releases** | Repos found in app or Electron update metadata, trusted mappings, or a repo you verify |
 | **macOS** | Apple's Software Update catalog and full installers |
-| **Developer packages** | Global packages from 24 managers, including npm, pnpm, Yarn, Bun, pip, uv, RubyGems, Cargo, Go, and Docker images |
+| **Developer packages** | Global packages from 35 managers, including npm, pnpm, Yarn, Bun, pip, uv, Conda, RubyGems, Cargo, Go, and Docker images |
 | **Local AI models** | Ollama registry manifests, LM Studio's Hugging Face repos, and the Hugging Face cache |
 
 Apps with their own updater are recognised and handed to it: TestFlight, Setapp,
@@ -143,15 +143,26 @@ the app bundles they install as well as by name.
 Upkeep lists global packages for the managers you have installed:
 
 - **JavaScript:** Node.js, Bun, Deno, npm, pnpm, Yarn, Volta, and fnm
-- **Python:** Python/pip, pipx, and uv
+- **Python:** Python/pip, pipx, uv, Poetry (official installer), Conda base
+  environments, and pixi global packages
 - **Ruby and Rust:** RubyGems, Rustup, and Cargo
 - **Other tools:** Go, Composer, .NET tools, GitHub CLI, and editor extensions for
   VS Code, Cursor, VSCodium, and Windsurf (now Devin Desktop)
+- **Language toolchains:** Flutter, Dart global packages, swiftly (Swift),
+  juliaup (Julia), GHCup (Haskell), opam (OCaml), and SDKMAN! (Java and JVM tools)
+- **Kubernetes:** Krew kubectl plugins
 - **System managers:** MacPorts, Nix, mise, and asdf
 - **Containers:** Docker images pulled from a public registry
 
 It keeps the executable path it found (such as an NVM Node install) when
 updating, and lets you pick a specific published version.
+
+Some managers have their own update rules. swiftly toolchains update within
+their minor release, GHCup tools are compared with GHCup's recommended version,
+SDKMAN! candidates keep their vendor (a Temurin JDK is not offered Zulu), and
+opam packages follow your last `opam update`. Poetry is checked only when the
+official installer put it there; Homebrew and pipx copies update with those
+managers.
 
 Editor extensions are checked against the gallery each editor installs from, read
 from its `product.json`: the Visual Studio Marketplace for VS Code, Open VSX for

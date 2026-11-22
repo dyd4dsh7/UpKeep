@@ -522,6 +522,19 @@ private struct DeveloperPackageDetailContent: View {
         case .volta: return URL(string: "https://volta.sh")
         case .fnm: return URL(string: "https://github.com/Schniz/fnm")
         case .dockerImages: return DockerImageReference.pageURL(forPullReference: identifier)
+        case .pixi:
+            let name = identifier.split(separator: "/").last.map(String.init) ?? identifier
+            return URL(string: "https://prefix.dev/channels/conda-forge/packages/\(name)")
+        case .krew: return URL(string: "https://krew.sigs.k8s.io/plugins/")
+        case .juliaup: return URL(string: "https://julialang.org/downloads/")
+        case .opam: return URL(string: "https://opam.ocaml.org/packages/\(encoded)/")
+        case .dart: return URL(string: "https://pub.dev/packages/\(encoded)")
+        case .poetry: return URL(string: "https://python-poetry.org/history/")
+        case .flutter: return URL(string: "https://docs.flutter.dev/release/release-notes")
+        case .ghcup: return URL(string: "https://www.haskell.org/ghcup/")
+        case .swiftly: return URL(string: "https://www.swift.org/install/")
+        case .conda: return URL(string: "https://anaconda.org/conda-forge/\(encoded)")
+        case .sdkman: return URL(string: "https://sdkman.io/sdks/\(encoded)")
         }
     }
 

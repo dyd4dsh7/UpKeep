@@ -80,6 +80,17 @@ enum DeveloperPackageUninstallAdapters {
         case .dockerImages:
             // Containers may still use the image; leave removal to Docker.
             throw AdapterError.unsupportedPackage(package.name)
+        case .krew:
+            return command(package, ["uninstall", package.registryIdentifier ?? package.name])
+        case .juliaup:
+            return command(package, ["remove", package.registryIdentifier ?? package.name])
+        case .opam:
+            return command(package, ["remove", "-y", package.registryIdentifier ?? package.name])
+        case .dart:
+            return command(package, ["pub", "global", "deactivate", package.registryIdentifier ?? package.name])
+        case .pixi, .poetry, .flutter, .ghcup, .swiftly, .conda, .sdkman:
+            // Shared environments, SDKs and toolchains are removed with the tool itself.
+            throw AdapterError.unsupportedPackage(package.name)
         }
     }
 

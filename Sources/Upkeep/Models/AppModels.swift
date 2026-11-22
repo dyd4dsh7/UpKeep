@@ -977,14 +977,28 @@ enum DeveloperPackageManager: String, Codable, CaseIterable, Identifiable, Senda
     case volta = "Volta"
     case fnm = "fnm"
     case dockerImages = "Docker Images"
+    case pixi = "pixi"
+    case krew = "Krew"
+    case juliaup = "juliaup"
+    case opam = "opam"
+    case dart = "Dart"
+    case poetry = "Poetry"
+    case flutter = "Flutter"
+    case ghcup = "GHCup"
+    case swiftly = "swiftly"
+    case conda = "Conda"
+    case sdkman = "SDKMAN!"
     var id: Self { self }
-    /// Docker images change by content digest, not by a comparable version.
-    var comparesDigests: Bool { self == .dockerImages }
+    /// Docker images change by content digest, and SDKMAN identifiers carry a
+    /// vendor suffix ("21.0.5-tem") that reads like a prerelease. Their
+    /// scanners only offer a newer target, so any difference is an update.
+    var comparesExactVersions: Bool { self == .dockerImages || self == .sdkman }
     var belongsToJavaScriptEcosystem: Bool {
         switch self {
         case .node, .bun, .deno, .npm, .pnpm, .yarn, .volta, .fnm: true
         case .vsCode, .uv, .pipx, .python, .rubyGems, .rustup, .cargo,
-             .githubCLI, .go, .composer, .dotnet, .macPorts, .nix, .mise, .asdf, .dockerImages: false
+             .githubCLI, .go, .composer, .dotnet, .macPorts, .nix, .mise, .asdf, .dockerImages,
+             .pixi, .krew, .juliaup, .opam, .dart, .poetry, .flutter, .ghcup, .swiftly, .conda, .sdkman: false
         }
     }
     var assetName: String {
@@ -1013,6 +1027,17 @@ enum DeveloperPackageManager: String, Codable, CaseIterable, Identifiable, Senda
         case .volta: "volta"
         case .fnm: "fnm"
         case .dockerImages: "docker"
+        case .pixi: "pixi"
+        case .krew: "krew"
+        case .juliaup: "julia"
+        case .opam: "opam"
+        case .dart: "dart"
+        case .poetry: "poetry"
+        case .flutter: "flutter"
+        case .ghcup: "haskell"
+        case .swiftly: "swift"
+        case .conda: "conda"
+        case .sdkman: "sdkman"
         }
     }
     var packageLabel: String {
@@ -1038,6 +1063,17 @@ enum DeveloperPackageManager: String, Codable, CaseIterable, Identifiable, Senda
         case .mise, .asdf: "Managed developer tool"
         case .volta, .fnm: "Managed JavaScript runtime"
         case .dockerImages: "Docker image"
+        case .pixi: "pixi global package"
+        case .krew: "kubectl plugin"
+        case .juliaup: "Julia release channel"
+        case .opam: "OCaml package"
+        case .dart: "Dart global package"
+        case .poetry: "Python packaging tool"
+        case .flutter: "Flutter SDK"
+        case .ghcup: "Haskell tool"
+        case .swiftly: "Swift toolchain"
+        case .conda: "Conda package"
+        case .sdkman: "SDKMAN! candidate"
         }
     }
     var homepage: URL? {
@@ -1066,6 +1102,17 @@ enum DeveloperPackageManager: String, Codable, CaseIterable, Identifiable, Senda
         case .volta: URL(string: "https://volta.sh")
         case .fnm: URL(string: "https://github.com/Schniz/fnm")
         case .dockerImages: URL(string: "https://hub.docker.com")
+        case .pixi: URL(string: "https://pixi.sh")
+        case .krew: URL(string: "https://krew.sigs.k8s.io")
+        case .juliaup: URL(string: "https://github.com/JuliaLang/juliaup")
+        case .opam: URL(string: "https://opam.ocaml.org")
+        case .dart: URL(string: "https://pub.dev")
+        case .poetry: URL(string: "https://python-poetry.org")
+        case .flutter: URL(string: "https://flutter.dev")
+        case .ghcup: URL(string: "https://www.haskell.org/ghcup")
+        case .swiftly: URL(string: "https://www.swift.org/install")
+        case .conda: URL(string: "https://anaconda.org/conda-forge")
+        case .sdkman: URL(string: "https://sdkman.io")
         }
     }
 }
@@ -1101,20 +1148,20 @@ struct DeveloperPackage: Identifiable, Hashable, Sendable {
         self.canUpdateAutomatically = canUpdateAutomatically
     }
     var isOutdated: Bool {
-        manager.comparesDigests
+        manager.comparesExactVersions
             ? latestVersion != currentVersion
             : VersionComparator.isNewer(latestVersion, than: currentVersion)
     }
     var availablePrereleaseChannel: PrereleaseChannel? {
-        manager.comparesDigests ? nil : VersionComparator.prereleaseChannel(for: latestVersion)
+        manager.comparesExactVersions ? nil : VersionComparator.prereleaseChannel(for: latestVersion)
     }
     var prereleaseChannel: PrereleaseChannel? {
-        if manager.comparesDigests { return nil }
+        if manager.comparesExactVersions { return nil }
         return availablePrereleaseChannel
             ?? VersionComparator.prereleaseChannel(for: currentVersion)
     }
     var prereleaseIsInstalled: Bool {
-        !manager.comparesDigests
+        !manager.comparesExactVersions
             && availablePrereleaseChannel == nil && VersionComparator.isPrerelease(currentVersion)
     }
 

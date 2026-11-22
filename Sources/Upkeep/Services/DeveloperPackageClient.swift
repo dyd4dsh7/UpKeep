@@ -70,6 +70,19 @@ struct DeveloperPackageClient: Sendable {
         appendDetected(.fnm, named: "fnm", extra: [homePath(".local/share/fnm/fnm")], enabledManagers: enabledManagers, to: &tools)
         appendDetected(.dockerImages, named: "docker", extra: ["/Applications/Docker.app/Contents/Resources/bin/docker"],
             enabledManagers: enabledManagers, to: &tools)
+        appendDetected(.pixi, named: "pixi", extra: [homePath(".pixi/bin/pixi")], enabledManagers: enabledManagers, to: &tools)
+        appendDetected(.krew, named: "kubectl-krew", extra: [homePath(".krew/bin/kubectl-krew")], enabledManagers: enabledManagers, to: &tools)
+        appendDetected(.juliaup, named: "juliaup", extra: [homePath(".juliaup/bin/juliaup")], enabledManagers: enabledManagers, to: &tools)
+        appendDetected(.opam, named: "opam", extra: [homePath(".local/bin/opam")], enabledManagers: enabledManagers, to: &tools)
+        appendDetected(.dart, named: "dart", extra: [], enabledManagers: enabledManagers, to: &tools)
+        appendDetected(.flutter, named: "flutter", extra: [
+            homePath("flutter/bin/flutter"), homePath("development/flutter/bin/flutter"), "/opt/homebrew/share/flutter/bin/flutter"
+        ], enabledManagers: enabledManagers, to: &tools)
+        appendDetected(.ghcup, named: "ghcup", extra: [homePath(".ghcup/bin/ghcup")], enabledManagers: enabledManagers, to: &tools)
+        appendDetected(.swiftly, named: "swiftly", extra: [homePath(".swiftly/bin/swiftly")], enabledManagers: enabledManagers, to: &tools)
+        if enabledManagers.contains(.poetry) { tools.append(contentsOf: officialPoetryExecutables().map { (.poetry, $0) }) }
+        if enabledManagers.contains(.conda) { tools.append(contentsOf: condaExecutables().map { (.conda, $0) }) }
+        if enabledManagers.contains(.sdkman), let script = sdkmanInitScript() { tools.append((.sdkman, script)) }
 
         var seenTargets = Set<String>()
         tools = tools.filter { seenTargets.insert("\($0.0.rawValue):\($0.1)").inserted }
@@ -236,6 +249,10 @@ struct DeveloperPackageClient: Sendable {
             discovered = [package.currentVersion, package.latestVersion]
         case .dockerImages:
             discovered = []
+        case .dart:
+            discovered = await pubDevVersions(package.registryIdentifier ?? package.name)
+        case .pixi, .krew, .juliaup, .opam, .poetry, .flutter, .ghcup, .swiftly, .conda, .sdkman:
+            discovered = [package.currentVersion, package.latestVersion]
         case .githubCLI:
             discovered = await latestPublisherReleaseVersions(repository: package.registryIdentifier ?? package.name)
         case .go where package.registryIdentifier == "go-runtime":
@@ -330,7 +347,7 @@ func selectableDeveloperPackageVersions(
     includePrereleases: Bool
 ) -> [String] {
     // A tag only pulls its current digest; digests have no version order.
-    if package.manager.comparesDigests { return [package.latestVersion] }
+    if package.manager.comparesExactVersions { return [package.latestVersion] }
     var allowed = includePrereleases
         ? discovered
         : discovered.filter { !VersionComparator.isPrerelease($0) }

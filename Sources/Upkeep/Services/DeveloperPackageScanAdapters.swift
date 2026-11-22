@@ -63,7 +63,18 @@ enum DeveloperPackageScanAdapters {
         .asdf: adapter(.asdf) { path, _ in await scanASDF(path) },
         .volta: adapter(.volta) { path, _ in await scanVolta(path) },
         .fnm: adapter(.fnm) { path, _ in await scanFNM(path) },
-        .dockerImages: adapter(.dockerImages) { path, _ in await scanDockerImages(path) }
+        .dockerImages: adapter(.dockerImages) { path, _ in await scanDockerImages(path) },
+        .pixi: adapter(.pixi) { path, _ in await scanPixiGlobal(path) },
+        .krew: adapter(.krew) { path, _ in await scanKrewPlugins(path) },
+        .juliaup: adapter(.juliaup) { path, _ in await scanJuliaup(path) },
+        .opam: adapter(.opam) { path, _ in await scanOpamPackages(path) },
+        .dart: adapter(.dart) { path, _ in await scanDartGlobalPackages(path) },
+        .poetry: adapter(.poetry) { path, _ in await scanPoetry(path) },
+        .flutter: adapter(.flutter) { path, _ in await scanFlutter(path) },
+        .ghcup: adapter(.ghcup) { path, _ in await scanGHCup(path) },
+        .swiftly: adapter(.swiftly) { path, _ in await scanSwiftly(path) },
+        .conda: adapter(.conda) { path, _ in await scanConda(path) },
+        .sdkman: adapter(.sdkman) { path, _ in await scanSDKMAN(path) }
     ]
 
     private static func adapter(
