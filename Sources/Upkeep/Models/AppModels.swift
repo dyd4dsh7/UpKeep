@@ -19,6 +19,8 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
     /// `latest-mac.yml` for Electron apps using electron-updater's generic provider.
     let electronUpdateFeedURL: URL?
     let vendorUpdateProduct: VendorUpdateProduct?
+    /// An iPhone or iPad app running on Apple silicon, wrapped in a Mac bundle.
+    let isWrappedIOSApp: Bool
     let steamAppID: String?
     let managedUpdateStatus: ManagedUpdateStatus?
     let installedAt: Date?
@@ -53,6 +55,7 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
         braveUpdateChannel: BraveUpdateChannel? = nil,
         electronUpdateFeedURL: URL? = nil,
         vendorUpdateProduct: VendorUpdateProduct? = nil,
+        isWrappedIOSApp: Bool = false,
         steamAppID: String? = nil,
         managedUpdateStatus: ManagedUpdateStatus? = nil,
         installedAt: Date? = nil,
@@ -82,6 +85,7 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
         self.braveUpdateChannel = braveUpdateChannel
         self.electronUpdateFeedURL = electronUpdateFeedURL
         self.vendorUpdateProduct = vendorUpdateProduct
+        self.isWrappedIOSApp = isWrappedIOSApp
         self.steamAppID = steamAppID
         self.managedUpdateStatus = managedUpdateStatus
         self.installedAt = installedAt
@@ -100,7 +104,7 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
     /// remain eligible even when they embed an updater; the Homebrew catalog
     /// separately excludes casks that declare `auto_updates`.
     var allowsHomebrewAdoption: Bool {
-        updateManagement == .direct
+        updateManagement == .direct && !isWrappedIOSApp
     }
 
     func replacingGitHubRepository(_ repository: String?) -> InstalledApp {
@@ -121,6 +125,7 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
             braveUpdateChannel: braveUpdateChannel,
             electronUpdateFeedURL: electronUpdateFeedURL,
             vendorUpdateProduct: vendorUpdateProduct,
+            isWrappedIOSApp: isWrappedIOSApp,
             steamAppID: steamAppID,
             managedUpdateStatus: managedUpdateStatus,
             installedAt: installedAt,

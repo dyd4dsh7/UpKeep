@@ -47,6 +47,7 @@ enum AppDiscovery {
     }
 
     private static func app(at url: URL, microsoftRegisteredPaths: Set<String>) -> InstalledApp? {
+        if let wrapped = wrappedIOSApp(at: url) { return wrapped }
         let infoURL = url.appendingPathComponent("Contents/Info.plist")
         guard let infoData = try? Data(contentsOf: infoURL, options: .mappedIfSafe),
               let info = try? PropertyListSerialization.propertyList(
@@ -129,6 +130,70 @@ enum AppDiscovery {
             modifiedAt: dates?.contentModificationDate,
             architectures: AppArchitectureInspector.architectures(at: url, info: info)
         )
+    }
+
+    // MARK: - iPhone and iPad apps
+
+    /// iPhone and iPad apps on Apple silicon install as `Name.app/Wrapper/Name.app`,
+    /// with a `WrappedBundle` link and no `Contents` folder. The App Store writes
+    /// `Wrapper/iTunesMetadata.plist` instead of a `_MASReceipt`.
+    static func wrappedIOSBundle(at url: URL) -> URL? {
+        let fileManager = FileManager.default
+        guard !fileManager.fileExists(atPath: url.appendingPathComponent("Contents/Info.plist").path) else { return nil }
+        let wrapper = url.appendingPathComponent("Wrapper", isDirectory: true)
+        let bundles = ((try? fileManager.contentsOfDirectory(at: wrapper, includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.pathExtension.lowercased() == "app" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        return bundles.first { fileManager.fileExists(atPath: $0.appendingPathComponent("Info.plist").path) }
+    }
+
+    private static func wrappedIOSApp(at url: URL) -> InstalledApp? {
+        guard let bundle = wrappedIOSBundle(at: url),
+              let infoData = try? Data(contentsOf: bundle.appendingPathComponent("Info.plist"), options: .mappedIfSafe),
+              let info = try? PropertyListSerialization.propertyList(from: infoData, format: nil) as? [String: Any]
+        else { return nil }
+        let fileManager = FileManager.default
+        let hasStoreMetadata = fileManager.fileExists(
+            atPath: url.appendingPathComponent("Wrapper/iTunesMetadata.plist").path
+        )
+        let management = wrappedIOSUpdateManagement(
+            hasStoreMetadata: hasStoreMetadata,
+            hasEmbeddedProvisioningProfile: fileManager.fileExists(
+                atPath: bundle.appendingPathComponent("embedded.mobileprovision").path
+            )
+        )
+        let dates = try? url.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey])
+        return InstalledApp(
+            name: (info["CFBundleDisplayName"] as? String) ?? (info["CFBundleName"] as? String)
+                ?? url.deletingPathExtension().lastPathComponent,
+            bundleIdentifier: info["CFBundleIdentifier"] as? String,
+            installedVersion: (info["CFBundleShortVersionString"] as? String)
+                ?? (info["CFBundleVersion"] as? String) ?? "Unknown",
+            buildVersion: info["CFBundleVersion"] as? String,
+            url: url,
+            sparkleFeedURL: nil,
+            githubRepository: nil,
+            hasAppStoreReceipt: hasStoreMetadata,
+            updateManagement: management,
+            hasBuiltInUpdater: false,
+            isWrappedIOSApp: true,
+            managedUpdateStatus: management.isExternallyManaged
+                ? ManagedUpdateStatus(state: .managed, detail: management.updateExplanation) : nil,
+            installedAt: dates?.creationDate,
+            modifiedAt: dates?.contentModificationDate,
+            architectures: AppArchitectureInspector.architectures(atIOSBundle: bundle, info: info)
+        )
+    }
+
+    /// App Store builds carry store metadata. TestFlight builds keep their
+    /// provisioning profile, which the App Store strips. Anything else was
+    /// installed another way and has no update source.
+    static func wrappedIOSUpdateManagement(
+        hasStoreMetadata: Bool,
+        hasEmbeddedProvisioningProfile: Bool
+    ) -> AppUpdateManagement {
+        if hasEmbeddedProvisioningProfile { return .testFlight }
+        return hasStoreMetadata ? .appStore : .direct
     }
 
     static func updateManagement(

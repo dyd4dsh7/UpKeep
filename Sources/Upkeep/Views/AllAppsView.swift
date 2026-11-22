@@ -714,6 +714,7 @@ struct AppDetailView: View {
                     detailLabel("Update sources")
                     Text(sourceNames)
                 }
+                if app.isWrappedIOSApp { GridRow { detailLabel("Platform"); Text("iPhone and iPad app") } }
                 GridRow { detailLabel("Update management"); Text(app.updateManagement.rawValue) }
                 GridRow { detailLabel("App Store receipt"); Text(app.hasAppStoreReceipt ? "Present" : "Not found") }
                 if let feed = app.sparkleFeedURL { GridRow { detailLabel("Sparkle feed"); Link(feed.host() ?? feed.absoluteString, destination: feed) } }

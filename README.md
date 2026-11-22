@@ -66,7 +66,7 @@ If a release has no build attached, [build from source](#build-from-source).
 
 | Source | How Upkeep checks |
 | --- | --- |
-| **Mac App Store** | App Store metadata for production installs |
+| **Mac App Store** | App Store metadata for production installs, including iPhone and iPad apps on Apple silicon |
 | **Sparkle** | Appcast feeds declared by the app, its runtime preferences, or a trusted mapping |
 | **Publisher version services** | Chrome, Edge, Firefox, Thunderbird, Brave, standalone JetBrains IDEs, Zoom, Slack, and 1Password |
 | **Electron update servers** | The release manifest (such as `latest-mac.yml`) of apps that use electron-updater's generic provider |
@@ -93,6 +93,9 @@ major releases, prereleases, dependencies, and developer-environment changes.
 <summary>More about update sources</summary>
 
 - A Homebrew cask that matches an installed app appears once, as the app update.
+- iPhone and iPad apps installed from the App Store on Apple silicon are listed
+  with your Mac apps. Their updates open in the App Store. iPhone and iPad apps
+  installed another way have no update source.
 - Sparkle appcasts that declare a package installer open the app's built-in
   updater instead of downloading the package.
 - Apps with an embedded updater stay labelled as such even when the publisher sets

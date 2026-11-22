@@ -29,9 +29,18 @@ enum AppArchitectureInspector {
     }()
 
     static func architectures(at appURL: URL, info: [String: Any]) -> [String] {
+        architectures(in: appURL.appendingPathComponent("Contents/MacOS", isDirectory: true), info: info)
+    }
+
+    /// iPhone and iPad bundles keep their executable at the bundle root.
+    static func architectures(atIOSBundle bundleURL: URL, info: [String: Any]) -> [String] {
+        architectures(in: bundleURL, info: info)
+    }
+
+    private static func architectures(in directory: URL, info: [String: Any]) -> [String] {
         guard let executable = info["CFBundleExecutable"] as? String,
               !executable.isEmpty, !executable.contains("/"), executable != "..",
-              let handle = try? FileHandle(forReadingFrom: appURL.appendingPathComponent("Contents/MacOS/\(executable)"))
+              let handle = try? FileHandle(forReadingFrom: directory.appendingPathComponent(executable))
         else { return [] }
         defer { try? handle.close() }
         // Only the Mach-O header is needed; do not load whole executables or launch a process per app.

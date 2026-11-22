@@ -508,7 +508,7 @@ struct UpdateScanner: Sendable {
     }
 
     static func allowsHomebrewCandidate(for app: InstalledApp) -> Bool {
-        app.updateManagement == .direct
+        app.updateManagement == .direct && !app.isWrappedIOSApp
     }
 
     static func caskIsNewer(_ candidate: String, than app: InstalledApp) -> Bool {

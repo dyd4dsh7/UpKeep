@@ -276,3 +276,85 @@ private func writeTestAppInfo(version: String, to url: URL) throws {
         path: "/Users/example/Applications/JetBrains Toolbox/IntelliJ IDEA.app"
     ) == .jetBrainsToolbox)
 }
+
+private func makeWrappedIOSApp(
+    named name: String,
+    in root: URL,
+    storeMetadata: Bool,
+    provisioningProfile: Bool = false
+) throws -> URL {
+    let fileManager = FileManager.default
+    let outer = root.appendingPathComponent("\(name).app", isDirectory: true)
+    let wrapper = outer.appendingPathComponent("Wrapper", isDirectory: true)
+    let inner = wrapper.appendingPathComponent("\(name).app", isDirectory: true)
+    try fileManager.createDirectory(at: inner, withIntermediateDirectories: true)
+    let info: [String: Any] = [
+        "CFBundleDisplayName": name, "CFBundleIdentifier": "com.example.\(name.lowercased())",
+        "CFBundleShortVersionString": "7.149.1", "CFBundleVersion": "7.149.1.4",
+        "CFBundleExecutable": name, "UIDeviceFamily": [1, 2]
+    ]
+    try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+        .write(to: inner.appendingPathComponent("Info.plist"))
+    // A thin arm64 Mach-O header: MH_MAGIC_64 and CPU_TYPE_ARM64, little-endian.
+    try Data([0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00, 0x00, 0x01] + Array(repeating: 0, count: 24))
+        .write(to: inner.appendingPathComponent(name))
+    try fileManager.createSymbolicLink(at: outer.appendingPathComponent("WrappedBundle"),
+        withDestinationURL: URL(fileURLWithPath: "Wrapper/\(name).app"))
+    if storeMetadata {
+        try PropertyListSerialization.data(fromPropertyList: ["itemId": 570060128], format: .xml, options: 0)
+            .write(to: wrapper.appendingPathComponent("iTunesMetadata.plist"))
+    }
+    if provisioningProfile { try Data().write(to: inner.appendingPathComponent("embedded.mobileprovision")) }
+    return outer
+}
+
+@Test func applicationDiscoveryFindsAppStoreIPhoneAndIPadApps() async throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("Upkeep-WrappedApps-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let outer = try makeWrappedIOSApp(named: "Duolingo", in: root, storeMetadata: true)
+
+    let app = try #require(await AppDiscovery.discover(at: outer))
+
+    #expect(app.isWrappedIOSApp)
+    #expect(app.name == "Duolingo")
+    #expect(app.bundleIdentifier == "com.example.duolingo")
+    #expect(app.installedVersion == "7.149.1")
+    #expect(app.buildVersion == "7.149.1.4")
+    #expect(app.url.standardizedFileURL == outer.standardizedFileURL)
+    #expect(app.updateManagement == .appStore)
+    #expect(app.hasAppStoreReceipt)
+    #expect(app.architectures == ["arm64"])
+    #expect(!app.allowsHomebrewAdoption)
+    #expect(enabledAppUpdateSources(for: app, checkAppStore: true, checkSparkle: true, checkGitHub: true)
+        .map(\.source) == [.appStore])
+}
+
+@Test func wrappedAppsWithoutStoreMetadataHaveNoUpdateSource() async throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("Upkeep-WrappedApps-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let sideloaded = try #require(await AppDiscovery.discover(
+        at: try makeWrappedIOSApp(named: "Sideloaded", in: root, storeMetadata: false)))
+    #expect(sideloaded.updateManagement == .direct)
+    #expect(!sideloaded.allowsHomebrewAdoption)
+    #expect(!UpdateScanner.allowsHomebrewCandidate(for: sideloaded))
+    #expect(enabledAppUpdateSources(for: sideloaded, checkAppStore: true, checkSparkle: true, checkGitHub: true).isEmpty)
+
+    let beta = try #require(await AppDiscovery.discover(
+        at: try makeWrappedIOSApp(named: "Beta", in: root, storeMetadata: true, provisioningProfile: true)))
+    #expect(beta.updateManagement == .testFlight)
+}
+
+@Test func wrappedBundleDetectionIgnoresMacBundles() throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("Upkeep-WrappedApps-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let outer = try makeWrappedIOSApp(named: "Maps", in: root, storeMetadata: true)
+    #expect(AppDiscovery.wrappedIOSBundle(at: outer)?.lastPathComponent == "Maps.app")
+    // A normal Mac bundle is never treated as wrapped.
+    let mac = root.appendingPathComponent("Mac.app/Contents", isDirectory: true)
+    try FileManager.default.createDirectory(at: mac, withIntermediateDirectories: true)
+    try Data("<plist><dict/></plist>".utf8).write(to: mac.appendingPathComponent("Info.plist"))
+    #expect(AppDiscovery.wrappedIOSBundle(at: root.appendingPathComponent("Mac.app")) == nil)
+}
