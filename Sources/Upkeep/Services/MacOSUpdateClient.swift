@@ -18,20 +18,30 @@ struct MacOSUpdateClient: Sendable {
         )
     }
 
+    /// Full-installer listings change only when Apple publishes a new
+    /// installer, but `softwareupdate --list-full-installers` takes about two
+    /// seconds. Automatic full scans reuse a recent successful listing; the
+    /// macOS page's own installer refresh always asks again.
+    static let installerListingMaximumAge: TimeInterval = 6 * 60 * 60
+
     func scan(includeInstallers: Bool = true) async -> Report {
-        await scan(checkUpdates: true, includeInstallers: includeInstallers)
+        await scan(checkUpdates: true, includeInstallers: includeInstallers, reuseRecentInstallers: true)
     }
 
     func scan(scope: MacOSScanScope) async -> Report {
-        await scan(checkUpdates: scope == .updates, includeInstallers: scope == .installers)
+        await scan(checkUpdates: scope == .updates, includeInstallers: scope == .installers, reuseRecentInstallers: false)
     }
 
-    private func scan(checkUpdates: Bool, includeInstallers: Bool) async -> Report {
+    private func scan(checkUpdates: Bool, includeInstallers: Bool, reuseRecentInstallers: Bool) async -> Report {
         var warnings: [String] = []
-        let updatesResult: (data: Data?, error: Error?) = checkUpdates ? await commandResult(URL(fileURLWithPath: "/usr/sbin/softwareupdate"), ["--list", "--product-types", "macOS"]) : (Data(), nil)
-        let installersResult: (data: Data?, error: Error?) = includeInstallers
-            ? await commandResult(URL(fileURLWithPath: "/usr/sbin/softwareupdate"), ["--list-full-installers"])
+        // The two listings are independent; run them together.
+        async let updatesCommand: (data: Data?, error: Error?) = checkUpdates
+            ? commandResult(URL(fileURLWithPath: "/usr/sbin/softwareupdate"), ["--list", "--product-types", "macOS"])
             : (Data(), nil)
+        async let installersCommand: (data: Data?, error: Error?) = includeInstallers
+            ? installerListing(reuseRecent: reuseRecentInstallers)
+            : (Data(), nil)
+        let (updatesResult, installersResult) = await (updatesCommand, installersCommand)
         if let error = updatesResult.error { warnings.append("Available updates: \(error.localizedDescription)") }
         if let error = installersResult.error { warnings.append("Full installers: \(error.localizedDescription)") }
         let updatesOutput = updatesResult.data ?? Data()
@@ -39,8 +49,18 @@ struct MacOSUpdateClient: Sendable {
         let updates = parseUpdates(String(data: updatesOutput, encoding: .utf8) ?? "")
         let installers = parseInstallers(String(data: installersOutput, encoding: .utf8) ?? "")
         let version = ProcessInfo.processInfo.operatingSystemVersionString
-        let build = await shellValue("/usr/bin/sw_vers", ["-buildVersion"])
-        let extra = await shellValue("/usr/bin/sw_vers", ["-productVersionExtra"])
+        // SystemVersion.plist holds the same values sw_vers prints, without
+        // launching two processes; fall back to sw_vers if it is unreadable.
+        let system = SystemVersionInfo.current
+        let build: String
+        let extra: String
+        if let system {
+            build = system.build
+            extra = system.extra
+        } else {
+            build = await shellValue("/usr/bin/sw_vers", ["-buildVersion"])
+            extra = await shellValue("/usr/bin/sw_vers", ["-productVersionExtra"])
+        }
         return Report(
             updates: updates + installers.filter { installer in
                 !updates.contains(where: { $0.version == installer.version })
@@ -115,6 +135,45 @@ private func versionFrom(_ value: String) -> String? {
 
 private func isBetaName(_ value: String) -> Bool {
     ["beta", "release candidate", " rc", "seed"].contains { value.localizedCaseInsensitiveContains($0) }
+}
+
+struct SystemVersionInfo: Equatable, Sendable {
+    let build: String
+    let extra: String
+
+    static var current: SystemVersionInfo? {
+        read(from: URL(fileURLWithPath: "/System/Library/CoreServices/SystemVersion.plist"))
+    }
+
+    static func read(from url: URL) -> SystemVersionInfo? {
+        guard let data = try? Data(contentsOf: url),
+              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+              let build = plist["ProductBuildVersion"] as? String, !build.isEmpty else { return nil }
+        return SystemVersionInfo(build: build, extra: plist["ProductVersionExtra"] as? String ?? "")
+    }
+}
+
+/// Remembers the last successful full-installer listing for automatic scans.
+actor MacOSInstallerListingCache {
+    static let shared = MacOSInstallerListingCache()
+    private var listing: (data: Data, date: Date)?
+
+    func recent(maximumAge: TimeInterval, now: Date = Date()) -> Data? {
+        guard let listing, now.timeIntervalSince(listing.date) < maximumAge else { return nil }
+        return listing.data
+    }
+
+    func store(_ data: Data, at date: Date = Date()) { listing = (data, date) }
+}
+
+private func installerListing(reuseRecent: Bool) async -> (data: Data?, error: Error?) {
+    if reuseRecent, let cached = await MacOSInstallerListingCache.shared.recent(
+        maximumAge: MacOSUpdateClient.installerListingMaximumAge) {
+        return (cached, nil)
+    }
+    let result = await commandResult(URL(fileURLWithPath: "/usr/sbin/softwareupdate"), ["--list-full-installers"])
+    if let data = result.data, result.error == nil { await MacOSInstallerListingCache.shared.store(data) }
+    return result
 }
 
 private func shellValue(_ path: String, _ arguments: [String]) async -> String {

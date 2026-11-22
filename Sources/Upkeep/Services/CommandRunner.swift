@@ -11,7 +11,11 @@ enum CommandRunner {
         return environment
     }
 
-    private static let processGate = SourceRequestGate(globalLimit: 8, perHostLimit: 2, caseInsensitiveKeys: false)
+    /// Concurrent local commands, at most two per executable. Raising this to
+    /// 12 did not shorten live scans (RubyGems sets the pace) and added CPU
+    /// contention; see the live scan benchmark before changing it.
+    static let processSlotLimit = 8
+    private static let processGate = SourceRequestGate(globalLimit: processSlotLimit, perHostLimit: 2, caseInsensitiveKeys: false)
     /// Network fetches (curl) get their own pool so long-running package-manager
     /// commands cannot starve publisher requests, and vice versa.
     private static let networkProcessGate = SourceRequestGate(globalLimit: 8, perHostLimit: 2, caseInsensitiveKeys: false)

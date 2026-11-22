@@ -74,7 +74,8 @@ private func largeProcessAdmissionFixture(sample: Int) async throws {
         ((try? manager.contentsOfDirectory(atPath: root.path)) ?? []).filter { $0.hasPrefix("ready-") }.count
     }
     let deadline = ContinuousClock.now.advanced(by: .seconds(12))
-    while startedCount() < 8, ContinuousClock.now < deadline {
+    let slots = CommandRunner.processSlotLimit
+    while startedCount() < slots, ContinuousClock.now < deadline {
         try await Task.sleep(for: .milliseconds(10))
     }
     try await Task.sleep(for: .milliseconds(150))
@@ -87,8 +88,8 @@ private func largeProcessAdmissionFixture(sample: Int) async throws {
     let maximumPerExecutable = Dictionary(grouping: live, by: { $0.0 }).values.map(\.count).max() ?? 0
     try Data().write(to: release)
     for task in tasks { #expect(try await task.value.status == 0) }
-    #expect(admittedBeforeRelease == 8)
-    #expect(live.count == 8)
+    #expect(admittedBeforeRelease == slots)
+    #expect(live.count == slots)
     #expect(maximumPerExecutable <= 2)
     #expect(startedCount() == workload)
     let elapsed = started.duration(to: clock.now)

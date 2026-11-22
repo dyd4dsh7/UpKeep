@@ -180,3 +180,33 @@ private func countingClient(_ transport: CountingCVETransport) -> CVEInventoryCl
     #expect(restored.lastChecked(for: "app|gone") == nil)
     #expect(Set(restored.sourceCheckFreshness.keys) == ["app|keep-id|Sparkle", "homebrew.catalog"])
 }
+
+@Test func marketplaceBatchResponseMapsEveryExtensionByIdentifier() {
+    let json = """
+    {"results":[{"extensions":[
+      {"extensionName":"Python","publisher":{"publisherName":"ms-python"},"versions":[{"version":"2026.1.0"},{"version":"2026.2.0","targetPlatform":"win32-x64"}]},
+      {"extensionName":"gitlens","publisher":{"publisherName":"eamodio"},"versions":[{"version":"17.0.0","targetPlatform":"universal"}]}
+    ]}]}
+    """
+    let versions = parseVisualStudioMarketplaceBatch(Data(json.utf8))
+    #expect(versions["ms-python.python"] == ["2026.1.0"], "Platform-specific builds for other systems are ignored")
+    #expect(versions["eamodio.gitlens"] == ["17.0.0"])
+    #expect(versions.count == 2)
+}
+
+@Test func systemVersionIsReadFromThePlistWithoutLaunchingSwVers() throws {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("SystemVersion-\(UUID()).plist")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let plist: [String: Any] = ["ProductBuildVersion": "26C5047e", "ProductVersion": "27.3", "ProductVersionExtra": "(a)"]
+    try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0).write(to: url)
+    #expect(SystemVersionInfo.read(from: url) == SystemVersionInfo(build: "26C5047e", extra: "(a)"))
+    #expect(SystemVersionInfo.current != nil)
+}
+
+@Test func installerListingCacheExpires() async {
+    let cache = MacOSInstallerListingCache()
+    let start = Date()
+    await cache.store(Data("listing".utf8), at: start)
+    #expect(await cache.recent(maximumAge: 60, now: start.addingTimeInterval(30)) == Data("listing".utf8))
+    #expect(await cache.recent(maximumAge: 60, now: start.addingTimeInterval(61)) == nil)
+}

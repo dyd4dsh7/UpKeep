@@ -471,15 +471,17 @@ func normalizedJavaScriptRuntimeVersion(_ value: String) -> String {
 }
 
 func scanNPM(_ path: String) async -> ManagerScanResult {
-    let installedResult = await captureDeveloperCommandAsync(
+    // The inventory and outdated checks are independent; run them together.
+    async let installedCommand = captureDeveloperCommandAsync(
         URL(fileURLWithPath: path), ["ls", "-g", "--depth=0", "--json"]
     )
+    async let outdatedCommand = captureDeveloperCommandAsync(
+        URL(fileURLWithPath: path), ["outdated", "-g", "--json"]
+    )
+    let (installedResult, outdatedResult) = await (installedCommand, outdatedCommand)
     guard let installed = try? JSONDecoder().decode(NPMList.self, from: installedResult.data).dependencies else {
         return failedManagerScan(.npm, command: "inventory", result: installedResult)
     }
-    let outdatedResult = await captureDeveloperCommandAsync(
-        URL(fileURLWithPath: path), ["outdated", "-g", "--json"]
-    )
     let outdated = try? JSONDecoder().decode([String: NPMOutdated].self, from: outdatedResult.data)
     let packages = installed.map { name, entry in
         DeveloperPackage(
@@ -496,15 +498,16 @@ func scanNPM(_ path: String) async -> ManagerScanResult {
 }
 
 func scanPNPM(_ path: String) async -> ManagerScanResult {
-    let installedResult = await captureDeveloperCommandAsync(
+    async let installedCommand = captureDeveloperCommandAsync(
         URL(fileURLWithPath: path), ["list", "-g", "--depth=0", "--json"]
     )
+    async let outdatedCommand = captureDeveloperCommandAsync(
+        URL(fileURLWithPath: path), ["outdated", "-g", "--format", "json"]
+    )
+    let (installedResult, outdatedResult) = await (installedCommand, outdatedCommand)
     guard let installed = parsePNPMInstalledPackages(installedResult.data) else {
         return failedManagerScan(.pnpm, command: "inventory", result: installedResult)
     }
-    let outdatedResult = await captureDeveloperCommandAsync(
-        URL(fileURLWithPath: path), ["outdated", "-g", "--format", "json"]
-    )
     let outdated = try? JSONDecoder().decode([String: NPMOutdated].self, from: outdatedResult.data)
     let packages = installed.map { name, version in
         DeveloperPackage(
@@ -521,16 +524,17 @@ func scanPNPM(_ path: String) async -> ManagerScanResult {
 }
 
 func scanPython(_ path: String) async -> ManagerScanResult {
-    let installedResult = await captureDeveloperCommandAsync(
+    async let installedCommand = captureDeveloperCommandAsync(
         URL(fileURLWithPath: path), ["-m", "pip", "list", "--format=json", "--disable-pip-version-check"]
     )
-    guard let installed = try? JSONDecoder().decode([PipInstalled].self, from: installedResult.data) else {
-        return failedManagerScan(.python, command: "inventory", result: installedResult)
-    }
-    let outdatedResult = await captureDeveloperCommandAsync(
+    async let outdatedCommand = captureDeveloperCommandAsync(
         URL(fileURLWithPath: path),
         ["-m", "pip", "list", "--outdated", "--format=json", "--disable-pip-version-check"]
     )
+    let (installedResult, outdatedResult) = await (installedCommand, outdatedCommand)
+    guard let installed = try? JSONDecoder().decode([PipInstalled].self, from: installedResult.data) else {
+        return failedManagerScan(.python, command: "inventory", result: installedResult)
+    }
     let outdatedValues = try? JSONDecoder().decode([PipOutdated].self, from: outdatedResult.data)
     let outdated = Dictionary((outdatedValues ?? []).map { ($0.name.lowercased(), $0.latestVersion) }, uniquingKeysWith: { first, _ in first })
     let packages = installed.map {
@@ -544,10 +548,11 @@ func scanPython(_ path: String) async -> ManagerScanResult {
 }
 
 func scanGems(_ path: String) async -> ManagerScanResult {
-    let installedResult = await captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["list", "--local"])
+    async let installedCommand = captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["list", "--local"])
+    async let outdatedCommand = captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["outdated"])
+    let (installedResult, outdatedResult) = await (installedCommand, outdatedCommand)
     guard installedResult.status == 0 else { return failedManagerScan(.rubyGems, command: "inventory", result: installedResult) }
     let installedOutput = String(data: installedResult.data, encoding: .utf8) ?? ""
-    let outdatedResult = await captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["outdated"])
     let outdatedOutput = String(data: outdatedResult.data, encoding: .utf8) ?? ""
     let packages = DeveloperInventoryParsers.parseGemInventory(installedOutput, outdatedOutput: outdatedOutput, executablePath: path)
     return ManagerScanResult(
@@ -594,10 +599,16 @@ func scanVSCodeExtensions(_ path: String) async -> ManagerScanResult {
     guard result.status == 0 else { return failedManagerScan(.vsCode, command: "inventory", result: result) }
     let installed = DeveloperInventoryParsers.parseExtensionInventory(result.data)
     let context = editorName(for: path)
+    // One marketplace query covers every extension; per-extension requests
+    // remain the fallback for anything the batch does not return.
+    let batched = await visualStudioMarketplaceVersions(extensionIDs: installed.map(\.0))
     let values = await withTaskGroup(of: (DeveloperPackage, Bool).self) { group in
         for (identifier, version) in installed {
             group.addTask {
-                let versions = await visualStudioMarketplaceVersions(extensionID: identifier)
+                let batchVersions = batched[identifier.lowercased()] ?? []
+                let versions = batchVersions.isEmpty
+                    ? await visualStudioMarketplaceVersions(extensionID: identifier)
+                    : batchVersions
                 return (DeveloperPackage(
                     name: identifier,
                     currentVersion: version,
@@ -1393,7 +1404,12 @@ private struct CrateVersionsResponse: Decodable {
 private struct VSMarketplaceResponse: Decodable {
     let results: [Result]
     struct Result: Decodable { let extensions: [Extension] }
-    struct Extension: Decodable { let versions: [Version] }
+    struct Extension: Decodable {
+        let versions: [Version]
+        let extensionName: String?
+        let publisher: Publisher?
+    }
+    struct Publisher: Decodable { let publisherName: String? }
     struct Version: Decodable { let version: String; let targetPlatform: String? }
 }
 private struct GoProxyLatest: Decodable { let version: String
@@ -1521,6 +1537,57 @@ private func latestPyPIVersion(package: String) async -> String? {
     return response.info?.version
 }
 
+/// Looks up many extensions in one marketplace query, keyed by lowercased
+/// `publisher.name`. Missing or failed entries are simply absent.
+func visualStudioMarketplaceVersions(extensionIDs: [String]) async -> [String: [String]] {
+    let ids = Array(Set(extensionIDs.map { $0.lowercased() })).sorted()
+    guard !ids.isEmpty,
+          let url = URL(string: "https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery") else { return [:] }
+    var output: [String: [String]] = [:]
+    for chunk in stride(from: 0, to: ids.count, by: 50).map({ Array(ids[$0..<min($0 + 50, ids.count)]) }) {
+        guard let body = try? JSONSerialization.data(withJSONObject: [
+            "filters": [[
+                "criteria": chunk.map { ["filterType": 7, "value": $0] },
+                "pageNumber": 1,
+                "pageSize": chunk.count
+            ]],
+            "flags": 914
+        ]) else { continue }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = body
+        request.timeoutInterval = 20
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json;api-version=7.2-preview.1", forHTTPHeaderField: "Accept")
+        request.setValue("Upkeep/0.9", forHTTPHeaderField: "User-Agent")
+        guard let data = await RegistryRequestCache.shared.data(for: request, key: "VSCode-batch:\(chunk.joined(separator: ","))") else { continue }
+        output.merge(parseVisualStudioMarketplaceBatch(data), uniquingKeysWith: { first, _ in first })
+    }
+    return output
+}
+
+func parseVisualStudioMarketplaceBatch(_ data: Data) -> [String: [String]] {
+    guard let root = try? JSONDecoder().decode(VSMarketplaceResponse.self, from: data) else { return [:] }
+    var output: [String: [String]] = [:]
+    for item in root.results.flatMap(\.extensions) {
+        guard let publisher = item.publisher?.publisherName, let name = item.extensionName else { continue }
+        output["\(publisher).\(name)".lowercased()] = compatibleMarketplaceVersions(item.versions)
+    }
+    return output
+}
+
+private func compatibleMarketplaceVersions(_ versions: [VSMarketplaceResponse.Version]) -> [String] {
+    #if arch(arm64)
+    let platform = "darwin-arm64"
+    #else
+    let platform = "darwin-x64"
+    #endif
+    let compatible = versions.filter {
+        $0.targetPlatform == nil || $0.targetPlatform == "universal" || $0.targetPlatform == platform
+    }
+    return VersionComparator.sortedNewestFirst(Set(compatible.map(\.version)))
+}
+
 private func visualStudioMarketplaceVersions(extensionID: String) async -> [String] {
     guard let url = URL(string: "https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery"),
           let body = try? JSONSerialization.data(withJSONObject: [
@@ -1536,15 +1603,7 @@ private func visualStudioMarketplaceVersions(extensionID: String) async -> [Stri
     request.setValue("Upkeep/0.9", forHTTPHeaderField: "User-Agent")
     guard let data = await RegistryRequestCache.shared.data(for: request, key: "VSCode:\(extensionID.lowercased())"),
           let root = try? JSONDecoder().decode(VSMarketplaceResponse.self, from: data) else { return [] }
-    #if arch(arm64)
-    let platform = "darwin-arm64"
-    #else
-    let platform = "darwin-x64"
-    #endif
-    let compatible = root.results.flatMap(\.extensions).flatMap(\.versions).filter {
-        $0.targetPlatform == nil || $0.targetPlatform == "universal" || $0.targetPlatform == platform
-    }
-    return VersionComparator.sortedNewestFirst(Set(compatible.map(\.version)))
+    return compatibleMarketplaceVersions(root.results.flatMap(\.extensions).flatMap(\.versions))
 }
 
 private func goModuleVersions(module: String) async -> [String] {

@@ -4,6 +4,9 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+- Made full update checks about 25% faster (2.4 s to 1.8 s on a typical Mac, 3.7 s to 2.6 s for the first check after launch): macOS and developer-tool checks run their independent commands together, VS Code extensions are checked in one request, and the full macOS installer list is reused for up to 6 hours during automatic checks.
+- Added a read-only live scan benchmark (`docs/performance/2026-11-22-live-scan.md`).
+
 ## 0.25.1 — 2026-11-22
 
 - Restored package-manager, model-runtime, and update-source logos from official sources for every supported tool that publishes one (Homebrew, npm, Node.js, Bun, Deno, Yarn, pnpm, Volta, Python, pipx, uv, RubyGems, Rust, Cargo, Go, Composer, .NET, MacPorts, Nix, mise, GitHub, VS Code, Ollama, LM Studio, and Sparkle), with dark-mode variants and per-logo sources and terms in THIRD_PARTY_NOTICES.md.
