@@ -112,6 +112,12 @@ private struct UpkeepRelease: Identifiable {
     var isUnreleased: Bool { version == "Next" }
 
     static let all = [
+        UpkeepRelease(version: "0.25.5", date: "22 November 2026", changes: [
+            "Checks for Upkeep updates and installs them in place: Upkeep verifies each release's checksum and signature, then quits, replaces itself (keeping a backup), and reopens.",
+            "Adds Upkeep › Check for Upkeep Updates…, an update banner, and update status in Settings › About.",
+            "Matches the app's colours to its icon.",
+            "Halves the app's size (20 MB to 10 MB) and lowers memory use, with peak memory down from about 550 MB to 355 MB."
+        ]),
         UpkeepRelease(version: "0.25.4", date: "22 November 2026", changes: [
             "Uses about 40% less memory after an update check by caching a small summary of the Homebrew cask catalog instead of the full 19 MB catalog.",
             "Makes repeat checks steadier by reusing the macOS update list for up to an hour during automatic checks; the macOS page still checks Apple directly."
