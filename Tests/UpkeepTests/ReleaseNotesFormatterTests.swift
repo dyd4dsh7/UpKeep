@@ -84,3 +84,31 @@ import Testing
     let text = ReleaseNotesFormatter.attributedString(from: "Use a | b\nfor pipes")
     #expect(String(text.characters) == "Use a | b\nfor pipes")
 }
+
+@Test func releaseNotesDropMarkdownImagesAndImageOnlyLines() {
+    let notes = """
+    ![image](https://example.com/shot.png)
+
+    Fixed sync ![icon](https://example.com/i.png) on Wi-Fi.
+    - ![screenshot](https://example.com/s.png)
+    - Kept
+    [![badge](https://example.com/b.svg)](https://example.com)
+
+    > ![chart](https://example.com/c.png)
+    Done `![not](an image)`
+    """
+    let text = ReleaseNotesFormatter.attributedString(from: notes)
+    #expect(String(text.characters) == "Fixed sync  on Wi-Fi.\n• Kept\n\n▎\nDone ![not](an image)")
+    #expect(text.runs.allSatisfy { $0.imageURL == nil })
+}
+
+@Test func releaseNotesTableCellsWithOnlyImagesAreSkipped() {
+    let notes = """
+    | Platform | Badge | Link |
+    |---|---|---|
+    | Mac | ![ok](https://example.com/ok.svg) | [DMG](https://example.com/a.dmg) |
+    | ![x](https://example.com/x.png) | ![y](https://example.com/y.png) | |
+    """
+    let text = ReleaseNotesFormatter.attributedString(from: notes)
+    #expect(String(text.characters) == "• Mac · Link: DMG")
+}

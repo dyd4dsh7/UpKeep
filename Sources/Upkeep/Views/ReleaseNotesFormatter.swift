@@ -12,6 +12,12 @@ enum ReleaseNotesFormatter {
             .map(String.init)
         var lines: [AttributedString] = []
         var previousWasBlank = true
+        // A line with nothing left to show (only images) is skipped.
+        func append(_ line: AttributedString) {
+            guard !line.characters.isEmpty else { return }
+            lines.append(line)
+            previousWasBlank = false
+        }
         var fence: String?
         var index = 0
         while index < rawLines.count {
@@ -36,7 +42,6 @@ enum ReleaseNotesFormatter {
                 previousWasBlank = true
                 continue
             }
-            previousWasBlank = false
             if index < rawLines.count, isTableDelimiter(rawLines[index]), let header = tableCells(line) {
                 index += 1
                 var rows: [[String]] = []
@@ -45,11 +50,11 @@ enum ReleaseNotesFormatter {
                     rows.append(cells)
                     index += 1
                 }
-                lines += tableLines(header: header, rows: rows)
+                tableLines(header: header, rows: rows).forEach(append)
             } else if let quote = quoteContent(line) {
-                lines.append(quoteLine(depth: quote.depth, text: quote.text))
+                append(quoteLine(depth: quote.depth, text: quote.text))
             } else {
-                lines.append(blockLine(line, rawLine: rawLine))
+                append(blockLine(line, rawLine: rawLine))
             }
         }
         while lines.last?.characters.isEmpty == true { lines.removeLast() }
@@ -68,8 +73,11 @@ enum ReleaseNotesFormatter {
             return bold(inline(heading))
         }
         if let item = listItemText(line) {
+            let text = inline(item)
+            // A list item that was only an image has nothing left to show.
+            guard !text.characters.isEmpty else { return AttributedString() }
             let indent = String(repeating: "    ", count: indentLevel(rawLine))
-            return AttributedString("\(indent)• ") + inline(item)
+            return AttributedString("\(indent)• ") + text
         }
         return inline(line)
     }
@@ -101,7 +109,11 @@ enum ReleaseNotesFormatter {
         if let alert = trimmed.wholeMatch(of: /\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/.ignoresCase()) {
             return AttributedString(bar) + bold(AttributedString(alert.output.1.lowercased().capitalized))
         }
-        return AttributedString(bar) + blockLine(trimmed, rawLine: text)
+        let content = blockLine(trimmed, rawLine: text)
+        if content.characters.isEmpty {
+            return AttributedString(String(bar.dropLast()))
+        }
+        return AttributedString(bar) + content
     }
 
     // MARK: Tables
@@ -158,20 +170,24 @@ enum ReleaseNotesFormatter {
             return result
         }
         guard !rows.isEmpty else {
-            return [bold(joined(header.filter { !$0.isEmpty }.map(inline)))]
+            return [bold(joined(header.map(inline).filter { !$0.characters.isEmpty }))]
         }
         return rows.map { row in
             var parts: [AttributedString] = []
-            for (column, cell) in row.enumerated() where !cell.isEmpty {
+            for (column, cell) in row.enumerated() {
+                let value = inline(cell)
+                guard !value.characters.isEmpty else { continue }
+                let label = column < header.count ? inline(header[column]) : AttributedString()
                 if column == 0 {
-                    parts.append(bold(inline(cell)))
-                } else if column < header.count, !header[column].isEmpty {
-                    parts.append(inline(header[column]) + AttributedString(": ") + inline(cell))
+                    parts.append(bold(value))
+                } else if !label.characters.isEmpty {
+                    parts.append(label + AttributedString(": ") + value)
                 } else {
-                    parts.append(inline(cell))
+                    parts.append(value)
                 }
             }
-            return AttributedString("• ") + joined(parts)
+            // A row of only images has nothing left to show.
+            return parts.isEmpty ? AttributedString() : AttributedString("• ") + joined(parts)
         }
     }
 
@@ -198,12 +214,20 @@ enum ReleaseNotesFormatter {
     }
 
     /// Parses inline Markdown (emphasis, code, links). Links that are not web links are
-    /// left as plain text so feed content cannot open arbitrary URL schemes.
+    /// left as plain text so feed content cannot open arbitrary URL schemes. Images are
+    /// dropped: `Text` cannot show them, and their alt text ("image", "screenshot") reads
+    /// as a stray word.
     private static func inline(_ text: String) -> AttributedString {
+        let withoutImages = removingImages(text)
         guard var parsed = try? AttributedString(
-            markdown: text,
+            markdown: withoutImages,
             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        ) else { return AttributedString(text) }
+        ) else { return AttributedString(withoutImages) }
+        let images = parsed.runs.filter { $0.imageURL != nil }.map(\.range)
+        for range in images.reversed() { parsed.removeSubrange(range) }
+        if withoutImages != text || !images.isEmpty {
+            parsed = trimmingWhitespace(parsed)
+        }
         for run in parsed.runs {
             guard let link = run.link else { continue }
             let scheme = link.scheme?.lowercased()
@@ -212,6 +236,38 @@ enum ReleaseNotesFormatter {
             }
         }
         return parsed
+    }
+
+    /// Removes `![alt](url)` outside code spans. The parser marks an image as one only
+    /// when it is not inside a link, so badges such as `[![build](…)](…)` need this.
+    private static func removingImages(_ text: String) -> String {
+        guard text.contains("![") else { return text }
+        var result = ""
+        var rest = Substring(text)
+        var inCode = false
+        while let character = rest.first {
+            if character == "\\" {
+                result += rest.prefix(2)
+                rest = rest.dropFirst(2)
+                continue
+            }
+            if character == "`" {
+                inCode.toggle()
+            } else if !inCode, let image = rest.prefixMatch(of: /!\[[^\]]*\]\([^)]*\)/) {
+                rest = rest[image.range.upperBound...]
+                continue
+            }
+            result.append(character)
+            rest = rest.dropFirst()
+        }
+        return result
+    }
+
+    private static func trimmingWhitespace(_ text: AttributedString) -> AttributedString {
+        let characters = text.characters
+        guard let first = characters.firstIndex(where: { !$0.isWhitespace }),
+              let last = characters.lastIndex(where: { !$0.isWhitespace }) else { return AttributedString() }
+        return AttributedString(text[first...last])
     }
 
     /// Fenced code is shown as written, in the code font, without Markdown parsing.
