@@ -4,10 +4,14 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+## 0.25.8 — 2026-11-23
+
+- Microsoft Edge, standalone JetBrains IDEs (IntelliJ IDEA, PyCharm, WebStorm, GoLand, CLion, Rider, DataGrip, RubyMine, PhpStorm, and RustRover), Zoom, Slack, and 1Password installed outside the App Store are now checked against their publisher's release service. Updates open in the app's built-in updater. JetBrains and Zoom compare build numbers, so patch releases are found too.
 - Electron apps that update from their developer's own server (electron-updater's generic provider) are now checked. Upkeep reads the app's release manifest (such as `latest-mac.yml`), hides prereleases from stable installs unless **Include prereleases** is on, waits for staged rollouts to finish, and hands the update to the app's built-in updater.
 - ChatGPT is now checked through the Sparkle feed packaged in the app. It sets its feed at runtime, so Upkeep previously found no update source for it.
-- Chrome and Brave no longer show **No update source** in app details while they are up to date.
 - UTM, PureMac, BlitzTree, and Spotifast installed from GitHub are now checked against their GitHub releases.
+- Chrome and Brave no longer show **No update source** in app details while they are up to date.
+- The README lists every update source, including publisher version services and Electron update servers, and the privacy policy names the release services Upkeep contacts.
 
 ## 0.25.7 — 2026-11-23
 

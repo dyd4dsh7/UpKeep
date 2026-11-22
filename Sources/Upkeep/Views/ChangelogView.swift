@@ -118,6 +118,12 @@ private struct UpkeepRelease: Identifiable {
     static let fullChangelogURL = URL(string: "https://github.com/\(SelfUpdate.repository)/blob/main/CHANGELOG.md")!
 
     static let all = [
+        UpkeepRelease(version: "0.25.8", date: "23 November 2026", changes: [
+            "Checks Microsoft Edge, standalone JetBrains IDEs, Zoom, Slack, and 1Password against their publishers' release services.",
+            "Checks Electron apps that update from their developer's own server, and ChatGPT through its packaged Sparkle feed.",
+            "Checks UTM, PureMac, BlitzTree, and Spotifast against their GitHub releases.",
+            "Fixes Chrome and Brave showing No update source in app details while up to date."
+        ]),
         UpkeepRelease(version: "0.25.7", date: "23 November 2026", changes: [
             "Shows release notes with their formatting: headings, lists, tables, quotes, and HTML from Sparkle and GitHub appear as text instead of raw markup.",
             "Adds Check for Upkeep updates in Settings › General to turn off automatic update checks.",
