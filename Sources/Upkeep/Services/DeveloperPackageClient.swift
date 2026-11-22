@@ -1427,9 +1427,6 @@ private struct VSMarketplaceResponse: Decodable {
     struct Publisher: Decodable { let publisherName: String? }
     struct Version: Decodable { let version: String; let targetPlatform: String? }
 }
-private struct GoProxyLatest: Decodable { let version: String
-    enum CodingKeys: String, CodingKey { case version = "Version" }
-}
 private struct GoRelease: Decodable { let version: String; let stable: Bool }
 private struct PackagistResponse: Decodable {
     let packages: [String: [PackageVersion]]

@@ -105,8 +105,6 @@ struct HomebrewClient: Sendable {
         try await execute(arguments)
     }
 
-    func upgradeAll() async throws { try await execute(["upgrade"]) }
-
     func adopt(_ item: AdoptableApp) async throws {
         let arguments = ["install", "--cask", "--adopt", item.caskToken]
         do {

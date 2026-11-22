@@ -3073,18 +3073,6 @@ final class UpkeepStore: ObservableObject {
     func recoveryStorage() async -> RecoveryStorage? {
         await dependencies.history.recoveryStorage()
     }
-
-    private func reconcileHomebrewUpdate(token: String, name: String) {
-        if let package = homebrewPackages.first(where: { $0.token == token }) {
-            if package.isOutdated {
-                errorMessage = "Homebrew completed the command, but \(name) still reports \(package.currentVersion) as available."
-            }
-            return
-        }
-        if scanWarnings.contains(where: { $0.source == .homebrew }) {
-            errorMessage = "Homebrew completed the update for \(name), but Upkeep could not fully refresh Homebrew data. Review Diagnostics and refresh again."
-        }
-    }
 }
 
 private extension String {
