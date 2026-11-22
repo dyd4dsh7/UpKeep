@@ -122,6 +122,7 @@ private struct UpkeepRelease: Identifiable {
             "Batch review shows every group the Updates header counts, with per-group selection and the apps it will quit; sidebar badges count pending updates only.",
             "Shows a checking state instead of empty lists during scans, and says Not checked yet or No update source instead of Up to date when nothing was checked.",
             "Redesigns workspaces, Settings, and dialogs, with a compact Updates header that adapts to light mode and update lists aligned into columns.",
+            "Keeps update rows on one aligned line when the details panel opens, shortening long names and badges instead of reflowing rows.",
             "Improves responsiveness during scans and in large lists, runs CVE checks concurrently, batches App Store lookups, and briefly caches Sparkle feeds.",
             "Prepares the project for open source, with tests and signed releases run locally."
         ]),

@@ -4,8 +4,6 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
-- Stopped update lists from shifting when the details panel opens: rows stay on one line with narrower aligned columns, long names truncate instead of wrapping only some rows, and security badges shrink to their shield icon before an app name is hidden.
-
 ## 0.25.0 — 2026-11-22
 
 ### Updates and correctness
@@ -24,6 +22,7 @@ All notable changes to Upkeep are documented here.
 ### Design
 - Redesigned workspaces, Settings, and dialogs, with a more compact Updates header that has its own light-mode palette.
 - Aligned update lists into columns: installed version, arrow, new version, and action line up on every row.
+- Stopped update lists from shifting when the details panel opens: rows stay on one line with narrower aligned columns, long names truncate instead of wrapping only some rows, and security badges shrink to their shield icon before an app name is hidden.
 - Left-aligned Settings explanations under their sections, showed each appearance option’s explanation on its own row, and matched sidebar and batch-review headings and links to the app’s style.
 - Prevented a SwiftUI navigation crash by avoiding animation of outgoing native list and toolbar hierarchies.
 - Kept item names visible in narrow inspectors by moving version/action controls below the name when space is limited.
