@@ -4,6 +4,7 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+- Removed the GitHub Actions CI and release workflows; tests and signed releases now run locally (see `docs/releasing.md`).
 - Made Upkeep a single main window that the menu bar, Dock icon, and update notifications reopen after it is closed; the menu bar item and Dock badge now stay current while the window is closed.
 - Added pending updates and “Update All Recommended…” to the menu bar menu, an “Open at login” setting, ⌘F for search, and “Stop After Current Update” for batch updates.
 - Batch review now shows every group the Updates header counts, with per-group selection and the list of apps it will quit; sidebar badges now count pending updates only.
