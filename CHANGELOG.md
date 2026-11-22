@@ -5,6 +5,7 @@ All notable changes to Upkeep are documented here.
 ## Unreleased
 
 - Tests no longer leave a settings file in `~/Library/Preferences` for every run (tens of thousands had built up). Test settings now live in a temporary folder that the next test run removes.
+- The UI preview build no longer leaves settings files in `~/Library/Preferences`: its settings live in a temporary folder that the next preview launch removes, and `script/package_ui_fixture.sh` deletes the window-state files of previews older than an hour.
 - Markdown tables and quote blocks in release notes are readable in **What’s New**: each table row becomes a bullet with its first cell in bold and labelled values for the other columns, quotes get a bar instead of raw `>` markers, and GitHub alerts such as `[!WARNING]` show as a bold title. `<br>` inside a table row no longer splits the row.
 - GitHub release notes keep their structure in **What’s New**: HTML inside the Markdown (collapsible `<details>` sections, `<br>`, images, and links) is converted instead of shown as raw tags, release notes from the GitHub Atom fallback keep their headings and lists, fenced code blocks show as code without their ``` markers, and Windows line endings no longer add a blank line after every line.
 - Added **Check for Upkeep updates** in Settings › General to turn off Upkeep's automatic update check; **Check for Upkeep Updates…** still works. The privacy policy now lists Google's Chrome version service and the caches left behind when removing Upkeep.

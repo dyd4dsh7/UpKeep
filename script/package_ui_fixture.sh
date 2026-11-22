@@ -10,6 +10,9 @@ fi
 test -x "$DEBUG_DIR/Upkeep"
 # Remove fixture bundles from earlier runs (older than an hour, so open ones stay).
 find /private/tmp -maxdepth 1 -name 'upkeep-ui-fixture.*' -mmin +60 -exec rm -rf {} + 2>/dev/null || true
+# Each fixture bundle gets its own bundle ID, and macOS saves its window state in a
+# preferences file named after it. Remove those along with the old bundles.
+find "$HOME/Library/Preferences" -maxdepth 1 -name 'test.upkeep.ui-fixture.*.plist' -mmin +60 -delete 2>/dev/null || true
 FIXTURE_DIR="$(mktemp -d /private/tmp/upkeep-ui-fixture.XXXXXX)"
 APP_BUNDLE="$FIXTURE_DIR/Upkeep UI Fixture.app"
 mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"

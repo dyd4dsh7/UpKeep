@@ -11,7 +11,7 @@ struct UpkeepApp: App {
     init() {
         #if DEBUG
         if UIFixture.enabled {
-            let defaults = UserDefaults(suiteName: "test.upkeep.ui-fixture.\(UUID().uuidString)")!
+            let defaults = UIFixture.makeDefaults()
             let showSetup = ProcessInfo.processInfo.arguments.contains("--ui-fixture-setup")
             defaults.set(!showSetup, forKey: "hasCompletedSetup")
             let appSettings = AppSettings(defaults: defaults)

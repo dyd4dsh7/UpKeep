@@ -36,6 +36,24 @@ enum UIFixture {
         ProcessInfo.processInfo.arguments.contains("--ui-fixture-dialogs")
     }
 
+    /// Fixture settings for this launch. The store lives in a temporary folder for each
+    /// process, not ~/Library/Preferences, where every launch used to leave a plist
+    /// behind. Folders left by fixture launches that have quit are removed.
+    static func makeDefaults() -> UserDefaults {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent("UpkeepUIFixtureDefaults", isDirectory: true)
+        for entry in (try? fileManager.contentsOfDirectory(atPath: root.path)) ?? [] {
+            guard let pid = Int32(entry), pid != getpid(), kill(pid, 0) != 0 else { continue }
+            try? fileManager.removeItem(at: root.appendingPathComponent(entry))
+        }
+        let directory = root.appendingPathComponent(String(getpid()), isDirectory: true)
+        try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        // An absolute path as the suite name makes UserDefaults store it at "<path>.plist".
+        // A fresh name each launch, so a reused process ID never inherits old settings.
+        // Force-unwrapped so a failure never falls back to the real app's settings.
+        return UserDefaults(suiteName: directory.appendingPathComponent("Settings-\(UUID().uuidString)").path)!
+    }
+
     static let backupDirectory: URL = {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("upkeep-fixture-backups")
         try? FileManager.default.createDirectory(at: directory.appendingPathComponent("Fixture Editor.app"), withIntermediateDirectories: true)
