@@ -13,13 +13,24 @@ extension HomebrewPackage {
         let buildReached = target.count == 1 || app.buildVersion.map {
             VersionComparator.compare($0, target[1]) != .orderedAscending
         } == true
-        guard comparison == .orderedDescending || (comparison == .orderedSame && buildReached)
-        else { return self }
-        return HomebrewPackage(
+        if comparison == .orderedDescending || (comparison == .orderedSame && buildReached) {
+            return replacing(installedVersion: app.installedVersion, isOutdated: false)
+        }
+        // Homebrew reports auto-updating casks as current unless run with
+        // --greedy, and its recorded version is stale once the app updates
+        // itself. Compare the catalog with the app actually installed.
+        if autoUpdates, !isOutdated, UpdateScanner.caskIsNewer(currentVersion, than: app) {
+            return replacing(installedVersion: app.installedVersion, isOutdated: true)
+        }
+        return self
+    }
+
+    private func replacing(installedVersion: String, isOutdated: Bool) -> HomebrewPackage {
+        HomebrewPackage(
             token: token, displayName: displayName, description: description, homepage: homepage,
-            license: license, installedVersion: app.installedVersion, currentVersion: currentVersion,
-            kind: kind, isOutdated: false, isDependency: isDependency, dependencies: dependencies,
-            versionScheme: versionScheme, tap: tap
+            license: license, installedVersion: installedVersion, currentVersion: currentVersion,
+            kind: kind, isOutdated: isOutdated, isDependency: isDependency, dependencies: dependencies,
+            versionScheme: versionScheme, tap: tap, autoUpdates: autoUpdates, appArtifactNames: appArtifactNames
         )
     }
 }

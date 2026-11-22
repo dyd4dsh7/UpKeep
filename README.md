@@ -131,6 +131,13 @@ Homebrew's `--adopt` workflow. Apps not managed by Homebrew also count as update
 when the catalog has a newer version; Upkeep backs the app up before handing it
 to Homebrew.
 
+Homebrew normally reports casks that update themselves (`auto_updates`) as
+current, and its recorded version goes stale once the app updates. Upkeep
+compares those casks with the version of the app actually installed, so an app
+that is behind its cask is reported and one that updated itself is not. A cask
+whose app isn't installed keeps Homebrew's answer. Casks are matched to apps by
+the app bundles they install as well as by name.
+
 ### Developer packages
 
 Upkeep lists global packages for the managers you have installed:

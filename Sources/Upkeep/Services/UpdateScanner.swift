@@ -169,16 +169,13 @@ struct UpdateScanner: Sendable {
         let failedAppSources = applicationResult.failedSources
         warnings.append(contentsOf: applicationResult.warnings)
 
-        let normalizedApps = Dictionary(grouping: apps) { normalize($0.name) }
+        let appsByProductName = Self.appsByProductName(apps)
         packages = packages.map { package in
-            guard package.kind == .cask,
-                  let app = normalizedApps[normalize(package.displayName)]?.first
-                    ?? normalizedApps[normalize(package.token)]?.first else { return package }
+            guard let app = Self.app(for: package, in: appsByProductName) else { return package }
             return package.reconciled(with: app)
         }
         for package in packages where package.kind == .cask && package.isOutdated {
-            let caskName = normalize(package.displayName)
-            guard let app = normalizedApps[caskName]?.first ?? normalizedApps[normalize(package.token)]?.first,
+            guard let app = Self.app(for: package, in: appsByProductName),
                   Self.allowsHomebrewCandidate(for: app)
             else { continue }
             updates.append(AvailableUpdate(
@@ -503,8 +500,24 @@ struct UpdateScanner: Sendable {
         }
     }
 
-    private func normalize(_ value: String) -> String {
-        value.lowercased().filter(\.isLetter)
+    /// First app (by name order) for each product name variant, matching the
+    /// app details' cask lookup.
+    static func appsByProductName(_ apps: [InstalledApp]) -> [String: InstalledApp] {
+        var index: [String: InstalledApp] = [:]
+        for app in apps {
+            for name in homebrewProductNameVariants(app.name) where index[name] == nil { index[name] = app }
+        }
+        return index
+    }
+
+    static func app(for package: HomebrewPackage, in appsByProductName: [String: InstalledApp]) -> InstalledApp? {
+        guard package.kind == .cask else { return nil }
+        // Prefer the cask's own app bundle names, then its display name and token.
+        let artifactNames = package.appArtifactNames
+            .flatMap { homebrewProductNameVariants(($0 as NSString).deletingPathExtension) }
+        let otherNames = homebrewProductNameVariants(package.displayName)
+            .union(homebrewProductNameVariants(package.token))
+        return (artifactNames + otherNames.sorted()).lazy.compactMap { appsByProductName[$0] }.first
     }
 
     static func allowsHomebrewCandidate(for app: InstalledApp) -> Bool {

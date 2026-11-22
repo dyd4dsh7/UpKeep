@@ -554,7 +554,28 @@ private struct CaskDTO: Decodable {
     let token: String; let name: [String]; let desc: String?; let homepage: String?; let version: String; let outdated: Bool
     let tap: String?
     private let installed: FlexibleString?
+    private let autoUpdates: Bool?
+    private let artifacts: [CatalogArtifact]?
     var installedVersion: String? { installed?.value }
+    var updatesItself: Bool { autoUpdates ?? false }
+    var appNames: [String] { artifacts?.flatMap(\.appNames) ?? [] }
+    enum CodingKeys: String, CodingKey {
+        case token, name, desc, homepage, version, outdated, tap, installed, artifacts
+        case autoUpdates = "auto_updates"
+    }
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        token = try container.decode(String.self, forKey: .token)
+        name = try container.decode([String].self, forKey: .name)
+        desc = try container.decodeIfPresent(String.self, forKey: .desc)
+        homepage = try container.decodeIfPresent(String.self, forKey: .homepage)
+        version = try container.decode(String.self, forKey: .version)
+        outdated = try container.decode(Bool.self, forKey: .outdated)
+        tap = try container.decodeIfPresent(String.self, forKey: .tap)
+        installed = try container.decodeIfPresent(FlexibleString.self, forKey: .installed)
+        autoUpdates = try? container.decodeIfPresent(Bool.self, forKey: .autoUpdates)
+        artifacts = try? container.decodeIfPresent([CatalogArtifact].self, forKey: .artifacts)
+    }
 }
 private struct FlexibleString: Decodable {
     let value: String
@@ -651,7 +672,11 @@ private func packages(from response: InfoResponse, includePrereleases: Bool) -> 
             kind: .cask,
             isOutdated: cask.outdated && (includePrereleases || !VersionComparator.isHomebrewPrerelease(cask.version)),
             isDependency: false,
-            dependencies: [], tap: cask.tap
+            dependencies: [], tap: cask.tap,
+            // A prerelease cask version is never offered unless prereleases are on.
+            autoUpdates: cask.updatesItself
+                && (includePrereleases || !VersionComparator.isHomebrewPrerelease(cask.version)),
+            appArtifactNames: cask.appNames
         )
     }
     return formulae + casks

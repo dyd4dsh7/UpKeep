@@ -102,6 +102,7 @@ final class UpkeepLibraryState: ObservableObject {
     func app(for package: HomebrewPackage) -> InstalledApp? {
         (homebrewNameVariants[package.displayName] ?? Self.productNameVariants(package.displayName))
             .union(homebrewNameVariants[package.token] ?? Self.productNameVariants(package.token))
+            .union(package.appMatchNames)
             .compactMap { appIndexByProductName[$0] }
             .min()
             .map { apps[$0] }
@@ -139,7 +140,7 @@ final class UpkeepLibraryState: ObservableObject {
             homebrewNameVariants[package.displayName] = displayNames
             let tokenNames = homebrewNameVariants[package.token] ?? Self.productNameVariants(package.token)
             homebrewNameVariants[package.token] = tokenNames
-            let names = displayNames.union(tokenNames)
+            let names = displayNames.union(tokenNames).union(package.appMatchNames)
             for name in names where caskIndexByProductName[name] == nil {
                 caskIndexByProductName[name] = index
             }
@@ -172,12 +173,7 @@ final class UpkeepLibraryState: ObservableObject {
     }
 
     private static func productNameVariants(_ value: String) -> Set<String> {
-        let normalized = value.lowercased().filter(\.isLetter)
-        var values: Set<String> = [normalized]
-        for suffix in ["desktop", "app"] where normalized.hasSuffix(suffix) && normalized.count > suffix.count {
-            values.insert(String(normalized.dropLast(suffix.count)))
-        }
-        return values
+        homebrewProductNameVariants(value)
     }
 }
 

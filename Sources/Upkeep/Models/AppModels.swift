@@ -829,6 +829,16 @@ enum HomebrewPackageKind: String, Codable, Sendable {
     case cask = "Cask"
 }
 
+/// "Docker Desktop", "docker-desktop" and "Docker" all name the same product.
+func homebrewProductNameVariants(_ value: String) -> Set<String> {
+    let normalized = value.lowercased().filter(\.isLetter)
+    var values: Set<String> = [normalized]
+    for suffix in ["desktop", "app"] where normalized.hasSuffix(suffix) && normalized.count > suffix.count {
+        values.insert(String(normalized.dropLast(suffix.count)))
+    }
+    return values
+}
+
 struct HomebrewPackage: Identifiable, Hashable, Sendable {
     var id: String { "\(kind.rawValue):\(token)" }
     let token: String
@@ -844,6 +854,17 @@ struct HomebrewPackage: Identifiable, Hashable, Sendable {
     let dependencies: [String]
     var versionScheme: Int = 0
     var tap: String? = nil
+    /// The cask declares `auto_updates`, so `brew outdated` skips it unless
+    /// `--greedy`. Upkeep compares such casks with the installed app instead.
+    var autoUpdates = false
+    /// App bundles the cask installs, such as `Docker.app` for docker-desktop.
+    var appArtifactNames: [String] = []
+    /// Cask names, token and app bundle names, normalized for matching apps.
+    var appMatchNames: Set<String> {
+        guard kind == .cask else { return [] }
+        return ([displayName, token] + appArtifactNames.map { ($0 as NSString).deletingPathExtension })
+            .reduce(into: Set<String>()) { $0.formUnion(homebrewProductNameVariants($1)) }
+    }
     var exclusionVersion: String {
         versionScheme == 0 ? currentVersion : "scheme:\(versionScheme)|\(currentVersion)"
     }
