@@ -90,6 +90,7 @@ import Testing
     ![image](https://example.com/shot.png)
 
     Fixed sync ![icon](https://example.com/i.png) on Wi-Fi.
+    Works on ![mac](https://example.com/m.png) ![pc](https://example.com/p.png)  Windows
     - ![screenshot](https://example.com/s.png)
     - Kept
     [![badge](https://example.com/b.svg)](https://example.com)
@@ -98,7 +99,7 @@ import Testing
     Done `![not](an image)`
     """
     let text = ReleaseNotesFormatter.attributedString(from: notes)
-    #expect(String(text.characters) == "Fixed sync  on Wi-Fi.\n• Kept\n\n▎\nDone ![not](an image)")
+    #expect(String(text.characters) == "Fixed sync on Wi-Fi.\nWorks on Windows\n• Kept\n\n▎\nDone ![not](an image)")
     #expect(text.runs.allSatisfy { $0.imageURL == nil })
 }
 

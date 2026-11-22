@@ -255,6 +255,10 @@ enum ReleaseNotesFormatter {
                 inCode.toggle()
             } else if !inCode, let image = rest.prefixMatch(of: /!\[[^\]]*\]\([^)]*\)/) {
                 rest = rest[image.range.upperBound...]
+                // Keep one space where a mid-sentence image was, not two.
+                if result.last == " " || result.last == "\t" {
+                    rest = rest.drop { $0 == " " || $0 == "\t" }
+                }
                 continue
             }
             result.append(character)

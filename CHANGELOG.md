@@ -4,7 +4,7 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
-- Images in Markdown release notes no longer show as a stray word such as “image” in **What’s New**: images, including badges inside links, are left out, as images in HTML notes already were, and lines with only an image are skipped.
+- Images in Markdown release notes no longer show as a stray word such as “image” in **What’s New**: images, including badges inside links, are left out, as images in HTML notes already were, without leaving a double space mid-sentence, and lines with only an image are skipped.
 - Tests no longer leave a settings file in `~/Library/Preferences` for every run (tens of thousands had built up). Test settings now live in a temporary folder that the next test run removes.
 - The UI preview build no longer leaves settings files in `~/Library/Preferences`: its settings live in a temporary folder that the next preview launch removes, and `script/package_ui_fixture.sh` deletes the window-state files of previews older than an hour.
 - Markdown tables and quote blocks in release notes are readable in **What’s New**: each table row becomes a bullet with its first cell in bold and labelled values for the other columns, quotes get a bar instead of raw `>` markers, and GitHub alerts such as `[!WARNING]` show as a bold title. `<br>` inside a table row no longer splits the row.
