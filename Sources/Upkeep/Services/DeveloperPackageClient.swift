@@ -226,7 +226,12 @@ struct DeveloperPackageClient: Sendable {
         case .yarn:
             discovered = await npmRegistryVersions(package: package.name == "Yarn" ? "yarn" : (package.registryIdentifier ?? package.name))
         case .vsCode:
-            discovered = await visualStudioMarketplaceVersions(extensionID: package.registryIdentifier ?? package.name)
+            if let gallery = EditorExtensionGallery.forEditorCLI(package.executablePath) {
+                discovered = await visualStudioMarketplaceVersions(
+                    extensionID: package.registryIdentifier ?? package.name, gallery: gallery)
+            } else {
+                discovered = []
+            }
         case .rustup, .macPorts, .nix, .mise, .asdf, .volta, .fnm:
             discovered = [package.currentVersion, package.latestVersion]
         case .dockerImages:
@@ -620,15 +625,19 @@ func scanVSCodeExtensions(_ path: String) async -> ManagerScanResult {
     guard result.status == 0 else { return failedManagerScan(.vsCode, command: "inventory", result: result) }
     let installed = DeveloperInventoryParsers.parseExtensionInventory(result.data)
     let context = editorName(for: path)
-    // One marketplace query covers every extension; per-extension requests
+    guard let gallery = EditorExtensionGallery.forEditorCLI(path) else {
+        return ManagerScanResult(manager: .vsCode, packages: [],
+            warning: "\(context) has no extension gallery configured, so its extensions were not checked.")
+    }
+    // One gallery query covers every extension; per-extension requests
     // remain the fallback for anything the batch does not return.
-    let batched = await visualStudioMarketplaceVersions(extensionIDs: installed.map(\.0))
+    let batched = await visualStudioMarketplaceVersions(extensionIDs: installed.map(\.0), gallery: gallery)
     let values = await withTaskGroup(of: (DeveloperPackage, Bool).self) { group in
         for (identifier, version) in installed {
             group.addTask {
                 let batchVersions = batched[identifier.lowercased()] ?? []
                 let versions = batchVersions.isEmpty
-                    ? await visualStudioMarketplaceVersions(extensionID: identifier)
+                    ? await visualStudioMarketplaceVersions(extensionID: identifier, gallery: gallery)
                     : batchVersions
                 return (DeveloperPackage(
                     name: identifier,
@@ -649,7 +658,7 @@ func scanVSCodeExtensions(_ path: String) async -> ManagerScanResult {
     return ManagerScanResult(
         manager: .vsCode,
         packages: values.map(\.0),
-        warning: failures == 0 ? nil : "\(context): marketplace checks failed for \(failures) extension\(failures == 1 ? "" : "s")."
+        warning: failures == 0 ? nil : "\(context): \(gallery.serviceURL.host ?? "gallery") checks failed for \(failures) extension\(failures == 1 ? "" : "s")."
     )
 }
 
@@ -1135,23 +1144,75 @@ private func executableCandidates(named name: String, extra: [String]) -> [Strin
         .filter { FileManager.default.isExecutableFile(atPath: $0) && seen.insert($0).inserted }
 }
 
+/// VS Code and its forks, with each app's bundled CLI. Names and CLI paths
+/// were read from the shipped apps. Windsurf was renamed Devin Desktop and
+/// keeps its bundle ID, so both app names are listed.
+private let editorApplications: [(app: String, cli: String, name: String)] = [
+    ("Visual Studio Code.app", "code", "VS Code"),
+    ("Visual Studio Code - Insiders.app", "code", "VS Code Insiders"),
+    ("Cursor.app", "cursor", "Cursor"),
+    ("VSCodium.app", "codium", "VSCodium"),
+    ("VSCodium - Insiders.app", "codium-insiders", "VSCodium Insiders"),
+    ("Windsurf.app", "windsurf", "Windsurf"),
+    ("Devin.app", "devin-desktop", "Devin"),
+    ("Devin - Next.app", "devin-desktop-next", "Devin Next")
+]
+
 private func editorCLIs() -> [String] {
-    let candidates = [
-        "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
-        homePath("Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"),
-        "/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code",
-        homePath("Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code"),
-        "/Applications/Cursor.app/Contents/Resources/app/bin/cursor",
-        homePath("Applications/Cursor.app/Contents/Resources/app/bin/cursor")
-    ]
+    let candidates = editorApplications.flatMap { editor in
+        let relative = "\(editor.app)/Contents/Resources/app/bin/\(editor.cli)"
+        return ["/Applications/\(relative)", homePath("Applications/\(relative)")]
+    }
     var seen = Set<String>()
     return candidates.filter { FileManager.default.isExecutableFile(atPath: $0) && seen.insert($0).inserted }
 }
 
-private func editorName(for path: String) -> String {
-    if path.contains("Cursor.app") { return "Cursor" }
-    if path.contains("Insiders.app") { return "VS Code Insiders" }
-    return "VS Code"
+func editorName(for path: String) -> String {
+    editorApplications.first { path.contains("/\($0.app)/") }?.name ?? "VS Code"
+}
+
+/// The extension gallery an editor installs from, read from its product.json.
+/// VS Code forks use different galleries (Open VSX, Cursor's, Windsurf's) with
+/// different versions, so checking the wrong one reports updates the editor
+/// cannot install.
+struct EditorExtensionGallery: Equatable, Sendable {
+    let serviceURL: URL
+    let itemURL: URL?
+
+    static let visualStudioMarketplace = EditorExtensionGallery(
+        serviceURL: URL(string: "https://marketplace.visualstudio.com/_apis/public/gallery")!,
+        itemURL: URL(string: "https://marketplace.visualstudio.com/items")
+    )
+
+    /// `…/app/bin/<cli>` → `…/app/product.json`.
+    static func forEditorCLI(_ path: String) -> EditorExtensionGallery? {
+        let product = URL(fileURLWithPath: path).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("product.json")
+        if let data = try? Data(contentsOf: product), let gallery = parse(productJSON: data) { return gallery }
+        // Microsoft's VS Code builds always use its marketplace.
+        return path.contains("/Visual Studio Code") ? visualStudioMarketplace : nil
+    }
+
+    static func parse(productJSON data: Data) -> EditorExtensionGallery? {
+        struct Product: Decodable {
+            struct Gallery: Decodable { let serviceUrl: String?; let itemUrl: String? }
+            let extensionsGallery: Gallery?
+        }
+        guard let gallery = (try? JSONDecoder().decode(Product.self, from: data))?.extensionsGallery,
+              let service = gallery.serviceUrl.flatMap(URL.init(string:)),
+              service.scheme?.lowercased() == "https", service.host?.isEmpty == false
+        else { return nil }
+        let item = gallery.itemUrl.flatMap(URL.init(string:)).flatMap { $0.scheme?.lowercased() == "https" ? $0 : nil }
+        return EditorExtensionGallery(serviceURL: service, itemURL: item)
+    }
+
+    var queryURL: URL { serviceURL.appendingPathComponent("extensionquery") }
+
+    func itemPage(for extensionID: String) -> URL? {
+        guard let itemURL, var components = URLComponents(url: itemURL, resolvingAgainstBaseURL: false) else { return nil }
+        components.queryItems = [URLQueryItem(name: "itemName", value: extensionID)]
+        return components.url
+    }
 }
 
 private func nvmInstallationContext(for path: String) -> String? {
@@ -1657,10 +1718,14 @@ private func latestPyPIVersion(package: String) async -> String? {
 
 /// Looks up many extensions in one marketplace query, keyed by lowercased
 /// `publisher.name`. Missing or failed entries are simply absent.
-func visualStudioMarketplaceVersions(extensionIDs: [String]) async -> [String: [String]] {
+func visualStudioMarketplaceVersions(
+    extensionIDs: [String],
+    gallery: EditorExtensionGallery = .visualStudioMarketplace
+) async -> [String: [String]] {
     let ids = Array(Set(extensionIDs.map { $0.lowercased() })).sorted()
-    guard !ids.isEmpty,
-          let url = URL(string: "https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery") else { return [:] }
+    guard !ids.isEmpty else { return [:] }
+    let url = gallery.queryURL
+    let host = gallery.serviceURL.host ?? "gallery"
     var output: [String: [String]] = [:]
     for chunk in stride(from: 0, to: ids.count, by: 50).map({ Array(ids[$0..<min($0 + 50, ids.count)]) }) {
         guard let body = try? JSONSerialization.data(withJSONObject: [
@@ -1678,7 +1743,7 @@ func visualStudioMarketplaceVersions(extensionIDs: [String]) async -> [String: [
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json;api-version=7.2-preview.1", forHTTPHeaderField: "Accept")
         request.setValue("Upkeep/0.9", forHTTPHeaderField: "User-Agent")
-        guard let data = await RegistryRequestCache.shared.data(for: request, key: "VSCode-batch:\(chunk.joined(separator: ","))") else { continue }
+        guard let data = await RegistryRequestCache.shared.data(for: request, key: "VSCode-batch:\(host):\(chunk.joined(separator: ","))") else { continue }
         output.merge(parseVisualStudioMarketplaceBatch(data), uniquingKeysWith: { first, _ in first })
     }
     return output
@@ -1706,9 +1771,9 @@ private func compatibleMarketplaceVersions(_ versions: [VSMarketplaceResponse.Ve
     return VersionComparator.sortedNewestFirst(Set(compatible.map(\.version)))
 }
 
-private func visualStudioMarketplaceVersions(extensionID: String) async -> [String] {
-    guard let url = URL(string: "https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery"),
-          let body = try? JSONSerialization.data(withJSONObject: [
+private func visualStudioMarketplaceVersions(extensionID: String, gallery: EditorExtensionGallery) async -> [String] {
+    let url = gallery.queryURL
+    guard let body = try? JSONSerialization.data(withJSONObject: [
             "filters": [["criteria": [["filterType": 7, "value": extensionID]]]],
             "flags": 914
           ]) else { return [] }
@@ -1719,7 +1784,7 @@ private func visualStudioMarketplaceVersions(extensionID: String) async -> [Stri
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     request.setValue("application/json;api-version=7.2-preview.1", forHTTPHeaderField: "Accept")
     request.setValue("Upkeep/0.9", forHTTPHeaderField: "User-Agent")
-    guard let data = await RegistryRequestCache.shared.data(for: request, key: "VSCode:\(extensionID.lowercased())"),
+    guard let data = await RegistryRequestCache.shared.data(for: request, key: "VSCode:\(gallery.serviceURL.host ?? ""):\(extensionID.lowercased())"),
           let root = try? JSONDecoder().decode(VSMarketplaceResponse.self, from: data) else { return [] }
     return compatibleMarketplaceVersions(root.results.flatMap(\.extensions).flatMap(\.versions))
 }

@@ -135,12 +135,18 @@ Upkeep lists global packages for the managers you have installed:
 - **JavaScript:** Node.js, Bun, Deno, npm, pnpm, Yarn, Volta, and fnm
 - **Python:** Python/pip, pipx, and uv
 - **Ruby and Rust:** RubyGems, Rustup, and Cargo
-- **Other tools:** Go, Composer, .NET tools, GitHub CLI, and VS Code extensions
+- **Other tools:** Go, Composer, .NET tools, GitHub CLI, and editor extensions for
+  VS Code, Cursor, VSCodium, and Windsurf (now Devin Desktop)
 - **System managers:** MacPorts, Nix, mise, and asdf
 - **Containers:** Docker images pulled from a public registry
 
 It keeps the executable path it found (such as an NVM Node install) when
 updating, and lets you pick a specific published version.
+
+Editor extensions are checked against the gallery each editor installs from, read
+from its `product.json`: the Visual Studio Marketplace for VS Code, Open VSX for
+VSCodium, and Cursor's and Windsurf's own marketplaces. Their versions differ, so
+Upkeep only offers versions the editor can install.
 
 Docker images are compared by content digest and updated with `docker pull`.
 Upkeep only lists an image when its registry recognises the local digest, so

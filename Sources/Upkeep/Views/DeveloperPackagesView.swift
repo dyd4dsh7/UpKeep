@@ -504,7 +504,9 @@ private struct DeveloperPackageDetailContent: View {
         case .deno: return URL(string: "https://deno.com/runtime")
         case .npm, .pnpm: return URL(string: "https://www.npmjs.com/package/\(encoded)")
         case .yarn: return URL(string: "https://yarnpkg.com")
-        case .vsCode: return URL(string: "https://marketplace.visualstudio.com/items?itemName=\(encoded)")
+        case .vsCode:
+            return EditorExtensionGallery.forEditorCLI(package.executablePath)?.itemPage(for: identifier)
+                ?? URL(string: "https://marketplace.visualstudio.com/items?itemName=\(encoded)")
         case .uv, .pipx, .python: return URL(string: "https://pypi.org/project/\(encoded)")
         case .rubyGems: return URL(string: "https://rubygems.org/gems/\(encoded)")
         case .rustup: return URL(string: "https://rustup.rs")
