@@ -112,6 +112,10 @@ private struct UpkeepRelease: Identifiable {
     var isUnreleased: Bool { version == "Next" }
 
     static let all = [
+        UpkeepRelease(version: "0.25.6", date: "22 November 2026", changes: [
+            "Explains Upkeep's own update checks and on-disk caches in the privacy policy.",
+            "Removes unused code, including an unused command that would have upgraded every Homebrew package at once."
+        ]),
         UpkeepRelease(version: "0.25.5", date: "22 November 2026", changes: [
             "Checks for Upkeep updates and installs them in place: Upkeep verifies each release's checksum and signature, then quits, replaces itself (keeping a backup), and reopens.",
             "Adds Upkeep › Check for Upkeep Updates…, an update banner, and update status in Settings › About.",

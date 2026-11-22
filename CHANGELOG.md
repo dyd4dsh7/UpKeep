@@ -4,6 +4,14 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+## 0.25.6 — 2026-11-22
+
+- Documented Upkeep's own update checks and its on-disk caches in the privacy policy (PRIVACY.md).
+- Turned on private vulnerability reporting, so the security report link in SECURITY.md and the issue templates now works.
+- Removed unused code, including an unused command that would have upgraded every Homebrew package at once.
+- Tests and the UI preview build no longer leave temporary folders behind.
+- Removed old review reports, unused benchmarks and scripts, and duplicate icon artwork, and refreshed the README screenshot.
+
 ## 0.25.5 — 2026-11-22
 
 - Added Upkeep self-updates: **Upkeep › Check for Upkeep Updates…**, an automatic check at launch and after scans (at most every 6 hours), a banner and notification when a newer version is available, and update status in Settings › About. **Update Now** downloads the release, verifies its SHA-256 checksum and Ed25519 release signature, checks the app's identity, version, architecture, and code signature, then quits, replaces Upkeep in place (keeping a backup), and reopens it. Releases without a signature open the release page instead.
