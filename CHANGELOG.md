@@ -4,23 +4,18 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
-- Images in Markdown release notes no longer show as a stray word such as “image” in **What’s New**: images, including badges inside links, are left out, as images in HTML notes already were, without leaving a double space mid-sentence, and lines with only an image are skipped.
-- Tests no longer leave a settings file in `~/Library/Preferences` for every run (tens of thousands had built up). Test settings now live in a temporary folder that the next test run removes.
-- The UI preview build no longer leaves settings files in `~/Library/Preferences`: its settings live in a temporary folder that the next preview launch removes, and `script/package_ui_fixture.sh` deletes the window-state files of previews older than an hour.
-- Markdown tables and quote blocks in release notes are readable in **What’s New**: each table row becomes a bullet with its first cell in bold and labelled values for the other columns, quotes get a bar instead of raw `>` markers, and GitHub alerts such as `[!WARNING]` show as a bold title. `<br>` inside a table row no longer splits the row.
-- GitHub release notes keep their structure in **What’s New**: HTML inside the Markdown (collapsible `<details>` sections, `<br>`, images, and links) is converted instead of shown as raw tags, release notes from the GitHub Atom fallback keep their headings and lists, fenced code blocks show as code without their ``` markers, and Windows line endings no longer add a blank line after every line.
-- Added **Check for Upkeep updates** in Settings › General to turn off Upkeep's automatic update check; **Check for Upkeep Updates…** still works. The privacy policy now lists Google's Chrome version service and the caches left behind when removing Upkeep.
-- Sparkle release notes written in HTML keep their structure in **What’s New**: headings, paragraphs, line breaks, bulleted and numbered lists, bold and italic text, and web links are converted instead of running together when tags are removed. Feeds that declare Markdown notes are shown as written.
-- Fixed the app details for TestFlight, Setapp, and other externally managed apps repeating the same explanation twice under **Managed by**.
-- Release notes in **What’s New** now render Markdown: headings show as bold text and list items as bullets instead of raw `#` and `-` markers. Only web links in release notes are clickable.
-- The app no longer includes licence texts for Swift Testing and SwiftSyntax, which are used only to run tests and are not part of the app.
-- Redesigned the README, listed all 23 supported developer package managers, and brought SECURITY.md and CONTRIBUTING.md up to date with how releases and self-updates work.
-- `./script/build_and_run.sh` now packages its debug build in a temporary folder, so it no longer replaces a release archive in `outputs/`.
-- Fixed building Upkeep with Command Line Tools on macOS 27 SDKs: one view used SwiftUI's `@State` macro, which needs a plugin those tools don't include. `Package.swift` also drops an old workaround for Swift Testing's macro plugin that current toolchains no longer need.
+## 0.25.7 — 2026-11-23
+
+- Release notes in **What’s New** keep their formatting instead of showing raw markup. Markdown headings show as bold text and lists as bullets, table rows become bullets with labelled values, quote blocks get a bar, GitHub alerts such as `[!WARNING]` show as a bold title, and code blocks show without their ``` markers. Images, including badges inside links, are left out, and only web links are clickable.
+- HTML in release notes is converted too: Sparkle feeds and GitHub releases keep their headings, paragraphs, line breaks, lists, collapsible `<details>` sections, bold and italic text, and links. Notes from the GitHub Atom fallback keep their headings and lists, and Windows line endings no longer add a blank line after every line.
+- Added **Check for Upkeep updates** in Settings › General to turn off Upkeep's automatic update check; **Check for Upkeep Updates…** still works.
+- macOS now explains why Upkeep asks to control Terminal (Homebrew commands that need your password), and Developer ID builds are signed with the entitlement the hardened runtime needs for it.
 - Settings › Changelog now lists releases from 0.24.0 and links to the full changelog on GitHub for earlier ones.
-- macOS now explains why Upkeep asks to control Terminal (Homebrew commands that need your password), and Developer ID builds are signed with the entitlement the hardened runtime needs for it. The README and privacy policy list this permission.
-- Removed unused code, including the old "update all Homebrew packages" path, whose button was removed in 0.24.0, and a one-time menu bar reset from 0.9.5. The app no longer bundles the unused `AppIcon.icon` source.
-- Fixed the README naming a CVE Checker **Update All** button (it is **Review Updates…**), listed the publisher feed cache in the privacy policy, and corrected the release guide: packaging already validates notarized builds, and `release-notes.py --not-notarized` adds the first-launch note for locally signed builds.
+- Fixed the app details for TestFlight, Setapp, and other externally managed apps repeating the same explanation twice under **Managed by**.
+- Fixed building Upkeep with Command Line Tools on macOS 27 SDKs, and removed an old Swift Testing workaround from `Package.swift`.
+- Removed unused code, including the old "update all Homebrew packages" path, whose button was removed in 0.24.0, and a one-time menu bar reset from 0.9.5. The app no longer bundles the unused `AppIcon.icon` source or the Swift Testing and SwiftSyntax licence texts.
+- Tests and the UI preview build no longer leave settings files in `~/Library/Preferences` (tens of thousands had built up from test runs), and `./script/build_and_run.sh` no longer replaces a release archive in `outputs/`.
+- Updated the README, privacy policy, SECURITY.md, CONTRIBUTING.md, and release guide. They list all 23 developer package managers, name the CVE Checker's **Review Updates…** button correctly, and cover Google's Chrome version service, the publisher feed cache, the Terminal permission, the caches left after removing Upkeep, and locally signed releases.
 
 ## 0.25.6 — 2026-11-22
 

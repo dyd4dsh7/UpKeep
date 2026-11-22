@@ -118,6 +118,14 @@ private struct UpkeepRelease: Identifiable {
     static let fullChangelogURL = URL(string: "https://github.com/\(SelfUpdate.repository)/blob/main/CHANGELOG.md")!
 
     static let all = [
+        UpkeepRelease(version: "0.25.7", date: "23 November 2026", changes: [
+            "Shows release notes with their formatting: headings, lists, tables, quotes, and HTML from Sparkle and GitHub appear as text instead of raw markup.",
+            "Adds Check for Upkeep updates in Settings › General to turn off automatic update checks.",
+            "Explains why Upkeep asks to control Terminal when a Homebrew command needs your password.",
+            "Fixes externally managed apps repeating the same explanation under Managed by.",
+            "Lists releases from 0.24.0 here, with a link to the full changelog on GitHub.",
+            "Removes unused code."
+        ]),
         UpkeepRelease(version: "0.25.6", date: "22 November 2026", changes: [
             "Explains Upkeep's own update checks and on-disk caches in the privacy policy.",
             "Removes unused code, including an unused command that would have upgraded every Homebrew package at once."
