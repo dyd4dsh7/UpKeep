@@ -15,8 +15,8 @@ import Testing
 @MainActor
 @Test func partialDeveloperRetryRetainsFailedEnvironmentAndSuccessDateAcrossRestart() async throws {
     let suite = "PartialDeveloperFreshness.\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = try #require(UserDefaults(testSuiteName: suite))
+    defer { defaults.removeTestDomain(forName: suite) }
     let settings = AppSettings(defaults: defaults)
     let baseline = Date(timeIntervalSince1970: 100)
     settings.lastCompletedScanDate = baseline
@@ -57,8 +57,8 @@ private struct PartialFreshnessManager: DeveloperPackageManaging {
 @MainActor
 @Test func failedAttemptRetainsSuccessfulSourceDateAcrossRestart() {
     let suite = "CheckFreshness.\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suite)!
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = UserDefaults(testSuiteName: suite)!
+    defer { defaults.removeTestDomain(forName: suite) }
     let settings = AppSettings(defaults: defaults)
     let success = Date(timeIntervalSince1970: 100)
     let failed = Date(timeIntervalSince1970: 200)
@@ -75,8 +75,8 @@ private struct PartialFreshnessManager: DeveloperPackageManaging {
 @Test(arguments: [true, false])
 func targetedAppRefreshDoesNotAdvanceGlobalSchedule(fails: Bool) async {
     let suite = "TargetedFreshness.\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suite)!
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = UserDefaults(testSuiteName: suite)!
+    defer { defaults.removeTestDomain(forName: suite) }
     let baseline = Date(timeIntervalSince1970: 1_725_000_000)
     let settings = AppSettings(defaults: defaults)
     settings.lastCompletedScanDate = baseline
@@ -115,8 +115,8 @@ private struct FreshnessScanner: UpdateScanning {
 @MainActor
 @Test func scopedSourceRetryPreservesOtherCandidatesAndTheirFreshness() async throws {
     let suite = "SourceRetry.\(UUID())"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = try #require(UserDefaults(testSuiteName: suite))
+    defer { defaults.removeTestDomain(forName: suite) }
     let settings = AppSettings(defaults: defaults)
     settings.checkSparkle = true
     settings.checkGitHub = true
@@ -157,8 +157,8 @@ private actor RetryRecordingScanner: UpdateScanning {
 @MainActor
 @Test func appFreshnessFailureDetailsDoNotBorrowAnotherAppsWarning() throws {
     let suite = "FreshnessAttribution.\(UUID())"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = try #require(UserDefaults(testSuiteName: suite))
+    defer { defaults.removeTestDomain(forName: suite) }
     let settings = AppSettings(defaults: defaults)
     let store = UpkeepStore(settings: settings)
     let app = InstalledApp(name: "Target", bundleIdentifier: "test.target", installedVersion: "1",

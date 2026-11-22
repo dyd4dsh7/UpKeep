@@ -61,8 +61,8 @@ import Testing
 @MainActor
 @Test func perItemLastCheckedDatesPersistAcrossSettingsInstances() {
     let suiteName = "UpkeepTests.ItemLastChecked.\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suiteName)!
-    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let defaults = UserDefaults(testSuiteName: suiteName)!
+    defer { defaults.removeTestDomain(forName: suiteName) }
     let checkedAt = Date(timeIntervalSince1970: 1_725_000_000)
 
     AppSettings(defaults: defaults).recordChecks(
@@ -171,8 +171,8 @@ import Testing
 @MainActor
 @Test func homebrewAdoptionIgnoreIsPersistedSeparately() {
     let suiteName = "UpkeepTests.HomebrewAdoptionIgnore.\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suiteName)!
-    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let defaults = UserDefaults(testSuiteName: suiteName)!
+    defer { defaults.removeTestDomain(forName: suiteName) }
 
     let first = AppSettings(defaults: defaults)
     first.setHomebrewAdoptionIgnored(true, key: "app:com.example.direct")
@@ -188,8 +188,8 @@ import Testing
 @MainActor
 @Test func ignoringHomebrewAdoptionKeepsOtherUpdateSources() {
     let suiteName = "UpkeepTests.HomebrewAdoptionCandidate.\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suiteName)!
-    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let defaults = UserDefaults(testSuiteName: suiteName)!
+    defer { defaults.removeTestDomain(forName: suiteName) }
 
     let app = InstalledApp(
         name: "Direct App",

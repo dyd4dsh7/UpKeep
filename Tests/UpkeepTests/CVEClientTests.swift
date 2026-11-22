@@ -343,8 +343,8 @@ private let cveBrewFeed = #"{"advisories":{"zip":[{"id":"BREW-zip-example","upst
 
 @MainActor @Test func cveAutomaticChecksFollowInventoryScansAndCanBeDisabled() async throws {
     let suite = "CVEAuto.\(UUID())"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = try #require(UserDefaults(testSuiteName: suite))
+    defer { defaults.removeTestDomain(forName: suite) }
     let settings = AppSettings(defaults: defaults)
     settings.refreshInterval = .never
     settings.checkOnLaunch = false
@@ -392,8 +392,8 @@ private actor CVEHeldFeed {
 
 @MainActor @Test func cveAutomaticChecksCoalesceChangesDuringActiveCheck() async throws {
     let suite = "CVECoalesce.\(UUID())"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = try #require(UserDefaults(testSuiteName: suite))
+    defer { defaults.removeTestDomain(forName: suite) }
     let settings = AppSettings(defaults: defaults)
     settings.checkOnLaunch = false; settings.refreshInterval = .never
     let feed = CVEHeldFeed()
@@ -416,8 +416,8 @@ private actor CVEHeldFeed {
 
 @MainActor @Test func cveDisablingAutomaticChecksDoesNotCancelManualCheck() async throws {
     let suite = "CVEManual.\(UUID())"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = try #require(UserDefaults(testSuiteName: suite))
+    defer { defaults.removeTestDomain(forName: suite) }
     let settings = AppSettings(defaults: defaults)
     settings.checkOnLaunch = false; settings.refreshInterval = .never
     let feed = CVEHeldFeed()
@@ -492,8 +492,8 @@ private actor CVEHeldFeed {
 
 @MainActor @Test func cveShowSoftwareClearsFiltersThatCouldHideAffectedInstalledSoftware() async throws {
     let suite = "CVEActions.\(UUID())"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = try #require(UserDefaults(testSuiteName: suite))
+    defer { defaults.removeTestDomain(forName: suite) }
     let settings = AppSettings(defaults: defaults)
     settings.completeSetup(.advanced, sidebarViewMode: .advanced)
     settings.refreshInterval = .never
@@ -548,8 +548,8 @@ private actor CVEHeldFeed {
 
 @MainActor @Test func cveDirectUpdateActionsUseCurrentInventoryOffersAndRespectExclusions() async throws {
     let suite = "CVEUpdateActions.\(UUID())"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = try #require(UserDefaults(testSuiteName: suite))
+    defer { defaults.removeTestDomain(forName: suite) }
     let settings = AppSettings(defaults: defaults)
     settings.automaticallyCheckCVEs = false
     let store = CVEStoreFixture.makeStore(settings: settings, includeCVEInventory: true)
@@ -581,8 +581,8 @@ private actor CVEHeldFeed {
 
 @MainActor @Test func cveDirectUpdatesRevalidateVersionAndUseExistingBusyAndErrorHandling() async throws {
     let suite = "CVEUpdateExecution.\(UUID())"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = try #require(UserDefaults(testSuiteName: suite))
+    defer { defaults.removeTestDomain(forName: suite) }
     let settings = AppSettings(defaults: defaults)
     settings.automaticallyCheckCVEs = false
     let store = CVEStoreFixture.makeStore(settings: settings, includeCVEInventory: true)
@@ -609,8 +609,8 @@ private actor CVEHeldFeed {
 
 @MainActor @Test func cveUpdateAllIncludesAllAffectedOffersIndependentOfFilters() async throws {
     let suite = "CVEUpdateAll.\(UUID())"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = try #require(UserDefaults(testSuiteName: suite))
+    defer { defaults.removeTestDomain(forName: suite) }
     let settings = AppSettings(defaults: defaults)
     settings.automaticallyCheckCVEs = false
     let store = CVEStoreFixture.makeStore(settings: settings, includeCVEInventory: true)
@@ -639,8 +639,8 @@ private actor CVEHeldFeed {
 
 @MainActor @Test func cveUpdateAllDeduplicatesAnAppAndItsActualHomebrewCaskAction() async throws {
     let suite = "CVEUpdateAllCask.\(UUID())"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = try #require(UserDefaults(testSuiteName: suite))
+    defer { defaults.removeTestDomain(forName: suite) }
     let settings = AppSettings(defaults: defaults)
     settings.automaticallyCheckCVEs = false
     let store = CVEStoreFixture.makeStore(settings: settings, includeCVEInventory: true)
@@ -662,8 +662,8 @@ private actor CVEHeldFeed {
 
 @MainActor @Test func cveUpdateAllUsesExistingBatchFailureReportingForValidOffers() async throws {
     let suite = "CVEUpdateAllExecution.\(UUID())"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = try #require(UserDefaults(testSuiteName: suite))
+    defer { defaults.removeTestDomain(forName: suite) }
     let settings = AppSettings(defaults: defaults)
     settings.automaticallyCheckCVEs = false
     let store = CVEStoreFixture.makeStore(settings: settings, includeCVEInventory: true)

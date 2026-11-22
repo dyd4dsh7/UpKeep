@@ -5,8 +5,8 @@ import Testing
 @MainActor
 @Test func nvmMigrationReservesAllVersionsInItsRoot() async {
     let suite = "NVMMigrationReservations.\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suite)!
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = UserDefaults(testSuiteName: suite)!
+    defer { defaults.removeTestDomain(forName: suite) }
     let store = UpkeepStore(settings: AppSettings(defaults: defaults))
     let node = DeveloperPackage(name: "Node.js", currentVersion: "18", latestVersion: "20", manager: .node,
                                 executablePath: "/fixture/user/.nvm/versions/node/v18/bin/node")
@@ -45,8 +45,8 @@ import Testing
     #expect(developerNodeRuntimePath(for: URL(fileURLWithPath: npm.executablePath)) == runtime.resolvingSymlinksInPath().path)
     #expect(developerNodeRuntimePath(for: URL(fileURLWithPath: pnpm.executablePath)) == runtime.resolvingSymlinksInPath().path)
     let suite = "NodeReservations.\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suite)!
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = UserDefaults(testSuiteName: suite)!
+    defer { defaults.removeTestDomain(forName: suite) }
     let store = UpkeepStore(settings: AppSettings(defaults: defaults))
     #expect(!store.mutationTargets(for: npm).isDisjoint(with: store.mutationTargets(for: pnpm)))
     let other = bins[1].appendingPathComponent("node")
@@ -60,8 +60,8 @@ import Testing
 @Test(arguments: [DeveloperPackageManager.asdf, .mise, .volta, .fnm])
 func managedNodeClientsAndCleanupReserveTheirRuntimeOwner(owner: DeveloperPackageManager) async throws {
     let suite = "NodeOwnerReservations-\(UUID())"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = try #require(UserDefaults(testSuiteName: suite))
+    defer { defaults.removeTestDomain(forName: suite) }
     let store = UpkeepStore(settings: AppSettings(defaults: defaults))
     let directory: String
     switch owner {

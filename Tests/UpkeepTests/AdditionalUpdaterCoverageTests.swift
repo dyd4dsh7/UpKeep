@@ -14,8 +14,8 @@ import Testing
 @MainActor
 @Test func customGitHubMappingsPersistByBundleIdentifier() throws {
     let suite = "AdditionalUpdaterCoverageTests.\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = try #require(UserDefaults(testSuiteName: suite))
+    defer { defaults.removeTestDomain(forName: suite) }
     let settings = AppSettings(defaults: defaults)
 
     settings.setGitHubRepository("owner/project", for: "COM.Example.App")
@@ -27,7 +27,7 @@ import Testing
 }
 
 @Test func runtimeSparkleFeedDiscoveryReadsPublisherPreferences() throws {
-    let bundleIdentifier = "com.example.sparkle.\(UUID().uuidString)"
+    let bundleIdentifier = TestDefaults.domain("com.example.sparkle.\(UUID().uuidString)")
     let defaults = UserDefaults.standard
     defaults.setPersistentDomain(
         ["SUFeedURL": "https://updates.example.com/appcast.xml"],

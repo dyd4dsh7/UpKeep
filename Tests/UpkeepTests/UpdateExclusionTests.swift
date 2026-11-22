@@ -5,7 +5,7 @@ import Testing
 @MainActor
 @Test func skippedVersionReturnsWhenANewerVersionAppears() throws {
     let (settings, defaults, suiteName) = try makeSettings()
-    defer { defaults.removePersistentDomain(forName: suiteName) }
+    defer { defaults.removeTestDomain(forName: suiteName) }
 
     settings.skip(key: "homebrew|Cask:example", name: "Example", category: "Homebrew", version: "2.0")
 
@@ -20,7 +20,7 @@ import Testing
 @MainActor
 @Test func ignoredItemSuppressesEveryFutureVersionUntilRestored() throws {
     let (settings, defaults, suiteName) = try makeSettings()
-    defer { defaults.removePersistentDomain(forName: suiteName) }
+    defer { defaults.removeTestDomain(forName: suiteName) }
 
     settings.ignore(key: "developer|npm:example", name: "example", category: "npm")
 
@@ -34,7 +34,7 @@ import Testing
 @MainActor
 @Test func temporarySkipExpiresAndRemainsVersionSpecific() throws {
     let (settings, defaults, suiteName) = try makeSettings()
-    defer { defaults.removePersistentDomain(forName: suiteName) }
+    defer { defaults.removeTestDomain(forName: suiteName) }
     let key = "homebrew|Cask:temporary"
 
     settings.skip(
@@ -56,7 +56,7 @@ import Testing
 @MainActor
 @Test func temporaryIgnoreSuppressesNewVersionsUntilExpiry() throws {
     let (settings, defaults, suiteName) = try makeSettings()
-    defer { defaults.removePersistentDomain(forName: suiteName) }
+    defer { defaults.removeTestDomain(forName: suiteName) }
     let key = "developer|npm:temporary"
 
     settings.ignore(key: key, name: "temporary", category: "npm", duration: .oneWeek)
@@ -112,7 +112,7 @@ import Testing
 @MainActor
 @Test func legacyAppExclusionsAreMigrated() throws {
     let (settings, defaults, suiteName) = try makeSettings()
-    defer { defaults.removePersistentDomain(forName: suiteName) }
+    defer { defaults.removeTestDomain(forName: suiteName) }
     let app = installedApp(at: "/Applications/Example.app", bundleIdentifier: "com.example.app")
     let legacyKey = "app|\(app.id)"
 
@@ -127,15 +127,15 @@ import Testing
 @MainActor
 private func makeSettings() throws -> (AppSettings, UserDefaults, String) {
     let suiteName = "UpkeepTests.UpdateExclusions.\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: suiteName))
-    defaults.removePersistentDomain(forName: suiteName)
+    let defaults = try #require(UserDefaults(testSuiteName: suiteName))
+    defaults.removeTestDomain(forName: suiteName)
     return (AppSettings(defaults: defaults), defaults, suiteName)
 }
 
 @MainActor
 @Test func exclusionLookupsPreserveDuplicatePersistedKeysAndTrackReplacement() throws {
     let (_, defaults, suiteName) = try makeSettings()
-    defer { defaults.removePersistentDomain(forName: suiteName) }
+    defer { defaults.removeTestDomain(forName: suiteName) }
     let skipped = UpdateExclusion(
         key: "same-key", name: "A", category: "App", version: "2.0",
         mode: .skipped, expiresAt: nil

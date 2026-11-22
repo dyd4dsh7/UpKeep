@@ -37,8 +37,8 @@ private final class ObservationProbe: @unchecked Sendable {
 @MainActor
 @Test func applicationLookupObservationTracksItsLookupRatherThanWholeLibrary() {
     let suite = "ScopedObservation.\(UUID())"
-    let defaults = UserDefaults(suiteName: suite)!
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = UserDefaults(testSuiteName: suite)!
+    defer { defaults.removeTestDomain(forName: suite) }
     let store = UpkeepStore(settings: AppSettings(defaults: defaults))
     let app = InstalledApp(name: "Fixture", bundleIdentifier: "test.observation",
         installedVersion: "1", buildVersion: nil, url: URL(fileURLWithPath: "/fixture.app"),
@@ -61,8 +61,8 @@ private final class ObservationProbe: @unchecked Sendable {
 @MainActor
 @Test func nativeNestedBindingWritesObservableNavigationState() {
     let suite = "ScopedBinding.\(UUID())"
-    let defaults = UserDefaults(suiteName: suite)!
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = UserDefaults(testSuiteName: suite)!
+    defer { defaults.removeTestDomain(forName: suite) }
     let store = UpkeepStore(settings: AppSettings(defaults: defaults))
     let probe = ObservationProbe()
     withObservationTracking { _ = store.navigation.selectedLocalModelID }
@@ -125,8 +125,8 @@ private final class ObservationProbe: @unchecked Sendable {
 @MainActor
 @Test func sceneCommandReadsTrackRequiredChildStateWithoutRootSubscription() {
     let suite = "ScopedScene.\(UUID())"
-    let defaults = UserDefaults(suiteName: suite)!
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = UserDefaults(testSuiteName: suite)!
+    defer { defaults.removeTestDomain(forName: suite) }
     let store = UpkeepStore(settings: AppSettings(defaults: defaults))
     let probe = ObservationProbe()
     withObservationTracking {
@@ -145,8 +145,8 @@ private final class ObservationProbe: @unchecked Sendable {
 @MainActor
 @Test func exclusionsKeepSettingsNotificationsForReferenceConsumers() {
     let suite = "ScopedSettings.\(UUID())"
-    let defaults = UserDefaults(suiteName: suite)!
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = UserDefaults(testSuiteName: suite)!
+    defer { defaults.removeTestDomain(forName: suite) }
     let settings = AppSettings(defaults: defaults)
     let store = UpkeepStore(settings: settings)
     let probe = ObservationProbe()

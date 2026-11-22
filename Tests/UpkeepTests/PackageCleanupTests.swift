@@ -83,8 +83,8 @@ import Testing
 @MainActor
 @Test func storeUsesInjectedCleanupManager() async {
     let suiteName = "PackageCleanupTests.\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suiteName)!
-    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let defaults = UserDefaults(testSuiteName: suiteName)!
+    defer { defaults.removeTestDomain(forName: suiteName) }
     let cleanup = RecordingCleanupManager()
     let store = UpkeepStore(
         settings: AppSettings(defaults: defaults),
@@ -136,8 +136,8 @@ private actor RecordingCleanupManager: PackageCleanupManaging {
 @MainActor
 @Test func cleanupSheetReceivesErrorsWithoutPresentingGlobalAlert() async {
     let suiteName = "PackageCleanupErrors.\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suiteName)!
-    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let defaults = UserDefaults(testSuiteName: suiteName)!
+    defer { defaults.removeTestDomain(forName: suiteName) }
     let store = UpkeepStore(
         settings: AppSettings(defaults: defaults),
         dependencies: UpkeepDependencies(
@@ -210,8 +210,8 @@ private struct FailingCleanupManager: PackageCleanupManaging {
 @MainActor
 @Test func cleanupSharesInstallReservationsButNotIndependentManagers() async {
     let suite = "CleanupReservations.\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suite)!
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = UserDefaults(testSuiteName: suite)!
+    defer { defaults.removeTestDomain(forName: suite) }
     let cleanup = RecordingCleanupManager()
     let store = UpkeepStore(settings: AppSettings(defaults: defaults), dependencies: UpkeepDependencies(
         scanner: CleanupEmptyScanner(), homebrew: HomebrewClient(), developerPackages: DeveloperPackageClient(),
@@ -251,8 +251,8 @@ private struct FailingCleanupManager: PackageCleanupManaging {
 @Test(arguments: PackageCleanupKind.allCases)
 func everySupportedCleanupRefusesAnInstallReservationAndWorksAfterRelease(kind: PackageCleanupKind) async throws {
     let suite = "CleanupInstallMatrix-\(UUID())"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = try #require(UserDefaults(testSuiteName: suite))
+    defer { defaults.removeTestDomain(forName: suite) }
     let cleanup = RecordingCleanupManager()
     let store = UpkeepStore(settings: AppSettings(defaults: defaults), dependencies: UpkeepDependencies(
         scanner: CleanupEmptyScanner(), homebrew: HomebrewClient(), developerPackages: DeveloperPackageClient(),

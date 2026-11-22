@@ -6,8 +6,8 @@ import Testing
 @Test(arguments: [DeveloperPackageManager.python, .pipx])
 func pythonClientsReserveUVManagedRuntimeAndCleanup(manager: DeveloperPackageManager) async throws {
     let suite = "PythonReservations-\(UUID())"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = try #require(UserDefaults(testSuiteName: suite))
+    defer { defaults.removeTestDomain(forName: suite) }
     let store = UpkeepStore(settings: AppSettings(defaults: defaults))
     let package = DeveloperPackage(name: "tool", currentVersion: "1", latestVersion: "2", manager: manager,
         executablePath: "/fixture/python-client/bin/\(manager.assetName)")

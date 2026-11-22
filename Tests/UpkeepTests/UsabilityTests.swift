@@ -5,9 +5,9 @@ import Testing
 @MainActor
 private func usabilityStore() throws -> (UpkeepStore, AppSettings, () -> Void) {
     let suite = "UpkeepTests.Usability.\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: suite))
+    let defaults = try #require(UserDefaults(testSuiteName: suite))
     let settings = AppSettings(defaults: defaults)
-    return (UpkeepStore(settings: settings), settings, { defaults.removePersistentDomain(forName: suite) })
+    return (UpkeepStore(settings: settings), settings, { defaults.removeTestDomain(forName: suite) })
 }
 
 private func storeApp(_ name: String) -> InstalledApp {

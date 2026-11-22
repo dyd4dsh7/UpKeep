@@ -11,8 +11,8 @@ import Testing
 
     for size in [200, 2_000] {
         let suite = "UpkeepTests.Responsiveness.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = try #require(UserDefaults(testSuiteName: suite))
+        defer { defaults.removeTestDomain(forName: suite) }
         let apps = (0..<size).map { index in
             InstalledApp(
                 name: "Product \(benchmarkSuffix(index)) Desktop",

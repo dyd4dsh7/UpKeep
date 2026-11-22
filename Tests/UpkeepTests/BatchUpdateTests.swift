@@ -5,8 +5,8 @@ import Testing
 @MainActor
 @Test func focusedCountMatchesPlanAcrossExclusionsAndCollectionChanges() throws {
     let suite = "UpkeepTests.FocusedCount.\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = try #require(UserDefaults(testSuiteName: suite))
+    defer { defaults.removeTestDomain(forName: suite) }
     let settings = AppSettings(defaults: defaults)
     let store = UpkeepStore(settings: settings)
     let app = InstalledApp(
@@ -84,8 +84,8 @@ import Testing
 @MainActor
 @Test func batchReviewDeduplicatesHomebrewCasksRepresentedByAnAppUpdate() {
     let suiteName = "BatchUpdateTests.\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suiteName)!
-    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let defaults = UserDefaults(testSuiteName: suiteName)!
+    defer { defaults.removeTestDomain(forName: suiteName) }
 
     let store = UpkeepStore(settings: AppSettings(defaults: defaults))
     let app = InstalledApp(

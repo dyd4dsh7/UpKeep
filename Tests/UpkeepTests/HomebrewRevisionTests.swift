@@ -15,8 +15,8 @@ import Testing
 @MainActor
 @Test func skippedFormulaTargetDoesNotHideLaterRevisionOrVersionScheme() throws {
     let name = "FormulaExclusion.\(UUID())"
-    let defaults = try #require(UserDefaults(suiteName: name))
-    defer { defaults.removePersistentDomain(forName: name) }
+    let defaults = try #require(UserDefaults(testSuiteName: name))
+    defer { defaults.removeTestDomain(forName: name) }
     let settings = AppSettings(defaults: defaults)
     let store = UpkeepStore(settings: settings)
     var package = HomebrewPackage(token: "example", displayName: "Example", description: nil,

@@ -57,8 +57,8 @@ import Testing
 @MainActor
 @Test func storeUsesInjectedDeveloperPackageManagerForInstalls() async {
     let suiteName = "DeveloperPackageAdapterTests.\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suiteName)!
-    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let defaults = UserDefaults(testSuiteName: suiteName)!
+    defer { defaults.removeTestDomain(forName: suiteName) }
     let manager = RecordingDeveloperPackageManager()
     let store = UpkeepStore(
         settings: AppSettings(defaults: defaults),
@@ -80,8 +80,8 @@ import Testing
 @MainActor
 @Test func storeUsesInjectedDeveloperPackageManagerForUninstalls() async {
     let suiteName = "DeveloperPackageAdapterTests.Uninstall.\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suiteName)!
-    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let defaults = UserDefaults(testSuiteName: suiteName)!
+    defer { defaults.removeTestDomain(forName: suiteName) }
     let manager = RecordingDeveloperPackageManager()
     let store = UpkeepStore(
         settings: AppSettings(defaults: defaults),

@@ -61,8 +61,8 @@ import Testing
     let original = migrationApp(architectures: ["x86_64"])
     let replacement = migrationApp(architectures: ["arm64"])
     let suite = "AppleSiliconMigration.\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = try #require(UserDefaults(testSuiteName: suite))
+    defer { defaults.removeTestDomain(forName: suite) }
     let store = UpkeepStore(settings: AppSettings(defaults: defaults), dependencies: UpkeepDependencies(
         scanner: UpkeepDependencies.live.scanner,
         applicationDiscovery: MigrationDiscovery(app: replacement),

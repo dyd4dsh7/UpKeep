@@ -118,8 +118,8 @@ import Testing
 @MainActor
 @Test func ignoringAnAppAlsoHidesItsHomebrewCask() throws {
     let suite = "UpkeepTests.IgnoredCask.\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = try #require(UserDefaults(testSuiteName: suite))
+    defer { defaults.removeTestDomain(forName: suite) }
     let store = UpkeepStore(settings: AppSettings(defaults: defaults))
     let app = InstalledApp(name: "Widget", bundleIdentifier: "test.widget", installedVersion: "1.0",
                            buildVersion: nil, url: URL(fileURLWithPath: "/Applications/Widget.app"),

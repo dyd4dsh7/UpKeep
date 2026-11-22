@@ -6,8 +6,8 @@ import Testing
 @MainActor
 @Test func cachedPrimaryCountTracksInventoryExclusionsAndSkippedTargetVersion() {
     let suite = "PrimaryCount.\(UUID())"
-    let defaults = UserDefaults(suiteName: suite)!
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = UserDefaults(testSuiteName: suite)!
+    defer { defaults.removeTestDomain(forName: suite) }
     let settings = AppSettings(defaults: defaults)
     let store = UpkeepStore(settings: settings)
     let app = InstalledApp(name: "Fixture", bundleIdentifier: "test.count", installedVersion: "1",

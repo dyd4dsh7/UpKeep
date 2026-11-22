@@ -7,8 +7,8 @@ import Testing
     guard ProcessInfo.processInfo.environment["UPKEEP_LIST_BENCHMARK"] == "1" else { return }
     for size in [200, 2_000] {
         let suite = "ListBenchmark.\(UUID())"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = try #require(UserDefaults(testSuiteName: suite))
+        defer { defaults.removeTestDomain(forName: suite) }
         let settings = AppSettings(defaults: defaults)
         settings.showCurrentDeveloperPackages = false
         let store = UpkeepStore(settings: settings)

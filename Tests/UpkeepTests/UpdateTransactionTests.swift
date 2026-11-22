@@ -5,8 +5,8 @@ import Testing
 @MainActor
 @Test func updatedApplicationsAreReopenedAtTheirInstalledPaths() async throws {
     let defaultsName = "UpdateRelaunchTests.\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: defaultsName))
-    defer { defaults.removePersistentDomain(forName: defaultsName) }
+    let defaults = try #require(UserDefaults(testSuiteName: defaultsName))
+    defer { defaults.removeTestDomain(forName: defaultsName) }
     let app = InstalledApp(
         name: "Example",
         bundleIdentifier: "com.example.relaunch",
@@ -45,8 +45,8 @@ import Testing
     let homebrew = TransactionHomebrew(recorder: recorder)
     let history = TransactionHistory(recorder: recorder)
     let defaultsName = "UpdateTransactionTests.\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: defaultsName))
-    defer { defaults.removePersistentDomain(forName: defaultsName) }
+    let defaults = try #require(UserDefaults(testSuiteName: defaultsName))
+    defer { defaults.removeTestDomain(forName: defaultsName) }
 
     let app = InstalledApp(
         name: "Example",
@@ -120,8 +120,8 @@ import Testing
     let recorder = TransactionRecorder()
     let history = PausingTransactionHistory()
     let defaultsName = "UpdateProgressTests.\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: defaultsName))
-    defer { defaults.removePersistentDomain(forName: defaultsName) }
+    let defaults = try #require(UserDefaults(testSuiteName: defaultsName))
+    defer { defaults.removeTestDomain(forName: defaultsName) }
 
     let app = InstalledApp(
         name: "Adobe Example",
@@ -198,8 +198,8 @@ import Testing
 @Test func homebrewAdoptionShowsProgressAfterAuthorizationUntilCommandCompletes() async throws {
     let homebrew = PausingAdoptionHomebrew()
     let defaultsName = "AdoptionProgressTests.\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: defaultsName))
-    defer { defaults.removePersistentDomain(forName: defaultsName) }
+    let defaults = try #require(UserDefaults(testSuiteName: defaultsName))
+    defer { defaults.removeTestDomain(forName: defaultsName) }
 
     let app = InstalledApp(
         name: "Adoptable Example",
@@ -441,8 +441,8 @@ private final class RecordingTransactionExternalOpener: ExternalOpening {
 @Test(arguments: ["updated", "outdated", "failed", "partial"], ["individual", "batch", "all"])
 func formulaUpdateVerifiesItsTokenWithoutScanningUnrelatedSources(result: String, mode: String) async throws {
     let suite = "FormulaUpdateVerification.\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = try #require(UserDefaults(testSuiteName: suite))
+    defer { defaults.removeTestDomain(forName: suite) }
     let recorder = TransactionRecorder()
     let package = HomebrewPackage(
         token: "gh", displayName: "gh", description: nil, homepage: nil, license: nil,

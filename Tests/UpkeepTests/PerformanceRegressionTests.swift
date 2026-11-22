@@ -110,8 +110,8 @@ private func countingClient(_ transport: CountingCVETransport) -> CVEInventoryCl
 
 @MainActor @Test func cachedSourceCountsMatchApplicationFilters() throws {
     let suite = "SourceCounts.\(UUID())"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = try #require(UserDefaults(testSuiteName: suite))
+    defer { defaults.removeTestDomain(forName: suite) }
     let store = CVEStoreFixture.makeStore(settings: AppSettings(defaults: defaults), includeCVEInventory: true)
     for destination in UpkeepStore.applicationSourceDestinations {
         #expect(store.applicationSourceCounts()[destination] == store.applications(for: destination).count)
@@ -162,8 +162,8 @@ private func countingClient(_ transport: CountingCVETransport) -> CVEInventoryCl
 
 @MainActor @Test func checkRecordsAreCoalescedAndPruned() throws {
     let suite = "CheckRecords.\(UUID())"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = try #require(UserDefaults(testSuiteName: suite))
+    defer { defaults.removeTestDomain(forName: suite) }
     let settings = AppSettings(defaults: defaults)
     let date = Date(timeIntervalSince1970: 1_000)
     settings.recordChecks(for: ["app|keep", "app|gone"], at: date)

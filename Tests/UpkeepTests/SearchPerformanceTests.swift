@@ -102,7 +102,7 @@ private struct SearchFixture {
 
     init(size: Int) throws {
         suite = "UpkeepTests.Search.\(UUID().uuidString)"
-        defaults = try #require(UserDefaults(suiteName: suite))
+        defaults = try #require(UserDefaults(testSuiteName: suite))
         store = UpkeepStore(settings: AppSettings(defaults: defaults))
         // Alphabetic names keep Homebrew's digit-stripping name matching unique.
         let names = (0..<size).map { index -> String in
@@ -149,5 +149,5 @@ private struct SearchFixture {
         }
     }
 
-    func cleanUp() { defaults.removePersistentDomain(forName: suite) }
+    func cleanUp() { defaults.removeTestDomain(forName: suite) }
 }

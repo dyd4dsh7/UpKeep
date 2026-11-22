@@ -5,8 +5,8 @@ import Testing
 @MainActor
 @Test func freshSetupDefaultsToFocusedApplicationManagement() {
     let suiteName = "AppSettingsSetupTests.\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suiteName)!
-    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let defaults = UserDefaults(testSuiteName: suiteName)!
+    defer { defaults.removeTestDomain(forName: suiteName) }
 
     let settings = AppSettings(defaults: defaults)
     #expect(!settings.hasCompletedSetup)
@@ -24,9 +24,9 @@ import Testing
 @MainActor
 @Test func sidebarViewModePersistsAcrossSettingsInstances() throws {
     let suiteName = "UpkeepTests.SidebarViewMode.\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: suiteName))
-    defer { defaults.removePersistentDomain(forName: suiteName) }
-    defaults.removePersistentDomain(forName: suiteName)
+    let defaults = try #require(UserDefaults(testSuiteName: suiteName))
+    defer { defaults.removeTestDomain(forName: suiteName) }
+    defaults.removeTestDomain(forName: suiteName)
 
     let settings = AppSettings(defaults: defaults)
     #expect(settings.sidebarViewMode == .basic)
@@ -39,9 +39,9 @@ import Testing
 @MainActor
 @Test func basicModeScansOnlyBasicSources() throws {
     let suiteName = "UpkeepTests.BasicScanSettings.\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: suiteName))
-    defer { defaults.removePersistentDomain(forName: suiteName) }
-    defaults.removePersistentDomain(forName: suiteName)
+    let defaults = try #require(UserDefaults(testSuiteName: suiteName))
+    defer { defaults.removeTestDomain(forName: suiteName) }
+    defaults.removeTestDomain(forName: suiteName)
 
     let settings = AppSettings(defaults: defaults)
     settings.completeSetup(.advanced, sidebarViewMode: .advanced)
@@ -83,9 +83,9 @@ import Testing
 @MainActor
 @Test func listDensityPersistsAcrossSettingsInstances() throws {
     let suiteName = "UpkeepTests.ListDensity.\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: suiteName))
-    defer { defaults.removePersistentDomain(forName: suiteName) }
-    defaults.removePersistentDomain(forName: suiteName)
+    let defaults = try #require(UserDefaults(testSuiteName: suiteName))
+    defer { defaults.removeTestDomain(forName: suiteName) }
+    defaults.removeTestDomain(forName: suiteName)
 
     let settings = AppSettings(defaults: defaults)
     #expect(settings.listDensity == .comfortable)
@@ -98,9 +98,9 @@ import Testing
 @MainActor
 @Test func completedScanDatePersistsAcrossSettingsInstances() throws {
     let suiteName = "UpkeepTests.LastScan.\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: suiteName))
-    defer { defaults.removePersistentDomain(forName: suiteName) }
-    defaults.removePersistentDomain(forName: suiteName)
+    let defaults = try #require(UserDefaults(testSuiteName: suiteName))
+    defer { defaults.removeTestDomain(forName: suiteName) }
+    defaults.removeTestDomain(forName: suiteName)
 
     let date = Date(timeIntervalSince1970: 1_753_132_800)
     let settings = AppSettings(defaults: defaults)

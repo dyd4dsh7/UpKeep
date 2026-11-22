@@ -6,8 +6,8 @@ import Testing
 @Test(arguments: [DeveloperPackageManager.asdf, .mise], ["python", "rust", "ruby"])
 func runtimeManagerPluginReservesItsConsumerEnvironment(owner: DeveloperPackageManager, runtime: String) async throws {
     let suite = "MultiRuntimeReservations-\(UUID())"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = try #require(UserDefaults(testSuiteName: suite))
+    defer { defaults.removeTestDomain(forName: suite) }
     let store = UpkeepStore(settings: AppSettings(defaults: defaults))
     let consumer: DeveloperPackageManager = runtime == "python" ? .python : runtime == "rust" ? .cargo : .rubyGems
     let key = runtime == "python" ? "python-runtime" : runtime == "rust" ? "rust-toolchain" : "rubygems"

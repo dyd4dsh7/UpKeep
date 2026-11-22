@@ -430,6 +430,7 @@ private actor ReviewInstaller: DirectAppInstalling {
 }
 @MainActor private final class ReviewFixture {
     let suite = "Upkeep.AppReviewTests.\(UUID().uuidString)"
+    deinit { UserDefaults.standard.removeTestDomain(forName: suite) }
     let defaults: UserDefaults
     let settings: AppSettings
     let history: ReviewHistory
@@ -441,7 +442,7 @@ private actor ReviewInstaller: DirectAppInstalling {
          discoveredApp: InstalledApp = reviewApp(version: "1.1", build: "11"), developerReport: DeveloperPackageClient.Report = .empty,
          scanner: any UpdateScanning = ReviewScanner(), developer: (any DeveloperPackageManaging)? = nil, models: (any LocalModelManaging)? = nil, progressInstaller: (any DirectAppInstalling)? = nil,
          discovery: (any ApplicationDiscovering)? = nil, homebrew: any HomebrewManaging = ReviewBrew()) {
-        defaults = UserDefaults(suiteName: suite)!
+        defaults = UserDefaults(testSuiteName: suite)!
         settings = AppSettings(defaults: defaults)
         self.history = history; self.installer = installer
         store = UpkeepStore(settings: settings, dependencies: UpkeepDependencies(
@@ -451,7 +452,7 @@ private actor ReviewInstaller: DirectAppInstalling {
             externalVerificationInterval: .milliseconds(1)
         ))
     }
-    func cleanUp() { defaults.removePersistentDomain(forName: suite) }
+    func cleanUp() { defaults.removeTestDomain(forName: suite) }
 }
 
 @MainActor

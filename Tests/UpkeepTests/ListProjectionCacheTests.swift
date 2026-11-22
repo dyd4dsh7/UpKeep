@@ -18,8 +18,8 @@ import Testing
 @MainActor
 @Test func developerListProjectionTracksQueryPolicyManagerAndInventory() {
     let suite = "ListProjection.\(UUID())"
-    let defaults = UserDefaults(suiteName: suite)!
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = UserDefaults(testSuiteName: suite)!
+    defer { defaults.removeTestDomain(forName: suite) }
     let settings = AppSettings(defaults: defaults)
     settings.showCurrentDeveloperPackages = false
     let store = UpkeepStore(settings: settings)
@@ -44,8 +44,8 @@ import Testing
 @MainActor
 @Test func homebrewListProjectionTracksAppMappingExclusionsAndPackageInventory() {
     let suite = "HomebrewProjection.\(UUID())"
-    let defaults = UserDefaults(suiteName: suite)!
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = UserDefaults(testSuiteName: suite)!
+    defer { defaults.removeTestDomain(forName: suite) }
     let settings = AppSettings(defaults: defaults)
     let store = UpkeepStore(settings: settings)
     let package = HomebrewPackage(token: "fixture", displayName: "Fixture", description: nil,

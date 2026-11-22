@@ -5,8 +5,8 @@ import Testing
 @MainActor
 @Test func cargoAndRustupReserveSharedToolchainsAcrossExecutablePaths() async throws {
     let suite = "RustReservations-\(UUID())"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = try #require(UserDefaults(testSuiteName: suite))
+    defer { defaults.removeTestDomain(forName: suite) }
     let store = UpkeepStore(settings: AppSettings(defaults: defaults))
     let cargo = DeveloperPackage(name: "tool", currentVersion: "1", latestVersion: "2", manager: .cargo,
         executablePath: "/fixture/.rustup/toolchains/stable/bin/cargo")

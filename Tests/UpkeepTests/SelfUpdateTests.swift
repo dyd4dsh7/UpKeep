@@ -128,8 +128,8 @@ private func fixtureApp(in root: URL, identifier: String = InstalledApp.upkeepBu
 @MainActor
 @Test func selfUpdateControllerStaysOfflineOutsideThePackagedApp() async throws {
     let suite = "UpkeepTests.SelfUpdate.\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = try #require(UserDefaults(testSuiteName: suite))
+    defer { defaults.removeTestDomain(forName: suite) }
     let controller = SelfUpdateController(defaults: defaults, isEnabled: false)
     controller.checkAutomatically()
     #expect(controller.phase == .idle)
@@ -183,8 +183,8 @@ private func fixtureApp(in root: URL, identifier: String = InstalledApp.upkeepBu
 @MainActor
 @Test func turningOffUpkeepUpdateChecksStopsAutomaticChecks() async throws {
     let suite = "UpkeepTests.SelfUpdateToggle.\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = try #require(UserDefaults(testSuiteName: suite))
+    defer { defaults.removeTestDomain(forName: suite) }
 
     let settings = AppSettings(defaults: defaults)
     #expect(settings.automaticallyCheckForUpkeepUpdates, "Checks are on by default")

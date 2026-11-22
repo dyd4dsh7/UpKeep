@@ -22,8 +22,8 @@ import Testing
 @MainActor
 @Test func cachedSearchTracksInventoryQueryAndSourceChanges() {
     let suite = "SearchProjection.\(UUID())"
-    let defaults = UserDefaults(suiteName: suite)!
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = UserDefaults(testSuiteName: suite)!
+    defer { defaults.removeTestDomain(forName: suite) }
     let store = UpkeepStore(settings: AppSettings(defaults: defaults))
     let app = InstalledApp(name: "Example", bundleIdentifier: "test.search", installedVersion: "1.0",
         buildVersion: nil, url: URL(fileURLWithPath: "/not-real/Example.app"), sparkleFeedURL: nil,
