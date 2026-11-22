@@ -9,6 +9,9 @@ All notable changes to Upkeep are documented here.
 - Sparkle release notes written in HTML keep their structure in **What’s New**: headings, paragraphs, line breaks, bulleted and numbered lists, bold and italic text, and web links are converted instead of running together when tags are removed. Feeds that declare Markdown notes are shown as written.
 - Fixed the app details for TestFlight, Setapp, and other externally managed apps repeating the same explanation twice under **Managed by**.
 - Release notes in **What’s New** now render Markdown: headings show as bold text and list items as bullets instead of raw `#` and `-` markers. Only web links in release notes are clickable.
+- The app no longer includes licence texts for Swift Testing and SwiftSyntax, which are used only to run tests and are not part of the app.
+- Redesigned the README, listed all 23 supported developer package managers, and brought SECURITY.md and CONTRIBUTING.md up to date with how releases and self-updates work.
+- `./script/build_and_run.sh` now packages its debug build in a temporary folder, so it no longer replaces a release archive in `outputs/`.
 
 ## 0.25.6 — 2026-11-22
 
