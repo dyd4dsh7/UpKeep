@@ -8,8 +8,6 @@
     <string>Upkeep</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
-    <key>CFBundleIconName</key>
-    <string>AppIcon</string>
     <key>CFBundleExecutable</key>
     <string>Upkeep</string>
     <key>CFBundleIdentifier</key>
@@ -21,17 +19,15 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-	<string>0.25.6</string>
+    <string>0.25.6</string>
     <key>CFBundleVersion</key>
-	<string>49</string>
+    <string>49</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.utilities</string>
-    <key>LSBackgroundOnly</key>
-    <false/>
-    <key>LSUIElement</key>
-    <false/>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Upkeep opens Terminal to run Homebrew commands that need your password or approval.</string>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © 2026 Hayden Thorn. Licensed under MIT. Third-party notices apply.</string>
     <key>NSPrincipalClass</key>

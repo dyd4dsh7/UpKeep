@@ -11,8 +11,9 @@ In Icon Composer:
 5. For Mono, map the loop to the primary tone and the down arrow to a lighter secondary tone.
 6. Save over `Support/AppIcon.icon` after making any visual refinements.
 
-The SwiftPM packaging script copies the editable `AppIcon.icon` source and the
-`AppIcon.icns` fallback. It does not compile an adaptive Icon Composer asset catalog.
+The SwiftPM packaging script ships only `AppIcon.icns`. It does not compile an
+adaptive Icon Composer asset catalog, so `AppIcon.icon` stays in the repository as
+source artwork.
 While running, `AppBrand` observes AppKit's effective appearance and selects the
 existing light or dark PNG through `NSApplication.applicationIconImage`. AppKit
 retains control of Dock sizing and the native update badge; no custom Dock view is used.

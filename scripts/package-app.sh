@@ -47,9 +47,6 @@ cp "${PROJECT_DIR}/Support/Info.plist" "${APP_DIR}/Contents/Info.plist"
 cp "${PROJECT_DIR}/Support/AppIcon.icns" "${APP_DIR}/Contents/Resources/AppIcon.icns"
 cp "${PROJECT_DIR}/LICENSE" "${APP_DIR}/Contents/Resources/LICENSE"
 cp "${PROJECT_DIR}/THIRD_PARTY_NOTICES.md" "${APP_DIR}/Contents/Resources/THIRD_PARTY_NOTICES.md"
-if [[ -d "${PROJECT_DIR}/Support/AppIcon.icon" ]]; then
-    ditto "${PROJECT_DIR}/Support/AppIcon.icon" "${APP_DIR}/Contents/Resources/AppIcon.icon"
-fi
 if [[ -d "${BIN_DIR}/Upkeep_Upkeep.bundle" ]]; then
     ditto "${BIN_DIR}/Upkeep_Upkeep.bundle" "${APP_DIR}/Contents/Resources/Upkeep_Upkeep.bundle"
 fi
@@ -68,10 +65,14 @@ xattr -cr "${APP_DIR}"
 if [[ "${CONFIGURATION}" == "release" ]]; then
     : "${UPKEEP_SIGNING_IDENTITY:?Set UPKEEP_SIGNING_IDENTITY to a Developer ID Application certificate name.}"
     : "${UPKEEP_NOTARY_PROFILE:?Set UPKEEP_NOTARY_PROFILE to an xcrun notarytool keychain profile.}"
+    # The hardened runtime blocks Apple events unless the app is entitled to
+    # send them; Upkeep uses them to run password-protected Homebrew commands
+    # in Terminal.
     codesign \
         --force \
         --options runtime \
         --timestamp \
+        --entitlements "${PROJECT_DIR}/Support/Upkeep.entitlements" \
         --sign "${UPKEEP_SIGNING_IDENTITY}" \
         "${APP_DIR}"
 else
