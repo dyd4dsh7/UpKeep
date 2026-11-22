@@ -707,6 +707,16 @@ enum SidebarDestination: String, CaseIterable, Identifiable {
 
     var id: Self { self }
 
+    /// Bundled third-party logo for source pages that represent a tool.
+    var logoName: String? {
+        switch self {
+        case .sparkle: "sparkle"
+        case .github: "github"
+        case .homebrewApps: "homebrew"
+        default: nil
+        }
+    }
+
     var systemImage: String {
         switch self {
         case .updates: "arrow.down.circle"

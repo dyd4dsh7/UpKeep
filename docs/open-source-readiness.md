@@ -85,8 +85,10 @@ its existing history. The historical logos remain in older commits and are
 documented as not covered by the MIT licence. Separately, logos for brands whose
 policies or file licences permit identification use were restored from official
 sources into `Sources/Upkeep/Resources/ThirdPartyLogos/`, with per-file sources,
-terms, and notices in `THIRD_PARTY_NOTICES.md`. Brands requiring permission keep
-system symbols.
+terms, and notices in `THIRD_PARTY_NOTICES.md`. The owner then chose to also
+include logos whose policies ask for permission (npm, Node.js, VS Code, Ollama,
+.NET size limits) or have no published terms, without requesting it; the notices
+state this and offer removal on request.
 
 ## Build and release gates
 

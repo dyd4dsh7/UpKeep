@@ -4,7 +4,7 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
-- Restored package-manager and model-runtime logos for brands whose policies or file licences permit it (Homebrew, Bun, Deno, Yarn, pnpm, mise, Nix, GitHub, LM Studio, pipx, RubyGems, Rust, Cargo, and Composer), using official files with dark-mode variants and full notices; other brands keep a system symbol.
+- Restored package-manager, model-runtime, and update-source logos from official sources for every supported tool that publishes one (Homebrew, npm, Node.js, Bun, Deno, Yarn, pnpm, Volta, Python, pipx, uv, RubyGems, Rust, Cargo, Go, Composer, .NET, MacPorts, Nix, mise, GitHub, VS Code, Ollama, LM Studio, and Sparkle), with dark-mode variants and per-logo sources and terms in THIRD_PARTY_NOTICES.md.
 
 ## 0.25.0 — 2026-11-22
 

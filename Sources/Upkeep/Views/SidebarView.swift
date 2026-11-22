@@ -184,9 +184,17 @@ struct UpkeepSidebarView: View {
             Text(destination.rawValue)
                 .lineLimit(1)
         } icon: {
-            Image(systemName: destination.systemImage)
-                .symbolRenderingMode(.monochrome)
-                .frame(width: 18)
+            if let name = destination.logoName, let logo = ThirdPartyLogo.image(named: name, in: scheme) {
+                Image(nsImage: logo)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 16, height: 16)
+                    .frame(width: 18)
+            } else {
+                Image(systemName: destination.systemImage)
+                    .symbolRenderingMode(.monochrome)
+                    .frame(width: 18)
+            }
         }
         .badge(count)
         .tag(destination)

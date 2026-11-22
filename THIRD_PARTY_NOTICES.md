@@ -41,30 +41,44 @@ Upkeep does not grant you any right to use them elsewhere; check each owner's
 terms below. Each logo was downloaded from its official source on 22 November
 2026 and is unmodified unless a change is listed.
 
-Logos are included only where the owner's policy or the file's licence permits
-this use. These brands are shown with a generic system symbol instead because
-their policy requires permission or no usable licence was found: npm, Node.js,
-Visual Studio Code, Go, Ollama, Python, .NET, uv, Volta, MacPorts, asdf, and fnm.
+Each logo is shown only to identify the tool it names (nominative use). Upkeep
+is not affiliated with, sponsored by, or endorsed by any of these owners. Some
+owners' policies ask that their logo be used only with written permission;
+Upkeep has **not** obtained that permission, and the Terms column says so. If
+you own one of these marks and want it removed, please open an issue and it will
+be replaced with a generic symbol. asdf and fnm publish no official logo, and
+Apple, Steam, Setapp and Microsoft AutoUpdate sources use system symbols.
 
 | File | Owner | Source | Terms | Changes |
 | --- | --- | --- | --- | --- |
 | `bun.png` | Oven (Bun) | [bun.com/press-kit](https://bun.com/press-kit) (`logo@4x.png`) | Press-kit guidance: do not stretch, recolour, or alter | None |
 | `cargo.png` | Rust Foundation | [rust-lang/cargo](https://github.com/rust-lang/cargo/blob/master/doc/book/src/images/Cargo-Logo-Small.png) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); [Rust trademark policy](https://rustfoundation.org/policy/rust-trademark-policy/) | None |
 | `composer.png` | Composer (Jordi Boggiano, Nils Adermann); logo by Max Grigorian | [composer/getcomposer.org](https://github.com/composer/getcomposer.org/blob/main/web/img/logo-composer-transparent.png) | MIT (notice below) | None |
+| `dotnet.svg` | .NET Foundation / Microsoft | [dotnet/brand](https://github.com/dotnet/brand/blob/main/logo/dotnet-logo.svg) | .NET brand guidelines; shown below the guidelines' 50 px minimum without permission | None |
 | `deno.svg` | Deno Land Inc. | [deno.com/brand](https://deno.com/brand) (dark filled mark) | Deno logo guidelines: black and white only, do not edit | None |
 | `github.svg`, `github-dark.svg` | GitHub, Inc. | [primer/octicons](https://github.com/primer/octicons) `mark-github` | [GitHub logo guidelines](https://brand.github.com/foundations/logo); Octicons MIT (notice below) | `github-dark.svg` fills the mark white, matching GitHub's official white logo |
+| `go.svg` | Go gopher by Renée French | [golang/website](https://github.com/golang/website/blob/master/_content/doc/gopher/favicon.svg) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); the gopher is not one of the Go trademarks | None |
 | `homebrew.svg` | Homebrew | [Homebrew/brew.sh](https://github.com/Homebrew/brew.sh/blob/main/assets/img/homebrew.svg) | BSD 2-Clause (notice below) | None |
 | `lmstudio.svg` | LM Studio | [lmstudio.ai/brand](https://lmstudio.ai/brand) (`LM Studio Icon Color.svg`) | LM Studio brand terms: use when referring to LM Studio; non-exclusive, non-transferable, revocable | None |
+| `macports.svg` | The MacPorts Project | [macports/macports-www](https://github.com/macports/macports-www/blob/master/img/macports-avatar.svg) | No published licence or trademark policy; used without permission | None |
 | `mise.svg`, `mise-dark.svg` | Jeff Dickey (mise) | [jdx/mise](https://github.com/jdx/mise/tree/main/docs/public) (`logo-light.svg`, `logo-dark.svg`) | MIT (notice below) | None |
 | `nix.png` | The NixOS Project and contributors; designed by Simon Frankau and Tim Cuthbertson | [NixOS/nixos-artwork](https://github.com/NixOS/nixos-artwork/blob/master/logo/nix-snowflake-colours.svg) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | Rendered from SVG to a 512 px PNG; artwork unchanged |
+| `node.svg` | OpenJS Foundation (Node.js) | [nodejs/nodejs.org](https://github.com/nodejs/nodejs.org/blob/main/apps/site/public/static/logos/jsIconGreen.svg) | [OpenJS trademark policy](https://trademark-policy.openjsf.org/) asks for written permission for this use; not obtained. File: MIT (notice below) | None |
+| `npm.svg` | npm, Inc. | [npm/logos](https://github.com/npm/logos) (`npm square/n.svg`) | [npm logo policy](https://docs.npmjs.com/policies/logos-and-usage) requires written permission; not obtained | None |
+| `ollama.svg`, `ollama-dark.png` | Ollama | [ollama/ollama](https://github.com/ollama/ollama/tree/main/docs) (`ollama-logo.svg`, `images/logo-dark.png`) | [Ollama terms](https://ollama.com/terms) reserve branding rights; used without permission. Files: MIT (notice below) | None |
 | `pipx.svg` | pipx (Chad Smith and contributors); logo by @IrishMorales | [pypa/pipx](https://github.com/pypa/pipx/blob/main/logo.svg) | MIT (notice below) | None |
 | `pnpm.svg` | pnpm (Zoltan Kochan and contributors) | [pnpm.io/logos](https://pnpm.io/logos) | MIT (notice below) | None |
+| `python.png` | Python Software Foundation | [python.org](https://www.python.org/) (`apple-touch-icon-144x144-precomposed.png`) | [PSF trademark policy](https://www.python.org/psf/trademarks/): unaltered logo to indicate compatibility. Python and the Python logos are trademarks or registered trademarks of the Python Software Foundation™ | None |
 | `rubygems.png` | Ruby Central (RubyGems) | [rubygems.org/logos.zip](https://rubygems.org/pages/about) (`rubygems_logo_red.png`) | Offered for download by RubyGems.org | None |
 | `rustup.svg`, `rustup-dark.svg` | Rust Foundation | [rust-lang/rust-artwork](https://github.com/rust-lang/rust-artwork/blob/master/logo/rust-logo-single-path.svg) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); [Rust trademark policy](https://rustfoundation.org/policy/rust-trademark-policy/) | `rustup-dark.svg` fills the logo white for dark appearance |
+| `sparkle.png` | The Sparkle Project | [sparkle-project/Sparkle](https://github.com/sparkle-project/Sparkle/tree/2.x/Resources/Images.xcassets/AppIcon.appiconset) (`icon_256x256@2x.png`) | Sparkle licence (MIT-style; notice below) | None |
+| `uv.svg` | Astral Software Inc. | [astral-sh/uv](https://github.com/astral-sh/uv/blob/main/docs/assets/logo-letter.svg) | No published trademark policy; "UV" is an Astral trademark; used without permission. File: MIT or Apache 2.0 | None |
+| `volta.png` | Volta (David Herman and contributors) | [volta-cli/website](https://github.com/volta-cli/website/blob/main/theme/assets/header-icon.png) | No published licence or policy; used without permission | None |
+| `vscode.svg` | Microsoft Corporation | [code.visualstudio.com/brand](https://code.visualstudio.com/brand) | Visual Studio Code, VS Code, and the Visual Studio Code icon are trademarks of Microsoft Corporation. All rights reserved. Microsoft's brand guidelines do not list in-app use; used without permission | None |
 | `yarn.svg` | Yarn | [yarnpkg/assets](https://github.com/yarnpkg/assets/blob/master/yarn-kitten-circle.svg) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | None |
 
-Attribution for CC BY 4.0 works: "Nix snowflake" by Simon Frankau and Tim
-Cuthbertson, the NixOS Project and contributors; "Rust logo" and "Cargo logo" by
+Attribution for CC BY 4.0 works: "Go gopher" by Renée French; "Nix snowflake"
+by Simon Frankau and Tim Cuthbertson, the NixOS Project and contributors; "Rust logo" and "Cargo logo" by
 the Rust Foundation; "Yarn logo" by the Yarn project. Each is licensed under
 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), with changes as listed
 above. CC BY 4.0 does not grant trademark rights.
@@ -77,6 +91,10 @@ the MIT licence text that follows:
 - Composer logo: Copyright (c) 2016 Jordi Boggiano, Nils Adermann
 - Octicons (`mark-github`): Copyright (c) 2026 GitHub Inc.
 - mise logos: Copyright (c) 2025 Jeff Dickey
+- Node.js website assets: Copyright Node.js Website WG contributors
+- Ollama logo files: Copyright (c) Ollama
+- Sparkle icon: Copyright (c) 2006-2013 Andy Matuschak and other Sparkle
+  contributors (see the [Sparkle licence](https://github.com/sparkle-project/Sparkle/blob/2.x/LICENSE))
 - pipx logo: Copyright (c) 2018 Chad Smith and contributors
 - pnpm logo: Copyright (c) 2016-2022 Zoltan Kochan and other contributors
 

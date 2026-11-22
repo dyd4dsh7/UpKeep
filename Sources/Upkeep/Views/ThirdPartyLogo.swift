@@ -5,8 +5,7 @@ import SwiftUI
 /// They identify the tool that manages an item. They are trademarks of their
 /// owners, are not covered by Upkeep's MIT licence, and are listed with their
 /// sources and terms in THIRD_PARTY_NOTICES.md. A name without a bundled logo
-/// (for example a brand whose policy requires permission) falls back to a
-/// system symbol at the call site. A `<name>-dark` file, when present, is the
+/// falls back to a system symbol at the call site. A `<name>-dark` file, when present, is the
 /// official or permitted variant for dark appearance.
 @MainActor
 enum ThirdPartyLogo {
@@ -34,9 +33,11 @@ enum ThirdPartyLogo {
             ?? Bundle.module.url(forResource: name, withExtension: "svg")
     }
 
-    /// Logos Upkeep is permitted to show; everything else uses a system symbol.
+    /// Bundled logos; anything else uses a system symbol.
     nonisolated static let bundledNames: Set<String> = [
-        "bun", "cargo", "composer", "deno", "github", "homebrew", "lmstudio",
-        "mise", "nix", "pipx", "pnpm", "rubygems", "rustup", "yarn"
+        "bun", "cargo", "composer", "deno", "dotnet", "github", "go", "homebrew",
+        "lmstudio", "macports", "mise", "nix", "node", "npm", "ollama", "pipx",
+        "pnpm", "python", "rubygems", "rustup", "sparkle", "uv", "volta",
+        "vscode", "yarn"
     ]
 }
