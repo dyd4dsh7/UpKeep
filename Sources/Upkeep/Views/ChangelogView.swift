@@ -118,6 +118,10 @@ private struct UpkeepRelease: Identifiable {
     static let fullChangelogURL = URL(string: "https://github.com/\(SelfUpdate.repository)/blob/main/CHANGELOG.md")!
 
     static let all = [
+        UpkeepRelease(version: "0.25.12", date: "23 November 2026", changes: [
+            "Compares Homebrew casks that update themselves with the installed app, so an app behind its cask is reported and one that updated itself shows its real version.",
+            "Links casks to apps by the app bundles they install, such as Docker Desktop and Docker.app."
+        ]),
         UpkeepRelease(version: "0.25.11", date: "23 November 2026", changes: [
             "Lists iPhone and iPad apps installed from the App Store on Apple silicon and checks them for App Store updates."
         ]),

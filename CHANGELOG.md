@@ -4,6 +4,11 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+## 0.25.12 — 2026-11-23
+
+- Homebrew casks that update themselves (`auto_updates`) are now compared with the installed app's real version. Homebrew reports them as current unless run with `--greedy`, and its recorded version goes stale once the app updates, so Upkeep could miss an app that was behind its cask. These casks now also show the installed app's version instead of Homebrew's stale one.
+- Casks are matched to apps by the app bundles they install, so casks named differently from their app, such as Docker Desktop and `Docker.app`, are linked during scans.
+
 ## 0.25.11 — 2026-11-23
 
 - iPhone and iPad apps installed from the App Store on Apple silicon now appear with your other apps and are checked for App Store updates. Upkeep used to skip them because their bundles have no `Contents` folder. App details show them as **iPhone and iPad app**, they are never matched to Homebrew casks, and those installed another way have no update source.
