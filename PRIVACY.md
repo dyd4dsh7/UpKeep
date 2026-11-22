@@ -30,12 +30,25 @@ names are matched locally. Local paths, bundle identifiers, and installation
 contexts are not sent. The index stays in memory during a check; displayed results remain in memory
 for the app session, shared by the CVE Checker and list badges. Opening advisory links contacts OSV, NVD, or GitHub.
 
+Upkeep checks for its own updates at most every six hours while it is open, and
+whenever you choose **Check for Upkeep Updates…**. Each check asks
+`api.github.com` for this project's published releases; it sends no app, package,
+or personal data beyond normal connection metadata. An update is downloaded from
+GitHub only when you choose to install it.
+
 ## What stays on the Mac
 
 Preferences, source selections, exclusions, and repository mappings use macOS
 UserDefaults. Diagnostics, update history, and app backups are stored under
 `~/Library/Application Support/Upkeep/`. Diagnostics retain up to 2,000 entries;
-backups retain up to three per app and twenty in total.
+backups retain up to three per app and twenty in total. Installing an Upkeep update
+keeps the previous version in `Self Update Backup` in the same folder.
+
+To make later checks faster, Upkeep caches some results in `~/Library/Caches/`:
+developer package names and versions (up to 30 minutes), macOS update and installer
+lists (up to six hours), and Homebrew's public cask catalog. Downloaded Upkeep
+updates are staged there until they are installed. macOS may clear these caches
+at any time; Upkeep rebuilds them on the next check.
 
 Diagnostics redact common credential patterns, URL queries, and the home-directory
 prefix before storage/export. Redaction cannot guarantee that every sensitive

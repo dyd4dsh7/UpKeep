@@ -1,7 +1,6 @@
 .build/
 .DS_Store
 outputs/
-work/
 *.xcuserstate
 DerivedData/
 dist/
@@ -13,4 +12,3 @@ dist/
 *.key
 *.mobileprovision
 *.keychain-db
-ci-artifact/
