@@ -342,8 +342,8 @@ extension View {
 private extension HomebrewAuthorizationConfirmation.Action {
     var isAdoption: Bool {
         switch self {
-        case .adopt, .updateAdoptable: true
-        case .update, .package, .allPackages: false
+        case .adopt: true
+        case .update, .package: false
         }
     }
 

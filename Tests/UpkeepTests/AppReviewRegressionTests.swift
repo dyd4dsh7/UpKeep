@@ -631,17 +631,18 @@ private actor ReviewVersionGate: DeveloperPackageManaging {
 }
 
 @MainActor
-@Test func homebrewBatchPreservesBackupFailureAcrossRescan() async throws {
+@Test func homebrewCaskUpdatePreservesBackupFailureAcrossRescan() async throws {
     let f = ReviewFixture(history: ReviewHistory(failBackup: true))
     defer { f.cleanUp() }
     let app = reviewApp()
     f.store.apps = [app]
-    f.store.homebrewPackages = [HomebrewPackage(
+    let package = HomebrewPackage(
         token: "review-fixture", displayName: app.name, description: nil, homepage: nil, license: nil,
         installedVersion: "1.0", currentVersion: "1.1", kind: .cask, isOutdated: true,
         isDependency: false, dependencies: []
-    )]
-    await f.store.updateAllPackages()
+    )
+    f.store.homebrewPackages = [package]
+    await f.store.updatePackage(package)
     await f.store.confirmHomebrewAuthorization(try #require(f.store.pendingHomebrewAuthorizationConfirmation))
     #expect(f.store.errorMessage?.contains("backup") == true)
 }
@@ -1194,7 +1195,7 @@ private actor DeveloperMutationReviewClient: DeveloperPackageManaging {
 }
 
 @MainActor
-@Test(arguments: ["updated", "newer", "unchanged", "partial", "unverified"], ["individual", "batch", "all", "adoptable", "fallback", "batchAdoptable", "individualFallback"])
+@Test(arguments: ["updated", "newer", "unchanged", "partial", "unverified"], ["individual", "batch", "fallback", "batchAdoptable", "individualFallback"])
 func caskVerificationUsesInstalledBundleAndProtectsUnverifiedRecovery(result: String, mode: String) async throws {
     let app = reviewApp()
     let observedVersion = result == "newer" ? "1.2" : "1.1"
@@ -1208,7 +1209,6 @@ func caskVerificationUsesInstalledBundleAndProtectsUnverifiedRecovery(result: St
     let package = HomebrewPackage(token: "review-fixture", displayName: app.name, description: nil,
         homepage: nil, license: nil, installedVersion: "1.0", currentVersion: "1.1", kind: .cask,
         isOutdated: true, isDependency: false, dependencies: [])
-    if mode == "all" { f.store.scanWarnings = [ScanWarning(source: .homebrew, message: "Cask catalog: offline")] }
     f.store.apps = [app]
     f.store.homebrewPackages = [package]
     #expect(f.store.homebrewPackageApp(for: package) != nil)
@@ -1239,10 +1239,7 @@ func caskVerificationUsesInstalledBundleAndProtectsUnverifiedRecovery(result: St
         #expect(summary.updatedCount == (successful ? 1 : 0))
         if successful { #expect(summary.results.first?.detail == "Updated to \(observedVersion).") }
     } else {
-        if mode == "all" { await f.store.updateAllPackages() }
-        else if mode == "adoptable" {
-            await f.store.updateAdoptableApp(AdoptableApp(app: app, caskToken: package.token, caskVersion: package.currentVersion))
-        } else { await f.store.updatePackage(package) }
+        await f.store.updatePackage(package)
         let confirmation = try #require(f.store.pendingHomebrewAuthorizationConfirmation)
         await f.store.confirmHomebrewAuthorization(confirmation)
         reportedError = f.store.errorMessage

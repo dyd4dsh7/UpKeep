@@ -185,8 +185,8 @@ private func caskCatalogCacheURL() -> URL? {
         .appendingPathComponent("cask-catalog-slim.json")
 }
 
-/// The cask catalog API is about 20 MB; Upkeep needs five fields per cask.
-/// The cache stores only those fields (about 1 MB) and keeps the decoded
+/// The cask catalog API is about 19 MB; Upkeep needs five fields per cask.
+/// The cache stores only those fields (about 0.5 MB) and keeps the decoded
 /// catalog in memory until the file changes, so scans neither re-read nor
 /// re-decode the full catalog.
 struct SlimCaskCatalog: Codable {

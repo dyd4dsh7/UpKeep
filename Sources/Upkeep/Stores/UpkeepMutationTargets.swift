@@ -131,11 +131,8 @@ extension UpkeepStore {
         switch confirmation.action {
         case let .update(update): return mutationTargets(for: .application(update))
         case let .package(package): return mutationTargets(for: .homebrew(package))
-        case let .adopt(item), let .updateAdoptable(item): return mutationTargets(for: item)
+        case let .adopt(item): return mutationTargets(for: item)
         case let .restore(record): return mutationTargets(for: record)
-        case .allPackages:
-            return Set(homebrewPackages.filter { $0.isOutdated && !isExcluded($0) }
-                .flatMap { mutationTargets(for: .homebrew($0)) })
         }
     }
 }

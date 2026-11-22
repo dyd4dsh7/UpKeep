@@ -18,7 +18,6 @@ enum OperationID: Hashable, Sendable {
     case packageCleanup(String)
     case localModelScan
     case localModelRuntimeScan(LocalModelRuntime)
-    case homebrewBatch
     case homebrewInventoryScan
     case homebrewCatalogScan
     case macOSSourceScan

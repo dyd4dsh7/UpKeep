@@ -21,12 +21,6 @@ enum CVEListStatus: Equatable {
         if case let .advisories(count, _) = self { return count > 0 }
         return false
     }
-    var requiresAttention: Bool {
-        switch self {
-        case .advisories, .incomplete: true
-        default: false
-        }
-    }
 }
 
 extension CVEInventoryItem {

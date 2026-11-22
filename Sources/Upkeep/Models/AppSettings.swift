@@ -301,10 +301,6 @@ final class AppSettings: ObservableObject {
             ? defaults.bool(forKey: "hasCompletedSetup")
             : (defaults.object(forKey: "lastCompletedScanDate") != nil)
         hasCompletedSetup = completedSetup
-        if !defaults.bool(forKey: "didRestoreSwiftUIMenuBarItem") {
-            defaults.set(true, forKey: "showMenuBarItem")
-            defaults.set(true, forKey: "didRestoreSwiftUIMenuBarItem")
-        }
         automaticallyCheckCVEs = defaults.bool(forKey: "automaticallyCheckCVEs")
         automaticallyCheckForUpkeepUpdates = defaults.bool(forKey: "automaticallyCheckForUpkeepUpdates")
         checkOnLaunch = defaults.bool(forKey: "checkOnLaunch")

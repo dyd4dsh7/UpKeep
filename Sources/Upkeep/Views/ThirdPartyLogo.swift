@@ -48,7 +48,8 @@ enum ThirdPartyLogo {
             ?? Bundle.module.url(forResource: name, withExtension: "svg")
     }
 
-    /// Bundled logos; anything else uses a system symbol.
+    /// Every bundled logo name. Lookups use `url(named:)`; tests use this list to
+    /// check that each logo loads and that every manager with a logo has one.
     nonisolated static let bundledNames: Set<String> = [
         "bun", "cargo", "composer", "deno", "dotnet", "github", "go", "homebrew",
         "lmstudio", "macports", "mise", "nix", "node", "npm", "ollama", "pipx",

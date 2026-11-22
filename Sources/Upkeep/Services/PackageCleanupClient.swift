@@ -96,10 +96,6 @@ struct PackageCleanupEstimate: Identifiable, Equatable, Sendable {
         basis != .reclaimable || bytes > 0
     }
 
-    var dialogTitle: String {
-        shouldOfferCleanup ? "Clean Up \(target.kind.cleanupSubject)?" : "Nothing to Clean"
-    }
-
     var confirmationMessage: String {
         let size = ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
         switch basis {

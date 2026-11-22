@@ -9,8 +9,6 @@ struct RunningAppConfirmation: Identifiable {
         case update(AvailableUpdate)
         case package(HomebrewPackage)
         case adopt(AdoptableApp)
-        case updateAdoptable(AdoptableApp)
-        case allPackages
         case restore(UpdateRecord)
     }
 
@@ -26,7 +24,6 @@ struct RunningAppConfirmation: Identifiable {
     var buttonTitle: String {
         switch action {
         case .adopt: "Quit and Adopt"
-        case .allPackages: "Quit Apps and Update"
         case .restore: "Quit and Restore"
         default: "Quit and Update"
         }
@@ -38,8 +35,6 @@ struct HomebrewAuthorizationConfirmation: Identifiable {
         case update(AvailableUpdate)
         case package(HomebrewPackage)
         case adopt(AdoptableApp)
-        case updateAdoptable(AdoptableApp)
-        case allPackages
     }
 
     let id = UUID()
@@ -1682,71 +1677,6 @@ final class UpkeepStore: ObservableObject {
         }
     }
 
-    func updateAllPackages() async {
-        if homebrewPackages.contains(where: { $0.isOutdated && !isExcluded($0) && $0.kind == .cask }) {
-            pendingHomebrewAuthorizationConfirmation = HomebrewAuthorizationConfirmation(
-                itemName: "Homebrew cask updates",
-                action: .allPackages
-            )
-            return
-        }
-        await continueAllPackageUpdates()
-    }
-
-    private func continueAllPackageUpdates() async {
-        let runningApps = homebrewPackages
-            .filter { $0.isOutdated && !isExcluded($0) && $0.kind == .cask }
-            .compactMap(matchingApp(for:))
-        if queueRunningAppConfirmation(for: runningApps, action: .allPackages) { return }
-        _ = await updateAllPackagesNow()
-    }
-
-    private func updateAllPackagesNow() async -> Bool {
-        await mutationCoordinator.withAccess(to: Set(homebrewPackages.filter { $0.isOutdated && !isExcluded($0) }.flatMap { mutationTargets(for: .homebrew($0)) }), otherwise: false) {
-            await updateAllPackagesUnlocked()
-        }
-    }
-
-    private func updateAllPackagesUnlocked() async -> Bool {
-        let operationID = OperationID.homebrewBatch
-        guard !isWorking(operationID) else { return false }
-        let startedAt = Date()
-        updateExecutionState.activeOperations.insert(operationID)
-        errorMessage = nil
-        defer { updateExecutionState.activeOperations.remove(operationID) }
-        var failureMessage: String?
-        let attempted = homebrewPackages.filter { $0.isOutdated && !isExcluded($0) }
-        for package in attempted {
-            guard await updatePackageUnlocked(package) else {
-                failureMessage = errorMessage ?? "Could not verify \(package.displayName)."
-                break
-            }
-        }
-        if let failureMessage {
-            errorMessage = failureMessage
-
-        } else {
-            let remaining = attempted.filter { attemptedPackage in
-                homebrewPackages.contains { $0.token == attemptedPackage.token && $0.kind == attemptedPackage.kind && $0.isOutdated }
-            }
-            if !remaining.isEmpty {
-                errorMessage = "Homebrew finished, but \(remaining.map(\.displayName).joined(separator: ", ")) still report available updates."
-            }
-        }
-        DiagnosticsStore.shared.record(
-            errorMessage == nil ? .info : .error,
-            category: .update,
-            errorMessage == nil ? "Homebrew batch update completed" : "Homebrew batch update needs attention",
-            metadata: [
-                "Attempted": "\(attempted.count)",
-                "Duration": formattedDiagnosticDuration(since: startedAt),
-                "Result": errorMessage ?? "All attempted packages refreshed successfully"
-            ]
-        )
-        refreshDiagnostics()
-        return errorMessage == nil
-    }
-
     func adopt(_ item: AdoptableApp) async {
         pendingHomebrewAuthorizationConfirmation = HomebrewAuthorizationConfirmation(
             itemName: item.app.name,
@@ -1836,18 +1766,6 @@ final class UpkeepStore: ObservableObject {
             errorMessage = commandError ?? message
             return false
         }
-    }
-
-    func updateAdoptableApp(_ item: AdoptableApp) async {
-        pendingHomebrewAuthorizationConfirmation = HomebrewAuthorizationConfirmation(
-            itemName: item.app.name,
-            action: .updateAdoptable(item)
-        )
-    }
-
-    private func continueAdoptableUpdate(_ item: AdoptableApp) async {
-        if queueRunningAppConfirmation(for: [item.app], action: .updateAdoptable(item)) { return }
-        _ = await updateAdoptableAppNow(item)
     }
 
     private func updateAdoptableAppNow(_ item: AdoptableApp) async -> Bool {
@@ -1972,8 +1890,6 @@ final class UpkeepStore: ObservableObject {
         case let .update(update): succeeded = await performApplicationUpdate(update)
         case let .package(package): succeeded = await updatePackageNow(package)
         case let .adopt(item): succeeded = await adoptNow(item)
-        case let .updateAdoptable(item): succeeded = await updateAdoptableAppNow(item)
-        case .allPackages: succeeded = await updateAllPackagesNow()
         case let .restore(record): succeeded = await revertNow(record)
         }
         if succeeded {
@@ -1991,8 +1907,6 @@ final class UpkeepStore: ObservableObject {
         case let .update(update): await continueApplicationUpdate(update)
         case let .package(package): await continuePackageUpdate(package)
         case let .adopt(item): await continueAdoption(item)
-        case let .updateAdoptable(item): await continueAdoptableUpdate(item)
-        case .allPackages: await continueAllPackageUpdates()
         }
     }
 

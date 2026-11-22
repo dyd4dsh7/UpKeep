@@ -123,16 +123,7 @@ struct MozillaUpdateClient: Sendable {
         return components.dropFirst().joined(separator: ".")
     }
 
-    static func newestBraveVersion(
-        for channel: BraveUpdateChannel,
-        releases: [BraveRelease]
-    ) -> String? {
-        newestBraveRelease(for: channel, releases: releases)?
-            .tagName
-            .trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
-    }
-
-    private static func newestBraveRelease(
+    static func newestBraveRelease(
         for channel: BraveUpdateChannel,
         releases: [BraveRelease]
     ) -> BraveRelease? {

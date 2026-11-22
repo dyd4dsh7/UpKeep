@@ -226,8 +226,6 @@ struct ManagedUpdateStatus: Hashable, Sendable {
         case queued = "Queued"
         case downloading = "Downloading"
         case installing = "Installing"
-        case restartRequired = "Restart required"
-        case attention = "Needs attention"
     }
 
     let state: State
@@ -482,19 +480,6 @@ struct AvailableUpdate: Identifiable, Hashable, Sendable {
         case .developer: "Open the app's built-in updater"
         case .sparkle: "Open the developer download"
         case .github: "Open the GitHub release"
-        }
-    }
-
-
-    var actionSystemImage: String {
-        if canInstallDirectly { return "arrow.down.app.fill" }
-        if requiresInAppInstallation { return "arrow.up.forward.app" }
-        return switch source {
-        case .homebrew: "shippingbox.and.arrow.backward.fill"
-        case .appStore: "storefront.fill"
-        case .developer: "arrow.triangle.2.circlepath"
-        case .sparkle: "arrow.down.circle.fill"
-        case .github: "arrow.up.right.square.fill"
         }
     }
 }

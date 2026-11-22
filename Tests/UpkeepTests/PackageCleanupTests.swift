@@ -35,7 +35,6 @@ import Testing
     let reclaimable = PackageCleanupEstimate(target: target, bytes: 2_000_000, basis: .reclaimable)
 
     #expect(!empty.shouldOfferCleanup)
-    #expect(empty.dialogTitle == "Nothing to Clean")
     #expect(reclaimable.shouldOfferCleanup)
     #expect(reclaimable.confirmationMessage.contains("Estimated cleanup size:"))
 }
@@ -45,7 +44,6 @@ import Testing
     let unknown = homebrewCleanupEstimate(target: target, output: "Warning: cleanup output changed")
     #expect(unknown.basis == .unavailable)
     #expect(unknown.shouldOfferCleanup)
-    #expect(unknown.dialogTitle != "Nothing to Clean")
     #expect(unknown.confirmationMessage.contains("unavailable"))
     #expect(homebrewCleanupEstimate(target: target, output: "").basis == .unavailable)
     #expect(homebrewCleanupEstimate(target: target, output: "Would free: 0 bytes").basis == .reclaimable)
@@ -57,7 +55,6 @@ import Testing
     let estimate = PackageCleanupEstimate(target: target, bytes: 2_000_000, basis: .cacheFootprintOnly)
 
     #expect(estimate.shouldOfferCleanup)
-    #expect(estimate.dialogTitle == "Clean Up npm Cache?")
     #expect(estimate.confirmationMessage.contains("Cleanup estimate unavailable"))
     #expect(estimate.confirmationMessage.contains("not the amount cleanup will remove"))
 }

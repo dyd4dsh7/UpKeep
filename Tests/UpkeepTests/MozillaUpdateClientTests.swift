@@ -72,12 +72,12 @@ import Testing
         )
     ]
 
-    #expect(MozillaUpdateClient.newestBraveVersion(
+    #expect(MozillaUpdateClient.newestBraveRelease(
         for: .release, releases: releases
-    ) == "1.92.143")
-    #expect(MozillaUpdateClient.newestBraveVersion(
+    )?.tagName == "v1.92.143")
+    #expect(MozillaUpdateClient.newestBraveRelease(
         for: .beta, releases: releases
-    ) == "1.93.125")
+    )?.tagName == "v1.93.125")
     #expect(MozillaUpdateClient.braveProductVersion("150.1.92.141") == "1.92.141")
     #expect(MozillaUpdateClient.braveBundleVersion(
         productVersion: "1.92.143",

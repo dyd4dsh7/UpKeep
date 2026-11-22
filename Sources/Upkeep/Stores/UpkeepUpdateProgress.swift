@@ -55,10 +55,7 @@ extension UpkeepStore {
         switch confirmation.action {
         case let .update(update): mutationTargets(for: .application(update))
         case let .package(package): mutationTargets(for: .homebrew(package))
-        case let .adopt(item), let .updateAdoptable(item): mutationTargets(for: item)
-        case .allPackages:
-            Set(homebrewPackages.filter { $0.isOutdated && !isExcluded($0) }
-                .flatMap { mutationTargets(for: .homebrew($0)) })
+        case let .adopt(item): mutationTargets(for: item)
         }
     }
 }
@@ -79,8 +76,7 @@ extension RunningAppConfirmation {
         switch action {
         case let .update(update): .applicationUpdate(update.id)
         case let .package(package): .homebrewPackage(package.id)
-        case let .adopt(item), let .updateAdoptable(item): .homebrewAdoption(item.id)
-        case .allPackages: .homebrewBatch
+        case let .adopt(item): .homebrewAdoption(item.id)
         case let .restore(record): .historyRestore(record.id)
         }
     }

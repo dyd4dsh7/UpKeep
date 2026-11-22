@@ -438,7 +438,7 @@ private final class RecordingTransactionExternalOpener: ExternalOpening {
 }
 
 @MainActor
-@Test(arguments: ["updated", "outdated", "failed", "partial"], ["individual", "batch", "all"])
+@Test(arguments: ["updated", "outdated", "failed", "partial"], ["individual", "batch"])
 func formulaUpdateVerifiesItsTokenWithoutScanningUnrelatedSources(result: String, mode: String) async throws {
     let suite = "FormulaUpdateVerification.\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(testSuiteName: suite))
@@ -468,9 +468,6 @@ func formulaUpdateVerifiesItsTokenWithoutScanningUnrelatedSources(result: String
         reportedError = summary.results.first(where: { $0.outcome == .failed })?.detail
         #expect(store.errorMessage == nil)
         #expect(summary.results.first?.outcome == (result == "updated" ? .updated : .failed))
-    case "all":
-        await store.updateAllPackages()
-        reportedError = store.errorMessage
     default:
         await store.updatePackage(package)
         reportedError = store.errorMessage
