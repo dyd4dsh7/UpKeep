@@ -17,6 +17,10 @@ All notable changes to Upkeep are documented here.
 - Redesigned the README, listed all 23 supported developer package managers, and brought SECURITY.md and CONTRIBUTING.md up to date with how releases and self-updates work.
 - `./script/build_and_run.sh` now packages its debug build in a temporary folder, so it no longer replaces a release archive in `outputs/`.
 - Fixed building Upkeep with Command Line Tools on macOS 27 SDKs: one view used SwiftUI's `@State` macro, which needs a plugin those tools don't include. `Package.swift` also drops an old workaround for Swift Testing's macro plugin that current toolchains no longer need.
+- Settings › Changelog now lists releases from 0.24.0 and links to the full changelog on GitHub for earlier ones.
+- macOS now explains why Upkeep asks to control Terminal (Homebrew commands that need your password), and Developer ID builds are signed with the entitlement the hardened runtime needs for it. The README and privacy policy list this permission.
+- Removed unused code, including the old "update all Homebrew packages" path, whose button was removed in 0.24.0, and a one-time menu bar reset from 0.9.5. The app no longer bundles the unused `AppIcon.icon` source.
+- Fixed the README naming a CVE Checker **Update All** button (it is **Review Updates…**), listed the publisher feed cache in the privacy policy, and corrected the release guide: packaging already validates notarized builds, and `release-notes.py --not-notarized` adds the first-launch note for locally signed builds.
 
 ## 0.25.6 — 2026-11-22
 

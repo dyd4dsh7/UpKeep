@@ -149,7 +149,7 @@ is on (the default). No API key is needed.
 | Selected apps and official casks | [NVD](https://nvd.nist.gov/developers/vulnerabilities) |
 
 Apps and updates with known advisories get a CVE badge that links to the results.
-**Update All** reviews every affected item that has an update available.
+**Review Updates…** reviews every affected item that has an update available.
 
 > [!NOTE]
 > An empty result means the source returned no known advisories for that version,
@@ -198,7 +198,8 @@ Update checks contact the publishers and registries for the sources you enable.
 Preferences, diagnostics, history, and backups stay on your Mac, and Upkeep runs no
 analytics service of its own. See [PRIVACY.md](PRIVACY.md) for exactly what is read, sent, and kept.
 
-macOS may ask for App Management access, notifications, or authentication for a
+macOS may ask for App Management access, notifications, permission to control
+Terminal (for Homebrew commands that need your password), or authentication for a
 specific action. Review updates and cleanup before confirming them. App backups are
 limited and do not replace a system backup.
 

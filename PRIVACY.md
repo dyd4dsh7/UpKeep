@@ -28,7 +28,8 @@ versions go to `api.osv.dev`. Curated application product/vendor identities,
 installed versions, and a macOS CPE target go to `services.nvd.nist.gov`. Homebrew
 formula matching downloads the shared advisory index from `formulae.brew.sh`;
 individual formula names are matched locally. Local paths, bundle identifiers,
-and installation contexts are not sent. The index stays in memory during a check;
+and installation contexts are not sent. The index is downloaded to a temporary
+file that is deleted once it is read, and is used only during a check;
 displayed results remain in memory for the app session, shared by the CVE Checker
 and list badges. Opening advisory links contacts OSV, NVD, or GitHub.
 
@@ -49,7 +50,8 @@ keeps the previous version in `Self Update Backup` in the same folder.
 
 To make later checks faster, Upkeep caches some results in `~/Library/Caches/`:
 developer package names and versions (up to 30 minutes), macOS update and installer
-lists (up to six hours), and Homebrew's public cask catalog. Downloaded Upkeep
+lists (up to six hours), Homebrew's public cask catalog, and publisher update
+feeds and release details from Sparkle, GitHub, and Mozilla (up to 30 minutes). Downloaded Upkeep
 updates are staged there until they are installed. macOS may clear these caches
 at any time; Upkeep rebuilds them on the next check.
 
@@ -61,8 +63,9 @@ Nothing automatically uploads diagnostic exports to the project.
 
 ## Permissions and changes
 
-macOS may request App Management access, notification permission, or authentication
-for an operation. Grant only what you want to use. Homebrew, developer tooling,
+macOS may request App Management access, notification permission, permission to
+control Terminal (used when a Homebrew command needs your password), or
+authentication for an operation. Grant only what you want to use. Homebrew, developer tooling,
 and local-model checks are optional. Updates, package adoption, restores, and
 cleanup can modify your applications or development environment; review the
 operation before confirming it. Backups do not cover every package manager or
