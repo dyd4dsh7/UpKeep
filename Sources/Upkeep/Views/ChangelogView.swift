@@ -112,6 +112,10 @@ private struct UpkeepRelease: Identifiable {
     var isUnreleased: Bool { version == "Next" }
 
     static let all = [
+        UpkeepRelease(version: "0.25.2", date: "22 November 2026", changes: [
+            "Makes full update checks about 25% faster by running independent macOS and developer-tool checks together and checking VS Code extensions in one request.",
+            "Reuses the full macOS installer list for up to 6 hours during automatic checks; the macOS page still refreshes it on request."
+        ]),
         UpkeepRelease(version: "0.25.1", date: "22 November 2026", changes: [
             "Shows official logos for package managers, model runtimes, and update sources, including Homebrew, npm, Node.js, Python, Rust, Go, GitHub, VS Code, Ollama, LM Studio, and Sparkle, with dark-mode versions.",
             "Shows the installed App Store, TestFlight, Steam, Setapp, and Microsoft AutoUpdate icons on their source pages.",
