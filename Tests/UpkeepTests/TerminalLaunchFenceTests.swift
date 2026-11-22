@@ -3,9 +3,9 @@ import Testing
 @testable import Upkeep
 
 private struct LaunchFenceFixture {
-    let root = FileManager.default.temporaryDirectory
+    let container = FileManager.default.temporaryDirectory
         .appendingPathComponent("Upkeep-Fence-Fixture-\(UUID().uuidString)")
-        .appendingPathComponent("path with ' quote $literal")
+    var root: URL { container.appendingPathComponent("path with ' quote $literal") }
     var script: URL { root.appendingPathComponent("command.zsh") }
     var pid: URL { root.appendingPathComponent("pid") }
     var status: URL { root.appendingPathComponent("status") }
@@ -14,7 +14,7 @@ private struct LaunchFenceFixture {
         TerminalLaunchFence(url: root.appendingPathComponent("launch-cancelled"), processIDURL: pid)
     }
     func prepare() throws { try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) }
-    func cleanUp() { try? FileManager.default.removeItem(at: root) }
+    func cleanUp() { try? FileManager.default.removeItem(at: container) }
     func launch() async throws -> CommandRunner.Result {
         try await CommandRunner.run(TerminalCommandLaunch.executable,
             TerminalCommandLaunch.arguments(script: script), timeout: 10)

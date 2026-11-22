@@ -8,6 +8,8 @@ if ! test -x "$DEBUG_DIR/Upkeep"; then
     DEBUG_DIR="$ROOT_DIR/.build/debug"
 fi
 test -x "$DEBUG_DIR/Upkeep"
+# Remove fixture bundles from earlier runs (older than an hour, so open ones stay).
+find /private/tmp -maxdepth 1 -name 'upkeep-ui-fixture.*' -mmin +60 -exec rm -rf {} + 2>/dev/null || true
 FIXTURE_DIR="$(mktemp -d /private/tmp/upkeep-ui-fixture.XXXXXX)"
 APP_BUNDLE="$FIXTURE_DIR/Upkeep UI Fixture.app"
 mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"

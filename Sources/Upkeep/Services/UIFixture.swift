@@ -37,7 +37,7 @@ enum UIFixture {
     }
 
     static let backupDirectory: URL = {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("upkeep-fixture-backups-\(UUID())")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("upkeep-fixture-backups")
         try? FileManager.default.createDirectory(at: directory.appendingPathComponent("Fixture Editor.app"), withIntermediateDirectories: true)
         return directory
     }()
