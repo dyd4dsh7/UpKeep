@@ -56,7 +56,7 @@ struct HomebrewClient: Sendable {
             let catalog: [CatalogCask]
             do { catalog = try JSONDecoder().decode([CatalogCask].self, from: data) }
             catch { throw UpdateSourceError.malformedData(error.localizedDescription) }
-            cacheCaskCatalog(data)
+            cacheCaskCatalog(catalog)
             return catalog
         } catch {
             throw UpdateSourceError(error)
@@ -184,7 +184,60 @@ struct HomebrewClient: Sendable {
 private func caskCatalogCacheURL() -> URL? {
     FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
         .appendingPathComponent("Upkeep/Homebrew", isDirectory: true)
-        .appendingPathComponent("cask-catalog.json")
+        .appendingPathComponent("cask-catalog-slim.json")
+}
+
+/// The cask catalog API is about 20 MB; Upkeep needs five fields per cask.
+/// The cache stores only those fields (about 1 MB) and keeps the decoded
+/// catalog in memory until the file changes, so scans neither re-read nor
+/// re-decode the full catalog.
+struct SlimCaskCatalog: Codable {
+    static let currentFormat = 1
+    let format: Int
+    let casks: [Entry]
+
+    struct Entry: Codable {
+        let t: String
+        let n: [String]
+        let v: String
+        let a: Bool?
+        let apps: [String]?
+    }
+
+    init(_ catalog: [CatalogCask]) {
+        format = Self.currentFormat
+        casks = catalog.map {
+            Entry(t: $0.token, n: $0.name, v: $0.version, a: $0.autoUpdates ? true : nil,
+                  apps: $0.artifactAppNames.isEmpty ? nil : $0.artifactAppNames)
+        }
+    }
+
+    var catalog: [CatalogCask] {
+        casks.map { CatalogCask(token: $0.t, name: $0.n, version: $0.v, autoUpdates: $0.a ?? false, artifactAppNames: $0.apps ?? []) }
+    }
+
+    static func decode(_ data: Data) -> [CatalogCask]? {
+        guard let value = try? JSONDecoder().decode(SlimCaskCatalog.self, from: data),
+              value.format == currentFormat else { return nil }
+        return value.catalog
+    }
+}
+
+private final class DecodedCaskCatalog: @unchecked Sendable {
+    static let shared = DecodedCaskCatalog()
+    private let lock = NSLock()
+    private var value: (modified: Date, size: Int, catalog: [CatalogCask])?
+
+    func catalog(modified: Date, size: Int) -> [CatalogCask]? {
+        lock.withLock {
+            guard let value, value.modified == modified, value.size == size else { return nil }
+            return value.catalog
+        }
+    }
+
+    func store(_ catalog: [CatalogCask], modified: Date, size: Int) {
+        lock.withLock { value = (modified, size, catalog) }
+    }
 }
 
 private func cachedCaskCatalog(maximumAge: TimeInterval) -> [CatalogCask]? {
@@ -193,16 +246,20 @@ private func cachedCaskCatalog(maximumAge: TimeInterval) -> [CatalogCask]? {
           let modified = attributes[.modificationDate] as? Date,
           let size = attributes[.size] as? NSNumber,
           size.intValue <= PublisherHTTPClient.metadataLimit,
-          Date().timeIntervalSince(modified) <= maximumAge,
-          let data = try? Data(contentsOf: url) else { return nil }
-    return try? JSONDecoder().decode([CatalogCask].self, from: data)
+          Date().timeIntervalSince(modified) <= maximumAge else { return nil }
+    if let decoded = DecodedCaskCatalog.shared.catalog(modified: modified, size: size.intValue) { return decoded }
+    guard let data = try? Data(contentsOf: url), let catalog = SlimCaskCatalog.decode(data) else { return nil }
+    DecodedCaskCatalog.shared.store(catalog, modified: modified, size: size.intValue)
+    return catalog
 }
 
-private func cacheCaskCatalog(_ data: Data) {
-    guard let url = caskCatalogCacheURL() else { return }
+private func cacheCaskCatalog(_ catalog: [CatalogCask]) {
+    guard let url = caskCatalogCacheURL(), let data = try? JSONEncoder().encode(SlimCaskCatalog(catalog)) else { return }
     do {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: url, options: .atomic)
+        // The previous cache stored the full API response; it is no longer read.
+        try? FileManager.default.removeItem(at: url.deletingLastPathComponent().appendingPathComponent("cask-catalog.json"))
     } catch {
         // Catalog caching is an optimization; the fresh result remains usable.
     }

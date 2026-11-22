@@ -221,3 +221,21 @@ private func countingClient(_ transport: CountingCVETransport) -> CVEInventoryCl
     #expect(await MacOSInstallerListingCache(fileURL: url).recent(maximumAge: 60, now: start.addingTimeInterval(61)) == nil)
     #expect(await MacOSInstallerListingCache(fileURL: url).recent(maximumAge: 60, now: start.addingTimeInterval(-3_600)) == nil)
 }
+
+@Test func slimCaskCatalogKeepsEveryFieldUpkeepUses() throws {
+    let api = """
+    [{"token":"firefox","name":["Mozilla Firefox"],"version":"140.0","auto_updates":true,
+      "artifacts":[{"app":["Firefox.app"]},{"zap":["~/Library/Firefox"]}],"desc":"Web browser","url":"https://example.invalid"},
+     {"token":"tool","name":["Tool"],"version":"1.0,42","artifacts":[{"binary":["tool"]}]}]
+    """
+    let catalog = try JSONDecoder().decode([CatalogCask].self, from: Data(api.utf8))
+    let slim = try JSONEncoder().encode(SlimCaskCatalog(catalog))
+    let restored = try #require(SlimCaskCatalog.decode(slim))
+    #expect(restored.map(\.token) == ["firefox", "tool"])
+    #expect(restored[0].name == ["Mozilla Firefox"] && restored[0].version == "140.0")
+    #expect(restored[0].autoUpdates && restored[0].artifactAppNames == ["Firefox.app"])
+    #expect(!restored[1].autoUpdates && restored[1].artifactAppNames.isEmpty && restored[1].version == "1.0,42")
+    #expect(slim.count < Data(api.utf8).count)
+    // The old full-response cache format is not mistaken for the slim one.
+    #expect(SlimCaskCatalog.decode(Data(api.utf8)) == nil)
+}

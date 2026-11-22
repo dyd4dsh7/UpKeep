@@ -23,23 +23,29 @@ struct MacOSUpdateClient: Sendable {
     /// seconds. Automatic full scans reuse a recent successful listing; the
     /// macOS page's own installer refresh always asks again.
     static let installerListingMaximumAge: TimeInterval = 6 * 60 * 60
+    /// `softwareupdate --list` is the slowest remaining scan step (about
+    /// 0.8–2 s). Automatic full scans reuse a successful listing for an hour;
+    /// the macOS page's own check always asks Apple again.
+    static let updateListingMaximumAge: TimeInterval = 60 * 60
 
     func scan(includeInstallers: Bool = true) async -> Report {
-        await scan(checkUpdates: true, includeInstallers: includeInstallers, reuseRecentInstallers: true)
+        await scan(checkUpdates: true, includeInstallers: includeInstallers, reuseRecentListings: true)
     }
 
     func scan(scope: MacOSScanScope) async -> Report {
-        await scan(checkUpdates: scope == .updates, includeInstallers: scope == .installers, reuseRecentInstallers: false)
+        await scan(checkUpdates: scope == .updates, includeInstallers: scope == .installers, reuseRecentListings: false)
     }
 
-    private func scan(checkUpdates: Bool, includeInstallers: Bool, reuseRecentInstallers: Bool) async -> Report {
+    private func scan(checkUpdates: Bool, includeInstallers: Bool, reuseRecentListings: Bool) async -> Report {
         var warnings: [String] = []
         // The two listings are independent; run them together.
         async let updatesCommand: (data: Data?, error: Error?) = checkUpdates
-            ? commandResult(URL(fileURLWithPath: "/usr/sbin/softwareupdate"), ["--list", "--product-types", "macOS"])
+            ? listing(["--list", "--product-types", "macOS"], cache: .updatesShared,
+                      maximumAge: Self.updateListingMaximumAge, reuseRecent: reuseRecentListings)
             : (Data(), nil)
         async let installersCommand: (data: Data?, error: Error?) = includeInstallers
-            ? installerListing(reuseRecent: reuseRecentInstallers)
+            ? listing(["--list-full-installers"], cache: .shared,
+                      maximumAge: Self.installerListingMaximumAge, reuseRecent: reuseRecentListings)
             : (Data(), nil)
         let (updatesResult, installersResult) = await (updatesCommand, installersCommand)
         if let error = updatesResult.error { warnings.append("Available updates: \(error.localizedDescription)") }
@@ -160,6 +166,11 @@ actor MacOSInstallerListingCache {
     static let shared = MacOSInstallerListingCache(
         fileURL: Bundle.main.bundleIdentifier == InstalledApp.upkeepBundleIdentifier ? defaultFileURL() : nil
     )
+    /// The same cache for `softwareupdate --list` (available macOS updates).
+    static let updatesShared = MacOSInstallerListingCache(
+        fileURL: Bundle.main.bundleIdentifier == InstalledApp.upkeepBundleIdentifier
+            ? defaultFileURL().deletingLastPathComponent().appendingPathComponent("macos-updates.json") : nil
+    )
 
     private struct Listing: Codable {
         let data: Data
@@ -204,13 +215,11 @@ actor MacOSInstallerListingCache {
     }
 }
 
-private func installerListing(reuseRecent: Bool) async -> (data: Data?, error: Error?) {
-    if reuseRecent, let cached = await MacOSInstallerListingCache.shared.recent(
-        maximumAge: MacOSUpdateClient.installerListingMaximumAge) {
-        return (cached, nil)
-    }
-    let result = await commandResult(URL(fileURLWithPath: "/usr/sbin/softwareupdate"), ["--list-full-installers"])
-    if let data = result.data, result.error == nil { await MacOSInstallerListingCache.shared.store(data) }
+private func listing(_ arguments: [String], cache: MacOSInstallerListingCache, maximumAge: TimeInterval,
+                     reuseRecent: Bool) async -> (data: Data?, error: Error?) {
+    if reuseRecent, let cached = await cache.recent(maximumAge: maximumAge) { return (cached, nil) }
+    let result = await commandResult(URL(fileURLWithPath: "/usr/sbin/softwareupdate"), arguments)
+    if let data = result.data, result.error == nil { await cache.store(data) }
     return result
 }
 
