@@ -4,6 +4,8 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+- Made repeat update checks faster (about 1.8 s to 1.1 s): RubyGems and npm reuse their outdated-package results for up to 30 minutes while the installed packages are unchanged. Installing, updating, or removing a package forces a fresh check.
+
 ## 0.25.2 — 2026-11-22
 
 - Made full update checks about 25% faster (2.4 s to 1.8 s on a typical Mac, 3.7 s to 2.6 s for the first check after launch): macOS and developer-tool checks run their independent commands together, VS Code extensions are checked in one request, and the full macOS installer list is reused for up to 6 hours during automatic checks.

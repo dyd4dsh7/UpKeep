@@ -471,14 +471,18 @@ func normalizedJavaScriptRuntimeVersion(_ value: String) -> String {
 }
 
 func scanNPM(_ path: String) async -> ManagerScanResult {
-    // The inventory and outdated checks are independent; run them together.
-    async let installedCommand = captureDeveloperCommandAsync(
-        URL(fileURLWithPath: path), ["ls", "-g", "--depth=0", "--json"]
+    // `npm outdated` exits 1 when anything is outdated, so cache any result
+    // that parses rather than requiring a zero exit status.
+    let executable = URL(fileURLWithPath: path)
+    let (installedResult, outdatedResult, _) = await DeveloperOutdatedCache.shared.inventoryAndOutdated(
+        key: "npm|\(path)",
+        inventory: { await captureDeveloperCommandAsync(executable, ["ls", "-g", "--depth=0", "--json"]) },
+        outdated: { await captureDeveloperCommandAsync(executable, ["outdated", "-g", "--json"]) },
+        isCacheable: { inventory, outdated in
+            (try? JSONDecoder().decode(NPMList.self, from: inventory.data).dependencies) != nil
+                && (try? JSONDecoder().decode([String: NPMOutdated].self, from: outdated.data)) != nil
+        }
     )
-    async let outdatedCommand = captureDeveloperCommandAsync(
-        URL(fileURLWithPath: path), ["outdated", "-g", "--json"]
-    )
-    let (installedResult, outdatedResult) = await (installedCommand, outdatedCommand)
     guard let installed = try? JSONDecoder().decode(NPMList.self, from: installedResult.data).dependencies else {
         return failedManagerScan(.npm, command: "inventory", result: installedResult)
     }
@@ -548,9 +552,13 @@ func scanPython(_ path: String) async -> ManagerScanResult {
 }
 
 func scanGems(_ path: String) async -> ManagerScanResult {
-    async let installedCommand = captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["list", "--local"])
-    async let outdatedCommand = captureDeveloperCommandAsync(URL(fileURLWithPath: path), ["outdated"])
-    let (installedResult, outdatedResult) = await (installedCommand, outdatedCommand)
+    let executable = URL(fileURLWithPath: path)
+    let (installedResult, outdatedResult, _) = await DeveloperOutdatedCache.shared.inventoryAndOutdated(
+        key: "rubygems|\(path)",
+        inventory: { await captureDeveloperCommandAsync(executable, ["list", "--local"]) },
+        outdated: { await captureDeveloperCommandAsync(executable, ["outdated"]) },
+        isCacheable: { inventory, outdated in inventory.status == 0 && outdated.status == 0 }
+    )
     guard installedResult.status == 0 else { return failedManagerScan(.rubyGems, command: "inventory", result: installedResult) }
     let installedOutput = String(data: installedResult.data, encoding: .utf8) ?? ""
     let outdatedOutput = String(data: outdatedResult.data, encoding: .utf8) ?? ""
