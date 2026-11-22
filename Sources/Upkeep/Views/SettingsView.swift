@@ -513,6 +513,8 @@ struct SettingsView: View {
                     }
                 }
                 Divider()
+                LabeledContent("Version") { Text(versionText.replacingOccurrences(of: "Version ", with: "")) }
+                SelfUpdateStatusRow()
                 LabeledContent("Developer") {
                     VStack(alignment: .trailing, spacing: 5) {
                         Text("Hayden Thorn")

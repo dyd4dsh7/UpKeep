@@ -853,7 +853,7 @@ struct AppDetailView: View {
     private var homebrewAdoptionIgnored: Bool { store.isHomebrewAdoptionIgnored(app) }
 
     private func candidateActionTitle(_ candidate: UpdateCandidate) -> String {
-        app.isUpkeep ? "View Release" : candidate.actionTitle
+        app.isUpkeep ? "Update…" : candidate.actionTitle
     }
 
     private var failedSources: [UpdateSource] {

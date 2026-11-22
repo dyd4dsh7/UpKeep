@@ -129,6 +129,7 @@ struct ContentView: View {
 
     @ViewBuilder private var detail: some View {
         VStack(spacing: 0) {
+            SelfUpdateBanner()
             if store.selection != .history && store.selection != .cveChecker {
                 ScanStatusNotice(isMacOS: store.selection == .macOSUpdates)
             }

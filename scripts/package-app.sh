@@ -93,6 +93,15 @@ fi
 mv -f "${STAGED_ARCHIVE}" "${ARCHIVE_PATH}"
 if [[ "${BUILD_CONFIGURATION}" == "release" ]]; then
     (cd "${OUTPUT_DIR}" && shasum -a 256 Upkeep.zip > Upkeep.zip.sha256)
+    # Installed copies of Upkeep only install updates signed with this key.
+    UPDATE_KEY=${UPKEEP_UPDATE_SIGNING_KEY:-$HOME/.config/upkeep/update-signing.key}
+    rm -f "${OUTPUT_DIR}/Upkeep.zip.sig"
+    if [[ -f "${UPDATE_KEY}" ]]; then
+        swift "${PROJECT_DIR}/scripts/update-signing.swift" sign "${ARCHIVE_PATH}" "${UPDATE_KEY}" > "${OUTPUT_DIR}/Upkeep.zip.sig"
+        echo "Signed ${ARCHIVE_PATH} for in-app updates"
+    else
+        echo "warning: no update signing key at ${UPDATE_KEY}; Upkeep.zip.sig not created, so in-app updates cannot install this release" >&2
+    fi
 fi
 
 echo "Packaged ${ARCHIVE_PATH}"

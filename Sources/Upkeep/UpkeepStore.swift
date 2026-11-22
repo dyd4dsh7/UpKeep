@@ -548,6 +548,7 @@ final class UpkeepStore: ObservableObject {
         if ownedRun { refreshCVEsAutomatically() }
         if ownedRun && didStart { scheduleNextRefresh() }
         if ownedRun { MemoryRelief.scheduleRelease() }
+        if ownedRun && didStart { SelfUpdateController.shared.checkAutomatically() }
     }
 
     var cveInventory: [CVEInventoryItem] {
@@ -1235,8 +1236,20 @@ final class UpkeepStore: ObservableObject {
         await dependencies.history.maintainStorage()
         refreshRunningApplications()
         observeRunningApplications()
+        configureSelfUpdate()
         if settings.checkOnLaunch { await scan() }
         scheduleNextRefresh()
+        SelfUpdateController.shared.checkAutomatically()
+    }
+
+    private func configureSelfUpdate() {
+        let controller = SelfUpdateController.shared
+        controller.isBusy = { [weak self] in
+            guard let self else { return false }
+            return !self.updateExecutionState.activeOperations.isEmpty
+        }
+        controller.includePrereleases = { [weak self] in self?.settings.scanSettings.includePrereleaseUpdates ?? false }
+        controller.notificationsEnabled = { [weak self] in self?.settings.notificationsEnabled ?? false }
     }
 
     func scheduleNextRefresh() {
@@ -1377,6 +1390,13 @@ final class UpkeepStore: ObservableObject {
     }
 
     private func performUpdateNow(_ update: AvailableUpdate) async -> Bool {
+        if update.app.isUpkeep, SelfUpdateController.shared.isEnabled {
+            // The packaged app replaces itself through the verified self-update
+            // flow, which runs after this action returns and quits Upkeep.
+            // Elsewhere, and in batches, the release page opens as before.
+            Task { @MainActor in SelfUpdateController.shared.updateFromList() }
+            return true
+        }
         if let token = update.homebrewToken {
             if let package = homebrewPackages.first(where: { $0.kind == .cask && $0.token == token }) {
                 return await updatePackageNow(package)

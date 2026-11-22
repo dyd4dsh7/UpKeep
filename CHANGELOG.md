@@ -4,6 +4,7 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+- Added Upkeep self-updates: **Upkeep › Check for Upkeep Updates…**, an automatic check at launch and after scans (at most every 6 hours), a banner and notification when a newer version is available, and update status in Settings › About. **Update Now** downloads the release, verifies its SHA-256 checksum and Ed25519 release signature, checks the app's identity, version, architecture, and code signature, then quits, replaces Upkeep in place (keeping a backup), and reopens it. Releases without a signature open the release page instead.
 - Matched the app's colours to its icon: the accent, Updates header, and backgrounds now use the icon's deep and light blues and warm off-white instead of green.
 - Halved the app size (20 MB to 10 MB installed, 8.6 MB to 6.8 MB download) by stripping debug symbols from release builds and optimizing for size; symbols are kept separately for crash reports.
 - Reduced memory use: the CVE check reads only installed formulae from Homebrew's 79 MB advisory feed via a memory-mapped download, and Upkeep returns freed memory after checks. Peak memory fell from about 550 MB to 355 MB and settled memory from about 264 MB to 192–205 MB.

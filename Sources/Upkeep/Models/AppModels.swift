@@ -467,13 +467,13 @@ struct AvailableUpdate: Identifiable, Hashable, Sendable {
     var canInstallDirectly: Bool { directInstallURL != nil }
 
     var actionTitle: String {
-        if app.isUpkeep { return "View Release" }
+        if app.isUpkeep { return "Update…" }
         if canInstallDirectly { return "Update" }
         return primaryCandidate.actionTitle
     }
 
     var actionDescription: String {
-        if app.isUpkeep { return "Download the signed release, then quit Upkeep and replace it in Applications" }
+        if app.isUpkeep { return "Download and verify the signed release, then quit, replace, and reopen Upkeep" }
         if canInstallDirectly { return "Download, verify, and install with Upkeep" }
         if requiresInAppInstallation { return "Open the app to run its built-in updater" }
         return switch source {

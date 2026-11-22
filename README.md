@@ -18,6 +18,10 @@ For a release with a build, download `Upkeep.zip` and `Upkeep.zip.sha256`, run
 `shasum -a 256 -c Upkeep.zip.sha256` in the download directory, extract the ZIP,
 and move `Upkeep.app` into Applications.
 
+From 0.25.5, Upkeep checks for its own updates (**Upkeep › Check for Upkeep
+Updates…**) and can install them in place after verifying the release's
+checksum and Ed25519 signature.
+
 - **Notarized builds** open normally through Finder.
 - **Builds that are not notarized** (currently, 0.25.1) are signed locally only,
   so macOS blocks the first launch. After the checksum passes, Control-click

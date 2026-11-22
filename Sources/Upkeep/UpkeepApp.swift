@@ -22,6 +22,9 @@ struct UpkeepApp: App {
             let fixtureStore = UIFixture.makeStore(settings: appSettings, operationState: UIFixture.operationState)
             if let route = UIFixture.route { fixtureStore.navigation.selection = route }
             if let section = UIFixture.settingsSection { appSettings.selectedSection = section }
+            if ProcessInfo.processInfo.arguments.contains("--ui-fixture-self-update") {
+                SelfUpdateController.shared.showFixtureRelease()
+            }
             UpkeepAppDelegate.store = fixtureStore
             _store = UpkeepState(initialValue: fixtureStore)
             return
@@ -62,6 +65,11 @@ struct UpkeepApp: App {
         .windowToolbarStyle(.unified(showsTitle: true))
         .defaultSize(width: initialWindowSize.width, height: initialWindowSize.height)
         .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Upkeep Updates…") {
+                    Task { await SelfUpdateController.shared.check(userInitiated: true) }
+                }
+            }
             CommandGroup(after: .textEditing) {
                 Button("Find…") { MainWindow.focusSearch() }
                     .keyboardShortcut("f", modifiers: .command)

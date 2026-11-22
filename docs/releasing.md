@@ -9,6 +9,11 @@ Actions workflows, so nothing runs on GitHub when a tag is pushed.
 ## One-time setup
 
 1. Confirm ownership/licensing and complete `docs/open-source-readiness.md`.
+1. Create the self-update signing key once with
+   `swift scripts/update-signing.swift generate ~/.config/upkeep/update-signing.key`
+   and put the printed public key in `SelfUpdate.publicKey`. Back the private key
+   up somewhere safe and never commit it. If it is lost, generate a new key; copies
+   with the old public key then need one manual update.
 2. Install the Developer ID Application certificate in your login keychain and
    store notarization credentials (see Local signing below). Never put a real
    certificate, password, or key in an issue, PR, or repository artifact.
@@ -28,12 +33,15 @@ Actions workflows, so nothing runs on GitHub when a tag is pushed.
    Without Developer ID credentials, `./scripts/package-app.sh local-release`
    produces the same optimized, stripped build signed locally (not notarized);
    say so in the release notes.
+   Packaging also writes `outputs/Upkeep.zip.sig` when the update signing key
+   exists (override its path with `UPKEEP_UPDATE_SIGNING_KEY`).
 5. Create and push an annotated `vMAJOR.MINOR.PATCH` tag on that verified commit.
 
 ## Publish
 
-Create a draft GitHub Release for the tag with `Upkeep.zip`, `Upkeep.zip.sha256`
-and notes from `python3 scripts/release-notes.py vMAJOR.MINOR.PATCH`. Download the
+Create a draft GitHub Release for the tag with `Upkeep.zip`, `Upkeep.zip.sha256`,
+and `Upkeep.zip.sig` (installed copies of Upkeep update in place only when all
+three are attached) and notes from `python3 scripts/release-notes.py vMAJOR.MINOR.PATCH`. Download the
 draft's archive, verify the checksum, extract it, launch that exact bundle, check
 the displayed version and key workflows, then publish. Confirm the assets are
 downloadable without authentication and that self-update discovery finds the new
