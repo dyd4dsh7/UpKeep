@@ -11,10 +11,7 @@ selected Swift toolchain. Upkeep has no external Swift package dependencies and
 no independently pinned Swift Testing or SwiftSyntax build. Swift Testing is
 licensed under Apache 2.0 with Runtime Library Exception; see its
 [distribution guidance](https://github.com/swiftlang/swift-testing/blob/swift-6.4.2-RELEASE/Documentation/Distributions.md).
-
-The unmodified Swift Testing and SwiftSyntax licence texts in `Support/Licenses/`
-are retained from earlier package-based test builds and included in app packages
-for historical attribution. These testing libraries are not bundled in the app.
+Swift Testing is used only to run tests and is not bundled in the app.
 
 ## System images and installed application icons
 
@@ -52,9 +49,10 @@ The App Store, TestFlight, Steam, Setapp, and Microsoft AutoUpdate source pages 
 the icon of the corresponding app installed on the user's Mac, read at runtime in
 the same way as every other app icon in Upkeep's lists. Those icons are not
 included in this repository or in Upkeep's app package, and remain the property
-of Apple Inc., Valve Corporation, MacPaw, and Microsoft Corporation respectively. When the app is not installed, Upkeep shows
-a system symbol; the macOS page uses Apple's system Apple-logo symbol. App Store,
-TestFlight, and macOS are trademarks of Apple Inc.
+of Apple Inc., Valve Corporation, MacPaw, and Microsoft Corporation
+respectively. When the app is not installed, Upkeep shows a system symbol; the
+macOS page uses Apple's system Apple-logo symbol. App Store, TestFlight, and
+macOS are trademarks of Apple Inc.
 Steam is a trademark of Valve Corporation. Setapp is a trademark of MacPaw.
 Microsoft is a trademark of Microsoft Corporation.
 
@@ -63,8 +61,8 @@ Microsoft is a trademark of Microsoft Corporation.
 | `bun.png` | Oven (Bun) | [bun.com/press-kit](https://bun.com/press-kit) (`logo@4x.png`) | Press-kit guidance: do not stretch, recolour, or alter | None |
 | `cargo.png` | Rust Foundation | [rust-lang/cargo](https://github.com/rust-lang/cargo/blob/master/doc/book/src/images/Cargo-Logo-Small.png) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); [Rust trademark policy](https://rustfoundation.org/policy/rust-trademark-policy/) | None |
 | `composer.png` | Composer (Jordi Boggiano, Nils Adermann); logo by Max Grigorian | [composer/getcomposer.org](https://github.com/composer/getcomposer.org/blob/main/web/img/logo-composer-transparent.png) | MIT (notice below) | None |
-| `dotnet.svg` | .NET Foundation / Microsoft | [dotnet/brand](https://github.com/dotnet/brand/blob/main/logo/dotnet-logo.svg) | .NET brand guidelines; shown below the guidelines' 50 px minimum without permission | None |
 | `deno.svg` | Deno Land Inc. | [deno.com/brand](https://deno.com/brand) (dark filled mark) | Deno logo guidelines: black and white only, do not edit | None |
+| `dotnet.svg` | .NET Foundation / Microsoft | [dotnet/brand](https://github.com/dotnet/brand/blob/main/logo/dotnet-logo.svg) | .NET brand guidelines; shown below the guidelines' 50 px minimum without permission | None |
 | `github.svg`, `github-dark.svg` | GitHub, Inc. | [primer/octicons](https://github.com/primer/octicons) `mark-github` | [GitHub logo guidelines](https://brand.github.com/foundations/logo); Octicons MIT (notice below) | `github-dark.svg` fills the mark white, matching GitHub's official white logo |
 | `go.svg` | Go gopher by Renée French | [golang/website](https://github.com/golang/website/blob/master/_content/doc/gopher/favicon.svg) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); the gopher is not one of the Go trademarks | None |
 | `homebrew.svg` | Homebrew | [Homebrew/brew.sh](https://github.com/Homebrew/brew.sh/blob/main/assets/img/homebrew.svg) | BSD 2-Clause (notice below) | None |
@@ -87,10 +85,10 @@ Microsoft is a trademark of Microsoft Corporation.
 | `yarn.svg` | Yarn | [yarnpkg/assets](https://github.com/yarnpkg/assets/blob/master/yarn-kitten-circle.svg) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | None |
 
 Attribution for CC BY 4.0 works: "Go gopher" by Renée French; "Nix snowflake"
-by Simon Frankau and Tim Cuthbertson, the NixOS Project and contributors; "Rust logo" and "Cargo logo" by
-the Rust Foundation; "Yarn logo" by the Yarn project. Each is licensed under
-[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), with changes as listed
-above. CC BY 4.0 does not grant trademark rights.
+by Simon Frankau and Tim Cuthbertson, the NixOS Project and contributors; "Rust
+logo" and "Cargo logo" by the Rust Foundation; "Yarn logo" by the Yarn project.
+Each is licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/),
+with changes as listed above. CC BY 4.0 does not grant trademark rights.
 
 ### MIT notices for logo files
 
