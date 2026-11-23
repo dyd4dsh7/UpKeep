@@ -118,6 +118,10 @@ private struct UpkeepRelease: Identifiable {
     static let fullChangelogURL = URL(string: "https://github.com/\(SelfUpdate.repository)/blob/main/CHANGELOG.md")!
 
     static let all = [
+        UpkeepRelease(version: "0.25.27", date: "24 November 2026", changes: [
+            "Records uninstalls in History, with Put Back for items in the Trash.",
+            "Holds automatic updates while on battery, in Low Power Mode, or on a metered network."
+        ]),
         UpkeepRelease(version: "0.25.26", date: "24 November 2026", changes: [
             "Uses your GitHub CLI sign-in and pauses GitHub checks at the hourly limit instead of failing.",
             "Can move an uninstalled app's settings and caches to the Trash.",

@@ -4,6 +4,11 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+## 0.25.27 — 2026-11-24
+
+- History now records uninstalls of apps, Homebrew packages, developer packages, and AI models. Items Upkeep moved to the Trash have a Put Back button that returns them, and any app data removed with them, to where they were. Homebrew and other package-manager uninstalls show the command that was run.
+- Automatic updates wait while the Mac is on battery power, in Low Power Mode, offline, or on a metered or Low Data Mode network, and try again every 30 minutes.
+
 ## 0.25.26 — 2026-11-24
 
 - GitHub checks no longer fail when GitHub's hourly limit runs out. When the GitHub CLI is signed in, Upkeep uses that sign-in for GitHub's API only, raising the limit from 60 to 5,000 requests an hour; turn it off in Settings › Sources. When the limit is reached, Upkeep pauses GitHub requests until it resets instead of failing each one, and nvm and other latest-release checks no longer count against it.
