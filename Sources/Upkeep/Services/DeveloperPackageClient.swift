@@ -303,15 +303,59 @@ struct DeveloperPackageClient: Sendable {
 
     func uninstall(_ package: DeveloperPackage) async throws {
         let plan = try DeveloperPackageUninstallAdapters.plan(for: package)
-        let result = await captureDeveloperCommandAsync(
-            plan.executable,
-            plan.arguments,
-            qos: .userInitiated,
-            purpose: .mutation
-        )
+        switch plan.action {
+        case let .command(executable, arguments):
+            try await runUninstallCommand(executable, arguments, failureMessage: plan.failureMessage)
+        case let .administratorCommand(executable, arguments):
+            try await runAsAdministrator(executable, arguments, failureMessage: plan.failureMessage)
+        case let .trash(paths):
+            let existing = paths.filter { FileManager.default.fileExists(atPath: $0) }
+            guard !existing.isEmpty else { throw ClientError.failed("\(package.name) was not found on disk.") }
+            for path in existing {
+                do { try FileManager.default.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil) }
+                catch { throw ClientError.failed("Could not move \(path) to the Trash: \(error.localizedDescription)") }
+            }
+        case let .simulatorRuntime(xcrun, platform, build):
+            let xcrunURL = URL(fileURLWithPath: xcrun)
+            let list = await captureDeveloperStandardOutput(xcrunURL, ["simctl", "runtime", "list", "-j"])
+            guard list.status == 0 else { throw ClientError.failed(plan.failureMessage) }
+            let identifiers = simulatorRuntimeIdentifiers(list.data, platform: platform, build: build)
+            guard !identifiers.isEmpty else { throw ClientError.failed("No installed \(platform) simulator runtime has build \(build).") }
+            for identifier in identifiers {
+                try await runUninstallCommand(xcrunURL, ["simctl", "runtime", "delete", identifier],
+                                              failureMessage: plan.failureMessage)
+            }
+        }
+    }
+
+    private func runUninstallCommand(_ executable: URL, _ arguments: [String], failureMessage: String) async throws {
+        let result = await captureDeveloperCommandAsync(executable, arguments, qos: .userInitiated, purpose: .mutation)
         guard result.status == 0 else {
             let output = String(data: result.data, encoding: .utf8)
-            throw ClientError.failed(output?.isEmpty == false ? output! : plan.failureMessage)
+            throw ClientError.failed(output?.isEmpty == false ? output! : failureMessage)
+        }
+    }
+
+    /// macOS shows its own password prompt; Upkeep never sees the password.
+    private func runAsAdministrator(_ executable: URL, _ arguments: [String], failureMessage: String) async throws {
+        let script = """
+        on run argv
+            set command to quoted form of (item 1 of argv)
+            repeat with index from 2 to count of argv
+                set command to command & " " & quoted form of (item index of argv)
+            end repeat
+            do shell script command with administrator privileges
+        end run
+        """
+        let result: CommandRunner.Result
+        do {
+            result = try await CommandRunner.run(URL(fileURLWithPath: "/usr/bin/osascript"),
+                                                 ["-e", script, executable.path] + arguments, timeout: 2_400)
+        } catch { throw ClientError.failed(error.localizedDescription) }
+        guard result.status == 0 else {
+            let output = String(decoding: result.output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            if output.contains("-128") { throw ClientError.failed("Uninstall was cancelled.") }
+            throw ClientError.failed(output.isEmpty ? failureMessage : output)
         }
     }
 

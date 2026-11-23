@@ -49,9 +49,71 @@ import Testing
     #expect(plan.arguments.suffix(2) == ["/Users/example/.nvm", "24.15.0"])
 }
 
-@Test func runtimeWithoutSafeRemovalDoesNotOfferUninstall() {
-    let package = adapterPackage(manager: .bun, name: "Bun")
+@Test func toolWithUnknownOriginDoesNotOfferUninstall() {
+    let package = DeveloperPackage(name: "Bun", currentVersion: "1.0.0", latestVersion: "2.0.0", manager: .bun,
+                                   executablePath: "/nonexistent/upkeep/bin/bun")
     #expect(!DeveloperPackageUninstallAdapters.supports(package))
+}
+
+@Test func officialInstallerToolsMoveTheirFolderToTheTrash() throws {
+    func plan(_ manager: DeveloperPackageManager, _ name: String, _ path: String) throws -> DeveloperPackageUninstallPlan.Action {
+        try DeveloperPackageUninstallAdapters.plan(for: DeveloperPackage(
+            name: name, currentVersion: "1.0.0", latestVersion: "2.0.0", manager: manager, executablePath: path)).action
+    }
+    #expect(try plan(.bun, "Bun", "/Users/example/.bun/bin/bun") == .trash(["/Users/example/.bun"]))
+    #expect(try plan(.deno, "Deno", "/Users/example/.deno/bin/deno") == .trash(["/Users/example/.deno"]))
+    #expect(try plan(.claudeCode, "Claude Code", "/Users/example/.local/bin/claude")
+        == .trash(["/Users/example/.local/bin/claude", "/Users/example/.local/share/claude"]))
+}
+
+@Test func homebrewOwnedToolsUninstallWithBrew() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("UpkeepBrew-\(UUID().uuidString)/homebrew")
+    let cellarBinary = root.appendingPathComponent("Cellar/deno/2.1.0/bin/deno")
+    let link = root.appendingPathComponent("bin/deno")
+    try FileManager.default.createDirectory(at: cellarBinary.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: link.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data().write(to: cellarBinary)
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: cellarBinary)
+    defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+    let plan = try #require(DeveloperPackageUninstallAdapters.homebrewPlan(for: link.path))
+    guard case let .command(brew, arguments) = plan.action else { Issue.record("Expected a brew command"); return }
+    #expect(brew.path.hasSuffix("/homebrew/bin/brew"))
+    #expect(arguments == ["uninstall", "deno"])
+}
+
+@Test func managerCommandsCoverPreviouslyUnsupportedPackages() throws {
+    func arguments(_ package: DeveloperPackage) throws -> [String] {
+        let plan = try DeveloperPackageUninstallAdapters.plan(for: package)
+        guard case let .command(_, arguments) = plan.action else { return [] }
+        return arguments
+    }
+    func package(_ manager: DeveloperPackageManager, _ name: String, version: String = "1.0.0",
+                 identifier: String? = nil, path: String = "/x/tool") -> DeveloperPackage {
+        DeveloperPackage(name: name, currentVersion: version, latestVersion: version, manager: manager,
+                         executablePath: path, registryIdentifier: identifier)
+    }
+    #expect(try arguments(package(.npm, "npm")) == ["uninstall", "-g", "npm"])
+    #expect(try arguments(package(.mise, "node", version: "22.1.0", identifier: "node")) == ["uninstall", "node@22.1.0"])
+    #expect(try arguments(package(.asdf, "ruby", version: "3.3.0", identifier: "ruby")) == ["uninstall", "ruby", "3.3.0"])
+    #expect(try arguments(package(.ghcup, "ghc", version: "9.6.6", identifier: "ghc")) == ["rm", "ghc", "9.6.6"])
+    #expect(try arguments(package(.swiftly, "Swift 6.0", identifier: "6.0.3")) == ["uninstall", "6.0.3", "--assume-yes"])
+    #expect(try arguments(package(.conda, "numpy", identifier: "numpy")) == ["remove", "-n", "base", "-y", "numpy"])
+    #expect(!DeveloperPackageUninstallAdapters.supports(package(.conda, "conda", identifier: "conda")))
+    #expect(try arguments(package(.pixi, "ripgrep", identifier: "ripgrep/ripgrep")) == ["global", "uninstall", "ripgrep"])
+    let macPorts = try DeveloperPackageUninstallAdapters.plan(for: package(.macPorts, "wget", identifier: "wget", path: "/opt/local/bin/port"))
+    #expect(macPorts.action == .administratorCommand(URL(fileURLWithPath: "/opt/local/bin/port"), ["uninstall", "wget"]))
+    let simulator = try DeveloperPackageUninstallAdapters.plan(for: package(.xcodeSimulators, "iOS 18.2 Simulator",
+        version: "22C150", identifier: "iOS", path: "/usr/bin/xcrun"))
+    #expect(simulator.action == .simulatorRuntime(xcrun: "/usr/bin/xcrun", platform: "iOS", build: "22C150"))
+}
+
+@Test func simulatorRuntimeIdentifiersMatchPlatformAndBuild() {
+    let json = Data("""
+    {"A1": {"build": "22C150", "version": "18.2", "platformIdentifier": "com.apple.platform.iphonesimulator", "state": "Ready"},
+     "B2": {"build": "22C150", "version": "11.2", "platformIdentifier": "com.apple.platform.watchsimulator", "state": "Ready"},
+     "C3": {"build": "22B81", "version": "18.1", "platformIdentifier": "com.apple.platform.iphonesimulator", "state": "Ready"}}
+    """.utf8)
+    #expect(simulatorRuntimeIdentifiers(json, platform: "iOS", build: "22C150") == ["A1"])
 }
 
 @MainActor

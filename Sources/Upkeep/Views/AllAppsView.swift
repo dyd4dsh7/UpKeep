@@ -1118,6 +1118,9 @@ private struct AppUninstallConfirmation: ViewModifier {
     }
 
     private func message(for app: InstalledApp) -> String {
+        if app.isUpkeep {
+            return "Upkeep will move itself to the Trash and quit. Settings and data in your Library folder are kept."
+        }
         let quit = store.isRunning(app) ? "Upkeep will quit \(app.name) first. " : ""
         if let cask = store.uninstallingCask(for: app) {
             return quit + "Homebrew will uninstall the \(cask.token) cask and remove \(app.name). Settings and data in your Library folder are kept."

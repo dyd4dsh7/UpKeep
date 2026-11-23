@@ -266,11 +266,9 @@ private struct PackageRow: View, Equatable {
                     ignoreFor: { store.ignore(package, duration: $0) }
                 )
             }
-            if store.canUninstall(package) {
-                Divider()
-                Button("Uninstall…", role: .destructive, action: requestUninstall)
-                    .disabled(isWorking)
-            }
+            Divider()
+            Button("Uninstall…", role: .destructive, action: requestUninstall)
+                .disabled(isWorking)
         }
     }
 
@@ -310,7 +308,7 @@ struct PackageDetail: View {
                     CVESecuritySummary(item: CVEInventoryItem(package))
                     if package.isOutdated { updateCard(package) }
                     detailCard(package)
-                    if store.canUninstall(package) { uninstallButton(package) }
+                    uninstallButton(package)
                     if package.isOutdated {
                         HomebrewImpactView(library: store.library, package: package, inventory: store.homebrewPackages)
                     }
@@ -383,11 +381,9 @@ struct PackageDetail: View {
                     ignoreFor: { store.ignore(package, duration: $0) }
                 )
             }
-            if store.canUninstall(package) {
-                Divider()
-                Button("Uninstall…", role: .destructive) { packagePendingUninstall = package }
-                    .disabled(isUpdating)
-            }
+            Divider()
+            Button("Uninstall…", role: .destructive) { packagePendingUninstall = package }
+                .disabled(isUpdating)
         }
     }
 

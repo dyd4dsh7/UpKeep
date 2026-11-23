@@ -434,13 +434,34 @@ private struct DeveloperPackageDetailContent: View {
     }
 
     private var uninstallConfirmationMessage: String {
-        switch package.manager {
-        case .node, .fnm, .rustup:
-            "This removes version \(package.currentVersion) and may also remove tools installed into that runtime. This cannot be undone by Upkeep."
-        case .uv where package.registryIdentifier?.hasPrefix("python:") == true:
-            "This removes version \(package.currentVersion) and may also remove tools installed into that runtime. This cannot be undone by Upkeep."
-        default:
-            "This removes \(package.name) \(package.currentVersion) using \(package.manager.rawValue). This cannot be undone by Upkeep."
+        let undo = " This cannot be undone by Upkeep."
+        guard let plan = try? DeveloperPackageUninstallAdapters.plan(for: package) else {
+            return "This removes \(package.name) \(package.currentVersion) using \(package.manager.rawValue).\(undo)"
+        }
+        switch plan.action {
+        case let .trash(paths):
+            let names = paths.map { ($0 as NSString).abbreviatingWithTildeInPath }.formatted()
+            return "This moves \(names) to the Trash, so you can restore it from there. Remove any lines that add it to your shell profile yourself."
+        case .administratorCommand:
+            return "This removes \(package.name) \(package.currentVersion). macOS will ask for an administrator password.\(undo)"
+        case .simulatorRuntime:
+            return "This deletes the \(package.name) runtime (build \(package.currentVersion)). Simulators that use it stop working until it is downloaded again."
+        case let .command(executable, arguments):
+            if executable.lastPathComponent == "brew" {
+                return "Homebrew will run brew \(arguments.joined(separator: " ")).\(undo)"
+            }
+            switch package.manager {
+            case .node, .fnm, .rustup, .pyenv, .rbenv, .swiftly, .ghcup, .mise, .asdf, .sdkman:
+                return "This removes version \(package.currentVersion) and may also remove tools installed into that runtime.\(undo)"
+            case .uv where package.registryIdentifier?.hasPrefix("python:") == true:
+                return "This removes version \(package.currentVersion) and may also remove tools installed into that runtime.\(undo)"
+            case .npm where package.name == "npm", .pnpm where package.name == "pnpm":
+                return "This removes \(package.name) itself, so its commands stop working until you reinstall it.\(undo)"
+            case .dockerImages:
+                return "Docker will remove the \(package.name) image tag. It refuses if a container still uses the image."
+            default:
+                return "This removes \(package.name) \(package.currentVersion) using \(package.manager.rawValue).\(undo)"
+            }
         }
     }
 

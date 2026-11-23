@@ -2047,16 +2047,15 @@ func cancelledDirectMutationReconcilesObservedVersionWithoutReportingSuccess(bat
     #expect(f.store.errorMessage != nil)
 }
 
-@MainActor
-@Test func upkeepCannotUninstallItself() async {
-    let app = reviewApp(identifier: InstalledApp.upkeepBundleIdentifier)
-    let f = ReviewFixture(discoveredApp: app)
-    defer { f.cleanUp() }
-    f.store.apps = [app]
-    #expect(!f.store.canUninstall(app))
-    await f.store.uninstallApp(app)
-    #expect(await f.uninstaller.trashed.isEmpty)
-    #expect(f.store.apps == [app])
+@Test func onlySystemProtectedAppsCannotBeUninstalled() throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("UpkeepSIP-\(UUID().uuidString).app")
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    #expect(!AppUninstaller.isSystemProtected(folder))
+    let safari = URL(fileURLWithPath: "/Applications/Safari.app")
+    if FileManager.default.fileExists(atPath: safari.path) {
+        #expect(AppUninstaller.isSystemProtected(safari))
+    }
 }
 
 private actor UninstallRecordingBrew: HomebrewManaging {
@@ -2120,4 +2119,38 @@ private func reviewPackage(_ token: String, kind: HomebrewPackageKind, name: Str
     f.store.homebrewPackages = [library, tool]
     #expect(f.store.homebrewDependents(of: library) == [tool])
     #expect(f.store.homebrewDependents(of: tool).isEmpty)
+}
+
+private actor UninstallRecordingModels: LocalModelManaging {
+    var uninstalled: [String] = []
+    func scan() async -> LocalModelClient.Report { .empty }
+    func update(_ model: LocalLLMModel) async throws {}
+    func uninstall(_ model: LocalLLMModel) async throws { uninstalled.append(model.id) }
+}
+
+@MainActor
+@Test func uninstallingModelForgetsItAndMovesSelection() async {
+    let models = UninstallRecordingModels()
+    let f = ReviewFixture(models: models)
+    defer { f.cleanUp() }
+    let model = reviewModel()
+    let other = LocalLLMModel(id: "other", name: "Other", variant: nil, runtime: .lmStudio,
+                              installedRevision: "1", latestRevision: "1", sizeBytes: nil, modifiedAt: nil,
+                              homepage: nil, executablePath: nil, updateReference: "other", isOutdated: false)
+    f.store.localModels = [model, other]; f.store.selectedLocalModelID = model.id
+    await f.store.uninstallLocalModel(model)
+    #expect(await models.uninstalled == [model.id])
+    #expect(f.store.localModels == [other])
+    #expect(f.store.selectedLocalModelID == other.id)
+}
+
+@Test func modelLocationStaysInsideItsRoot() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("UpkeepModels-\(UUID().uuidString)")
+    let file = root.appendingPathComponent("publisher/repo/model.gguf")
+    try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data().write(to: file)
+    defer { try? FileManager.default.removeItem(at: root) }
+    #expect(LocalModelClient.modelLocation(relative: "publisher/repo/model.gguf", roots: [root])?.path == file.standardizedFileURL.path)
+    #expect(LocalModelClient.modelLocation(relative: "../outside", roots: [root]) == nil)
+    #expect(LocalModelClient.modelLocation(relative: "publisher/missing.gguf", roots: [root]) == nil)
 }

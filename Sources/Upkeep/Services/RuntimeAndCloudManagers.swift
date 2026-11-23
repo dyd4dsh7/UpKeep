@@ -324,6 +324,17 @@ func parseSimulatorRuntimes(_ data: Data) -> [SimulatorRuntime]? {
     }
 }
 
+/// Identifiers of installed runtime images for a platform name ("iOS") and build.
+func simulatorRuntimeIdentifiers(_ data: Data, platform: String, build: String) -> [String] {
+    struct Image: Decodable { let build: String; let platformIdentifier: String }
+    guard let images = try? JSONDecoder().decode([String: Image].self, from: jsonPayload(data)) else { return [] }
+    return images.filter { _, image in
+        image.build == build
+            && SimulatorPlatform.sdkPlatform(simulatorPlatform: image.platformIdentifier)
+                .flatMap(SimulatorPlatform.name) == platform
+    }.keys.sorted()
+}
+
 /// `xcodebuild -showsdks -json`: the simulator SDKs in the selected Xcode.
 func parseSimulatorSDKs(_ data: Data) -> [SimulatorSDK] {
     struct SDK: Decodable { let canonicalName: String; let platformVersion: String?; let productBuildVersion: String? }

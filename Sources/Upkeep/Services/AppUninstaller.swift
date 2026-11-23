@@ -6,6 +6,14 @@ protocol AppUninstalling: Sendable {
 }
 
 struct AppUninstaller: AppUninstalling {
+    /// System Integrity Protection marks bundles such as Safari as restricted;
+    /// nothing, including Finder with an administrator password, can remove them.
+    static func isSystemProtected(_ url: URL) -> Bool {
+        var info = stat()
+        guard lstat(url.path, &info) == 0 else { return false }
+        return info.st_flags & UInt32(SF_RESTRICTED) != 0
+    }
+
     func moveToTrash(_ url: URL) async throws {
         do {
             try FileManager.default.trashItem(at: url, resultingItemURL: nil)

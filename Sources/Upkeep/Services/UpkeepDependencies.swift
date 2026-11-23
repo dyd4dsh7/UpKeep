@@ -149,9 +149,11 @@ protocol LocalModelManaging: Sendable {
     func scan(progress: @escaping LocalModelScanProgressReporter) async -> LocalModelClient.Report
     func scan(runtime: LocalModelRuntime) async -> LocalModelClient.Report
     func update(_ model: LocalLLMModel) async throws
+    func uninstall(_ model: LocalLLMModel) async throws
 }
 
 extension LocalModelManaging {
+    func uninstall(_ model: LocalLLMModel) async throws { throw ScopedScanError.unavailable }
     func scan(progress: @escaping LocalModelScanProgressReporter) async -> LocalModelClient.Report {
         let report = await scan()
         await progress(report, Set(LocalModelRuntime.allCases))

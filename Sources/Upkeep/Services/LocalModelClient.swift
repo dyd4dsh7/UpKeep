@@ -79,6 +79,52 @@ struct LocalModelClient: Sendable {
         }
     }
 
+    /// Ollama removes its own models; LM Studio files and Hugging Face cache
+    /// folders go to the Trash so they can be restored.
+    func uninstall(_ model: LocalLLMModel) async throws {
+        switch model.runtime {
+        case .ollama:
+            guard let path = model.executablePath else { throw ModelError.runtimeUnavailable("Ollama") }
+            try await run(URL(fileURLWithPath: path), ["rm", model.updateReference])
+        case .lmStudio:
+            let relative = String(model.id.dropFirst("lmstudio:".count))
+            guard let file = Self.modelLocation(relative: relative, roots: lmStudioModelRoots()) else {
+                throw ModelError.failed("The model file for \(model.name) could not be found.")
+            }
+            try FileManager.default.trashItem(at: file, resultingItemURL: nil)
+            Self.trashEmptyFolders(from: file.deletingLastPathComponent(), stoppingAtDepth: 2, below: relative)
+        case .huggingFace:
+            let folder = "models--" + model.updateReference.replacingOccurrences(of: "/", with: "--")
+            guard let location = Self.modelLocation(relative: folder, roots: huggingFaceCacheRoots()) else {
+                throw ModelError.failed("The cache folder for \(model.name) could not be found.")
+            }
+            try FileManager.default.trashItem(at: location, resultingItemURL: nil)
+        }
+    }
+
+    /// The existing item at `relative` inside one of `roots`, refusing paths that escape the root.
+    static func modelLocation(relative: String, roots: [URL]) -> URL? {
+        guard !relative.isEmpty, !relative.split(separator: "/").contains("..") else { return nil }
+        for root in roots {
+            let candidate = root.appendingPathComponent(relative).standardizedFileURL
+            guard candidate.path.hasPrefix(root.standardizedFileURL.path + "/"),
+                  FileManager.default.fileExists(atPath: candidate.path) else { continue }
+            return candidate
+        }
+        return nil
+    }
+
+    /// Removes the publisher/repository folders a deleted LM Studio file leaves empty.
+    private static func trashEmptyFolders(from folder: URL, stoppingAtDepth depth: Int, below relative: String) {
+        var current = folder
+        for _ in 0..<min(depth, relative.split(separator: "/").count - 1) {
+            let contents = (try? FileManager.default.contentsOfDirectory(atPath: current.path)) ?? ["?"]
+            guard contents.allSatisfy({ $0 == ".DS_Store" }) else { return }
+            try? FileManager.default.trashItem(at: current, resultingItemURL: nil)
+            current = current.deletingLastPathComponent()
+        }
+    }
+
     private func scanHuggingFaceCache() async -> ModelRuntimeScanResult {
         let executable = executable(named: "hf", extra: [
             FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/hf").path

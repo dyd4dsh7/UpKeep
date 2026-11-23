@@ -82,7 +82,7 @@ import Testing
     }
     #expect(executable.path == "/usr/local/bin/docker")
     #expect(arguments == ["pull", "postgres:17-alpine"])
-    #expect(!DeveloperPackageUninstallAdapters.supports(outdated))
+    #expect(try DeveloperPackageUninstallAdapters.plan(for: outdated).arguments == ["image", "rm", "postgres:17-alpine"])
 }
 
 @Test func publisherHeadRequestsUseCurlHeadMode() throws {

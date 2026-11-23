@@ -194,5 +194,6 @@ import Testing
         return
     }
     #expect(arguments == ["global", "update", "tools"])
-    #expect(!DeveloperPackageUninstallAdapters.supports(package))
+    let uninstall = try DeveloperPackageUninstallAdapters.plan(for: package)
+    #expect(uninstall.arguments == ["global", "remove", "--environment", "tools", "samtools"])
 }

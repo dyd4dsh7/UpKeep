@@ -2026,9 +2026,9 @@ final class UpkeepStore: ObservableObject {
         }
     }
 
-    /// Upkeep itself and apps that ship with macOS cannot be removed here.
+    /// Only bundles macOS protects with System Integrity Protection, such as Safari, cannot be removed.
     func canUninstall(_ app: InstalledApp) -> Bool {
-        !app.isUpkeep && app.updateManagement != .macOS
+        !AppUninstaller.isSystemProtected(app.url)
     }
 
     /// The Homebrew cask that owns this app, when both sides map to each other.
@@ -2066,7 +2066,7 @@ final class UpkeepStore: ObservableObject {
             "Path": app.url.path,
             "Action": "Uninstall"
         ]) {
-            if self.dependencies.applicationLifecycle.runningApplications().contains(app) {
+            if !app.isUpkeep, self.dependencies.applicationLifecycle.runningApplications().contains(app) {
                 try await self.dependencies.applicationLifecycle.quit([app])
             }
             if let cask {
@@ -2076,15 +2076,16 @@ final class UpkeepStore: ObservableObject {
             }
         }
         guard succeeded else { return }
+        if app.isUpkeep {
+            // Upkeep is now in the Trash; quit so it is not left running from there.
+            NSApplication.shared.terminate(nil)
+            return
+        }
         if let cask { homebrewPackages.removeAll { $0.id == cask.id } }
         apps.removeAll { $0.id == app.id }
         updates.removeAll { $0.app.id == app.id }
         adoptableApps.removeAll { $0.app.id == app.id }
         if selectedApp?.id == app.id { selectedApp = nil }
-    }
-
-    func canUninstall(_ package: HomebrewPackage) -> Bool {
-        homebrewPackageApp(for: package)?.isUpkeep != true
     }
 
     /// Installed packages that list this one as a dependency.
@@ -2100,10 +2101,6 @@ final class UpkeepStore: ObservableObject {
     }
 
     private func uninstallHomebrewPackageUnlocked(_ package: HomebrewPackage) async {
-        guard canUninstall(package) else {
-            errorMessage = "\(package.displayName) cannot be uninstalled by Upkeep."
-            return
-        }
         let operationID = OperationID.homebrewPackage(package.id)
         guard !isWorking(operationID) else { return }
         updateExecutionState.activeOperations.insert(operationID)
@@ -2129,6 +2126,28 @@ final class UpkeepStore: ObservableObject {
             adoptableApps.removeAll { $0.app.id == app.id }
             if selectedApp?.id == app.id { selectedApp = nil }
         }
+    }
+
+    func uninstallLocalModel(_ model: LocalLLMModel) async {
+        await mutationCoordinator.withAccess(to: mutationTargets(for: .model(model)), otherwise: ()) {
+            await uninstallLocalModelUnlocked(model)
+        }
+    }
+
+    private func uninstallLocalModelUnlocked(_ model: LocalLLMModel) async {
+        let operationID = OperationID.localModel(model.id)
+        guard !isWorking(operationID) else { return }
+        updateExecutionState.activeOperations.insert(operationID)
+        defer { updateExecutionState.activeOperations.remove(operationID) }
+
+        let succeeded = await execute(label: model.name, activity: operationID, metadata: [
+            "Source": model.runtime.rawValue,
+            "Revision": model.installedRevision,
+            "Action": "Uninstall"
+        ]) { try await self.dependencies.localModels.uninstall(model) }
+        guard succeeded else { return }
+        localModels.removeAll { $0.id == model.id }
+        if selectedLocalModelID == model.id { selectedLocalModelID = localModels.first?.id }
     }
 
     @discardableResult
