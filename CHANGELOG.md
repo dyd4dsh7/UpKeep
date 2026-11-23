@@ -4,6 +4,8 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+## 0.25.17 — 2026-11-23
+
 - The details panel has a clearer layout. Update is one large button, other actions sit in a quieter row of icons, the new version stands out in the header, the source is no longer repeated, and expandable sections are consistent full-width rows. The Homebrew, developer package and AI model panels share it.
 - New developer sources: pyenv Python versions and rbenv Ruby versions (grouped by release line and offered the newest patch the tool can install), the Google Cloud CLI (checked against Google's release channel and updated with `gcloud components update`), Azure CLI extensions (preview releases are not offered to stable installs), and Xcode simulator runtimes (a beta or release-candidate runtime for the selected Xcode's version is offered the release build).
 - npm is now offered the newest release that supports the Node.js it runs on. npm 12 needs Node 22.22.2, 24.15 or 26 and later, so an older Node is offered the newest npm 11 instead.

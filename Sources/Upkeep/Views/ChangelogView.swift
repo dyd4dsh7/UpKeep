@@ -118,6 +118,12 @@ private struct UpkeepRelease: Identifiable {
     static let fullChangelogURL = URL(string: "https://github.com/\(SelfUpdate.repository)/blob/main/CHANGELOG.md")!
 
     static let all = [
+        UpkeepRelease(version: "0.25.17", date: "23 November 2026", changes: [
+            "Gives the details panel a clearer layout, with one large Update button and quieter secondary actions.",
+            "Checks pyenv and rbenv versions, the Google Cloud CLI, Azure CLI extensions, and Xcode simulator runtimes.",
+            "Offers npm only releases that support the Node.js beside it, and warns when MacPorts' ports list is old.",
+            "Stops reporting a quit Docker Desktop as a failed check."
+        ]),
         UpkeepRelease(version: "0.25.16", date: "23 November 2026", changes: [
             "Stops showing App Store updates the Mac App Store doesn't offer, such as the iPhone version of TestFlight.",
             "Stops offering Node.js alpha and release-candidate builds to stable installs.",
