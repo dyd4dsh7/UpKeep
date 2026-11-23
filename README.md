@@ -10,7 +10,6 @@
 **Keep your Mac's apps, packages, and developer tools up to date, and tidy, from one native app.**
 
 [![Latest release](https://img.shields.io/github/v/release/dyd4dsh7/UpKeep?label=release)](https://github.com/dyd4dsh7/UpKeep/releases/latest)
-[![Tests](https://github.com/dyd4dsh7/UpKeep/actions/workflows/tests.yml/badge.svg)](https://github.com/dyd4dsh7/UpKeep/actions/workflows/tests.yml)
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black?logo=apple)
 ![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-blue)
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)

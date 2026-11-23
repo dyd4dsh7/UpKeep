@@ -3,11 +3,8 @@
 Official releases come from `dyd4dsh7/UpKeep`. Source contributors and forks do not
 need access to the maintainer's Apple credentials.
 
-Releases are built, signed and notarized locally. The only GitHub Actions
-workflow, `.github/workflows/tests.yml`, runs the tests on pushes to `main` and on
-pull requests. It has no secrets and signs or publishes nothing, so pushing a tag
-does not build a release. Check that the latest run on `main` passed before
-releasing.
+Releases are built, signed and notarized locally. The repository has no GitHub
+Actions workflows, so nothing runs on GitHub when a tag is pushed.
 
 ## One-time setup
 
