@@ -679,7 +679,7 @@ final class UpkeepStore: ObservableObject {
                 || report.failedRuntimes.contains(previous.runtime) || owned.contains(previous.runtime)
                 || !runtimes.contains(previous.runtime) { merged[previous.id] = previous }
             localModels = merged.values.sorted(by: ScanResultReconciliation.modelOrder)
-            if selectedLocalModelID == nil || !localModels.contains(where: { $0.id == selectedLocalModelID }) {
+            if needsReselection(selectedLocalModelID, in: localModels.map(\.id)) {
                 selectedLocalModelID = localModels.first?.id
             }
         case let .developerPackages(report, managers):
@@ -873,12 +873,12 @@ final class UpkeepStore: ObservableObject {
         }
         lastChecked = report.checkedAt
         settings.lastCompletedScanDate = report.checkedAt
-        if selectedPackageID == nil { selectedPackageID = filteredHomebrewPackages.first?.id }
-        if selectedDeveloperPackageID == nil || !developerPackages.contains(where: { $0.id == selectedDeveloperPackageID }) {
+        if selectedPackageID == nil, !selectionClearedByUninstall { selectedPackageID = filteredHomebrewPackages.first?.id }
+        if needsReselection(selectedDeveloperPackageID, in: developerPackages.map(\.id)) {
             selectedDeveloperPackageID = developerPackages.first?.id
             selectedDeveloperVersion = developerPackages.first?.latestVersion ?? ""
         }
-        if selectedLocalModelID == nil || !localModels.contains(where: { $0.id == selectedLocalModelID }) {
+        if needsReselection(selectedLocalModelID, in: localModels.map(\.id)) {
             selectedLocalModelID = localModels.first?.id
         }
         refreshDiagnostics()
@@ -2022,8 +2022,23 @@ final class UpkeepStore: ObservableObject {
         }
         if succeeded {
             developerPackages.removeAll { $0.id == package.id }
+            if selectedDeveloperPackageID == package.id {
+                clearSelectionAfterUninstall { $0.selectedDeveloperPackageID = nil }
+            }
             await scan()
         }
+    }
+
+    /// Clears a selection without letting the list jump to the next item.
+    private func clearSelectionAfterUninstall(_ clear: (UpkeepStore) -> Void) {
+        clear(self)
+        selectionClearedByUninstall = true
+    }
+
+    /// A list picks its first item when nothing valid is selected, except right after an uninstall.
+    func needsReselection(_ selection: String?, in ids: [String]) -> Bool {
+        guard let selection else { return !selectionClearedByUninstall }
+        return !ids.contains(selection)
     }
 
     /// Only bundles macOS protects with System Integrity Protection, such as Safari, cannot be removed.
@@ -2085,7 +2100,7 @@ final class UpkeepStore: ObservableObject {
         apps.removeAll { $0.id == app.id }
         updates.removeAll { $0.app.id == app.id }
         adoptableApps.removeAll { $0.app.id == app.id }
-        if selectedApp?.id == app.id { selectedApp = nil }
+        if selectedApp?.id == app.id { clearSelectionAfterUninstall { $0.selectedApp = nil } }
     }
 
     /// Installed packages that list this one as a dependency.
@@ -2119,12 +2134,12 @@ final class UpkeepStore: ObservableObject {
         }
         guard succeeded else { return }
         homebrewPackages.removeAll { $0.id == package.id }
-        if selectedPackageID == package.id { selectedPackageID = nil }
+        if selectedPackageID == package.id { clearSelectionAfterUninstall { $0.selectedPackageID = nil } }
         if let app {
             apps.removeAll { $0.id == app.id }
             updates.removeAll { $0.app.id == app.id }
             adoptableApps.removeAll { $0.app.id == app.id }
-            if selectedApp?.id == app.id { selectedApp = nil }
+            if selectedApp?.id == app.id { clearSelectionAfterUninstall { $0.selectedApp = nil } }
         }
     }
 
@@ -2147,7 +2162,7 @@ final class UpkeepStore: ObservableObject {
         ]) { try await self.dependencies.localModels.uninstall(model) }
         guard succeeded else { return }
         localModels.removeAll { $0.id == model.id }
-        if selectedLocalModelID == model.id { selectedLocalModelID = localModels.first?.id }
+        if selectedLocalModelID == model.id { clearSelectionAfterUninstall { $0.selectedLocalModelID = nil } }
     }
 
     @discardableResult
@@ -2196,7 +2211,7 @@ final class UpkeepStore: ObservableObject {
             existing: scanWarnings, fresh: report.scanWarnings, source: .localModels,
             checkedName: runtime?.rawValue
         )
-        if selectedLocalModelID == nil || !localModels.contains(where: { $0.id == selectedLocalModelID }) {
+        if needsReselection(selectedLocalModelID, in: localModels.map(\.id)) {
             selectedLocalModelID = localModels.first?.id
         }
         return report

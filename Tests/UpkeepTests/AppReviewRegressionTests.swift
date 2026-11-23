@@ -2129,7 +2129,7 @@ private actor UninstallRecordingModels: LocalModelManaging {
 }
 
 @MainActor
-@Test func uninstallingModelForgetsItAndMovesSelection() async {
+@Test func uninstallingModelForgetsItAndClearsSelection() async {
     let models = UninstallRecordingModels()
     let f = ReviewFixture(models: models)
     defer { f.cleanUp() }
@@ -2141,7 +2141,26 @@ private actor UninstallRecordingModels: LocalModelManaging {
     await f.store.uninstallLocalModel(model)
     #expect(await models.uninstalled == [model.id])
     #expect(f.store.localModels == [other])
-    #expect(f.store.selectedLocalModelID == other.id)
+    #expect(f.store.selectedLocalModelID == nil)
+    // The list does not jump to the next model until the user picks one.
+    #expect(!f.store.needsReselection(nil, in: [other.id]))
+    f.store.selectedLocalModelID = other.id
+    #expect(!f.store.selectionClearedByUninstall)
+}
+
+@MainActor
+@Test func changingSectionAfterUninstallAllowsAutomaticSelectionAgain() async {
+    let brew = UninstallRecordingBrew()
+    let f = ReviewFixture(homebrew: brew)
+    defer { f.cleanUp() }
+    let formula = reviewPackage("libfixture", kind: .formula)
+    let other = reviewPackage("otherfixture", kind: .formula)
+    f.store.homebrewPackages = [formula, other]; f.store.selectedPackageID = formula.id
+    await f.store.uninstallHomebrewPackage(formula)
+    #expect(f.store.selectedPackageID == nil)
+    #expect(!f.store.needsReselection(nil, in: [other.id]))
+    f.store.navigation.selection = .allApps
+    #expect(f.store.needsReselection(nil, in: [other.id]))
 }
 
 @Test func modelLocationStaysInsideItsRoot() throws {

@@ -183,7 +183,13 @@ final class UpkeepLibraryState: ObservableObject {
 final class UpkeepNavigationState: ObservableObject {
     // Stable legacy publisher; all sends remain inside this MainActor model.
     @ObservationIgnored nonisolated(unsafe) let objectWillChange = ObservableObjectPublisher()
-    var selection: SidebarDestination = .updates { willSet { objectWillChange.send() } }
+    var selection: SidebarDestination = .updates {
+        willSet { objectWillChange.send() }
+        didSet { selectionClearedByUninstall = false }
+    }
+    /// After an uninstall the list shows nothing selected instead of jumping to
+    /// the next item, until the user picks something or changes section.
+    var selectionClearedByUninstall = false { willSet { objectWillChange.send() } }
     var homebrewFilter: HomebrewFilter = .all { willSet { objectWillChange.send() } }
     var appListFilter: AppListFilter = .all { willSet { objectWillChange.send() } }
     var appSortOrder: AppSortOrder = .recommended { willSet { objectWillChange.send() } }
@@ -191,13 +197,25 @@ final class UpkeepNavigationState: ObservableObject {
     var homebrewSortOrder: HomebrewSortOrder = .recommended { willSet { objectWillChange.send() } }
     var homebrewSortAscending = true { willSet { objectWillChange.send() } }
     var developerManagerFilter: DeveloperManagerFilter = .all { willSet { objectWillChange.send() } }
-    var selectedPackageID: String? { willSet { objectWillChange.send() } }
-    var selectedDeveloperPackageID: String? { willSet { objectWillChange.send() } }
+    var selectedPackageID: String? {
+        willSet { objectWillChange.send() }
+        didSet { if selectedPackageID != nil { selectionClearedByUninstall = false } }
+    }
+    var selectedDeveloperPackageID: String? {
+        willSet { objectWillChange.send() }
+        didSet { if selectedDeveloperPackageID != nil { selectionClearedByUninstall = false } }
+    }
     var selectedDeveloperVersion = "" { willSet { objectWillChange.send() } }
-    var selectedLocalModelID: String? { willSet { objectWillChange.send() } }
+    var selectedLocalModelID: String? {
+        willSet { objectWillChange.send() }
+        didSet { if selectedLocalModelID != nil { selectionClearedByUninstall = false } }
+    }
     var availableDeveloperVersions: [String] = [] { willSet { objectWillChange.send() } }
     var isLoadingDeveloperVersions = false { willSet { objectWillChange.send() } }
-    var selectedApp: InstalledApp? { willSet { objectWillChange.send() } }
+    var selectedApp: InstalledApp? {
+        willSet { objectWillChange.send() }
+        didSet { if selectedApp != nil { selectionClearedByUninstall = false } }
+    }
     var updateInspectorSelection: UpdateInspectorSelection? { willSet { objectWillChange.send() } }
     var requestedSearchResult: SearchResultSelection? { willSet { objectWillChange.send() } }
     var inventoryReveal: InventoryReveal? { willSet { objectWillChange.send() } }

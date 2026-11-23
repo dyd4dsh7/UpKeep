@@ -27,6 +27,10 @@ extension UpkeepStore {
     var availableDeveloperVersions: [String] { get { navigation.availableDeveloperVersions } set { navigation.availableDeveloperVersions = newValue } }
     var isLoadingDeveloperVersions: Bool { get { navigation.isLoadingDeveloperVersions } set { navigation.isLoadingDeveloperVersions = newValue } }
     var selectedApp: InstalledApp? { get { navigation.selectedApp } set { navigation.selectedApp = newValue } }
+    var selectionClearedByUninstall: Bool {
+        get { navigation.selectionClearedByUninstall }
+        set { navigation.selectionClearedByUninstall = newValue }
+    }
     var updateInspectorSelection: UpdateInspectorSelection? { get { navigation.updateInspectorSelection } set { navigation.updateInspectorSelection = newValue } }
     var searchText: String { get { navigation.searchText } set { navigation.searchText = newValue } }
     var pendingRevert: UpdateRecord? { get { navigation.pendingRevert } set { navigation.pendingRevert = newValue } }

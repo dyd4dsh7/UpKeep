@@ -156,10 +156,13 @@ import Testing
         )
     )
     let package = adapterPackage(manager: .npm, name: "typescript")
+    store.selectedDeveloperPackageID = package.id
 
     await store.uninstallDeveloperPackage(package)
 
     #expect(await manager.uninstalls == ["typescript"])
+    // The rescan after the uninstall must not select another package.
+    #expect(store.selectedDeveloperPackageID == nil)
 }
 
 private func adapterPackage(

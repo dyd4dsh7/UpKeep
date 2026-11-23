@@ -181,7 +181,7 @@ struct HomebrewView: View {
     }
 
     private func ensurePackageSelection(in packages: [HomebrewPackage]) {
-        guard !packages.contains(where: { $0.id == store.selectedPackageID }) else { return }
+        guard store.needsReselection(store.selectedPackageID, in: packages.map(\.id)) else { return }
         store.selectedPackageID = packages.first?.id
     }
 }

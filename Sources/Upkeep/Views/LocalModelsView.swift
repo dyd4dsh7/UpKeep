@@ -67,7 +67,7 @@ struct LocalModelsView: View {
     }
 
     private func ensureModelSelection(in models: [LocalLLMModel]) {
-        guard !models.contains(where: { $0.id == store.selectedLocalModelID }) else { return }
+        guard store.needsReselection(store.selectedLocalModelID, in: models.map(\.id)) else { return }
         store.selectedLocalModelID = models.first?.id
     }
 }

@@ -116,7 +116,7 @@ struct DeveloperPackagesView: View {
     }
 
     private func ensurePackageSelection(in packages: [DeveloperPackage]) {
-        guard !packages.contains(where: { $0.id == store.selectedDeveloperPackageID }) else { return }
+        guard store.needsReselection(store.selectedDeveloperPackageID, in: packages.map(\.id)) else { return }
         store.selectedDeveloperPackageID = packages.first?.id
     }
 
