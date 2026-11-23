@@ -118,6 +118,9 @@ private struct UpkeepRelease: Identifiable {
     static let fullChangelogURL = URL(string: "https://github.com/\(SelfUpdate.repository)/blob/main/CHANGELOG.md")!
 
     static let all = [
+        UpkeepRelease(version: "0.25.25", date: "24 November 2026", changes: [
+            "Gives the details panel a clearer header with a larger icon, status chips and an easier-to-see close button."
+        ]),
         UpkeepRelease(version: "0.25.24", date: "24 November 2026", changes: [
             "Shows a short description of what each app, package and model is."
         ]),

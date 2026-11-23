@@ -4,6 +4,10 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+## 0.25.25 — 2026-11-24
+
+- The details panel has a clearer header. The icon is larger, with the name and description beside it; the version, running state, update source and package kind sit together in one row of chips; and the close button is easier to see and lines up with the icon. Apps, Homebrew, developer packages and AI models now share the same header layout, and Homebrew casks show the icon of the app they install.
+
 ## 0.25.24 — 2026-11-24
 
 - Apps, Homebrew packages, developer packages and local AI models show a short description of what they are, in the list under the name and in the details panel. Descriptions come from each package's registry, the App Store, Homebrew, Hugging Face, or Upkeep's own descriptions for runtimes, Apple apps and common model families, and are kept for 30 days. Where an item has no description, the list shows what it did before.
