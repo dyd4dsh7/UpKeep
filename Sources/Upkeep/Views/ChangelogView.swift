@@ -118,6 +118,11 @@ private struct UpkeepRelease: Identifiable {
     static let fullChangelogURL = URL(string: "https://github.com/\(SelfUpdate.repository)/blob/main/CHANGELOG.md")!
 
     static let all = [
+        UpkeepRelease(version: "0.25.18", date: "23 November 2026", changes: [
+            "Gives Settings more room and splits package managers into those found on this Mac and those not found.",
+            "Makes the diagnostics log easier to read, with entries grouped by day and warnings and errors highlighted.",
+            "Redesigns the About page with Upkeep's update status and project links."
+        ]),
         UpkeepRelease(version: "0.25.17", date: "23 November 2026", changes: [
             "Gives the details panel a clearer layout, with one large Update button and quieter secondary actions.",
             "Checks pyenv and rbenv versions, the Google Cloud CLI, Azure CLI extensions, and Xcode simulator runtimes.",

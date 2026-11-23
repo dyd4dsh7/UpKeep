@@ -4,6 +4,12 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+## 0.25.18 — 2026-11-23
+
+- Settings has a smaller page header and a slightly larger window, so pages have more room. Developer settings split package managers into those found on this Mac and those not found, and say what each one is.
+- The diagnostics log is easier to read. Entries are grouped by day; routine entries show a one-line summary and open on click; warnings and errors are highlighted with their details shown. Details use the full width, so long values are no longer cut off. Summary figures turn orange or red when the last scan had warnings or errors, and the level filter is a single row of buttons.
+- The About page shows the app icon, version, and Upkeep's own update status with a clear state, plus links to release notes, source code, issue reporting, the privacy policy, third-party notices, and the developer's site.
+
 ## 0.25.17 — 2026-11-23
 
 - The details panel has a clearer layout. Update is one large button, other actions sit in a quieter row of icons, the new version stands out in the header, the source is no longer repeated, and expandable sections are consistent full-width rows. The Homebrew, developer package and AI model panels share it.
