@@ -128,6 +128,11 @@ struct HomebrewClient: Sendable {
         try await execute(["upgrade", "--cask", token])
     }
 
+    func setPinned(_ package: HomebrewPackage, _ pinned: Bool) async throws {
+        guard package.kind == .formula else { throw BrewError.failed("Homebrew can only pin formulae, not casks.") }
+        try await execute([pinned ? "pin" : "unpin", package.token])
+    }
+
     func uninstall(_ package: HomebrewPackage) async throws {
         var arguments = ["uninstall"]
         if package.kind == .cask { arguments.append("--cask") }
@@ -317,10 +322,14 @@ private func run(_ executable: URL, _ arguments: [String]) async throws -> Data 
     }
 }
 
-private func runInTerminal(
+/// Runs a command that needs the administrator password in a Terminal window
+/// and waits for it to finish. `subject` names it in Terminal and in errors,
+/// such as "Homebrew update" or "App Store update".
+func runInTerminal(
     _ executable: URL,
     _ arguments: [String],
-    permissionRepairURL: URL? = nil
+    permissionRepairURL: URL? = nil,
+    subject: String = "Homebrew update"
 ) async throws -> Data {
     let commandLog = OperationCommandLogContext.current
     let cancellation = CommandRunner.Cancellation()
@@ -329,14 +338,14 @@ private func runInTerminal(
         commandLog?.append("Cancellation requested. Waiting for the dedicated Terminal command group to stop before releasing the install reservation.")
     }) {
         try await runInTerminalUntilCompletion(executable, arguments, permissionRepairURL: permissionRepairURL,
-                                              cancellation: cancellation)
+                                              subject: subject, cancellation: cancellation)
     }
 }
 
 private func runInTerminalUntilCompletion(
     _ executable: URL,
     _ arguments: [String],
-    permissionRepairURL: URL?, cancellation: CommandRunner.Cancellation
+    permissionRepairURL: URL?, subject: String, cancellation: CommandRunner.Cancellation
 ) async throws -> Data {
     let fileManager = FileManager.default
     let directory = fileManager.temporaryDirectory
@@ -400,7 +409,7 @@ private func runInTerminalUntilCompletion(
     \(launchFence.scriptPreamble(statusURL: statusURL))
     trap 'print -r -- "$upkeep_status" > \(shellQuote(statusURL.path))' EXIT HUP INT TERM
     print
-    print "Upkeep needs administrator approval to finish this Homebrew update."
+    print "Upkeep needs administrator approval to finish this \(subject)."
     print "Enter your macOS password when sudo asks for it."
     print
     \(permissionRepair)
@@ -410,9 +419,9 @@ private func runInTerminalUntilCompletion(
     trap - EXIT HUP INT TERM
     print
     if (( upkeep_status == 0 )); then
-      print "Homebrew update completed. You can close this window."
+      print "\(subject.prefix(1).uppercased() + subject.dropFirst()) completed. You can close this window."
     else
-      print "Homebrew update failed with status $upkeep_status. You can close this window."
+      print "\(subject.prefix(1).uppercased() + subject.dropFirst()) failed with status $upkeep_status. You can close this window."
     fi
     exit $upkeep_status
     """
@@ -424,8 +433,8 @@ private func runInTerminalUntilCompletion(
     let terminalCommand = ([TerminalCommandLaunch.executable.path] + TerminalCommandLaunch.arguments(script: scriptURL))
         .map(shellQuote).joined(separator: " ")
 
-    DiagnosticsStore.shared.record(.info, category: .command, "Homebrew needs interactive authorization", metadata: [
-        "Command": "brew " + arguments.joined(separator: " "),
+    DiagnosticsStore.shared.record(.info, category: .command, "Command needs interactive authorization", metadata: [
+        "Command": ([executable.lastPathComponent] + arguments).joined(separator: " "),
         "Action": permissionRepairURL == nil
             ? "Opened Terminal for the administrator password prompt"
             : "Opened Terminal to repair app permissions and retry Homebrew adoption",
@@ -440,14 +449,14 @@ private func runInTerminalUntilCompletion(
         commandStopped = await settleFailedTerminalLaunch(fence: launchFence, statusURL: statusURL,
             scriptURL: scriptURL, cancellation: cancellation)
         throw HomebrewClient.BrewError.failed(
-            "Homebrew needs administrator approval, but Upkeep could not open Terminal: \(error.localizedDescription)"
+            "The \(subject) needs administrator approval, but Upkeep could not open Terminal: \(error.localizedDescription)"
         )
     }
     guard opener.status == 0 else {
         commandStopped = await settleFailedTerminalLaunch(fence: launchFence, statusURL: statusURL,
             scriptURL: scriptURL, cancellation: cancellation)
         throw HomebrewClient.BrewError.failed(
-            "Homebrew needs administrator approval, but Terminal could not be opened."
+            "The \(subject) needs administrator approval, but Terminal could not be opened."
         )
     }
 
@@ -547,9 +556,9 @@ private func shellQuote(_ value: String) -> String {
 private struct InfoResponse: Decodable { let formulae: [FormulaDTO]; let casks: [CaskDTO] }
 private struct FormulaDTO: Decodable {
     let name: String; let desc: String?; let license: String?; let homepage: String?
-    let revision: Int?; let versionScheme: Int?; let tap: String?
+    let revision: Int?; let versionScheme: Int?; let tap: String?; let pinned: Bool?
     enum CodingKeys: String, CodingKey {
-        case name, desc, license, homepage, versions, dependencies, installed, outdated, revision, tap
+        case name, desc, license, homepage, versions, dependencies, installed, outdated, revision, tap, pinned
         case versionScheme = "version_scheme"
     }
     let versions: Versions; let dependencies: [String]; let installed: [Installed]; let outdated: Bool
@@ -666,10 +675,12 @@ private func packages(from response: InfoResponse, includePrereleases: Bool) -> 
             installedVersion: installed.version,
             currentVersion: current,
             kind: .formula,
-            isOutdated: formula.outdated && (includePrereleases || !VersionComparator.isHomebrewPrerelease(current)),
+            isOutdated: formula.pinned != true && formula.outdated
+                && (includePrereleases || !VersionComparator.isHomebrewPrerelease(current)),
             isDependency: !installed.installedOnRequest,
             dependencies: formula.dependencies,
-            versionScheme: formula.versionScheme ?? 0, tap: formula.tap
+            versionScheme: formula.versionScheme ?? 0, tap: formula.tap,
+            isPinned: formula.pinned == true
         )
     }
     let casks = response.casks.compactMap { cask -> HomebrewPackage? in

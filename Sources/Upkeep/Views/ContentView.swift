@@ -167,6 +167,7 @@ struct ContentView: View {
                 store.navigation.selection = .updates
             }, showSoftware: store.showCVESoftware)
         case .history: UpdateHistoryView()
+        case .duplicates: DuplicatesView()
         case .developerPackages: DeveloperPackagesView()
         case .localModels: LocalModelsView()
         case .appStore, .testFlight, .setapp, .microsoftAutoUpdate, .steam, .otherUpdaters,
@@ -191,7 +192,7 @@ struct ContentView: View {
                 case .homebrewPackages: return selectedHomebrewPackage != nil
                 case .developerPackages: return selectedDeveloperPackage != nil
                 case .localModels: return selectedLocalModel != nil
-                case .macOSUpdates, .history: return false
+                case .macOSUpdates, .history, .duplicates: return false
                 default: return store.selectedApp != nil
                 }
             },

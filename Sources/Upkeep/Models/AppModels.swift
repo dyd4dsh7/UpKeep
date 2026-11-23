@@ -357,12 +357,18 @@ struct UpdateCandidate: Identifiable, Hashable, Sendable {
         sourcePrereleaseChannel ?? VersionComparator.prereleaseChannel(for: availableVersion)
     }
 
+    /// App Store updates install with `mas` when it is installed and the
+    /// listing gives the app's ID.
+    var usesMacAppStoreCLI: Bool {
+        source == .appStore && MacAppStoreCLI.isInstalled && MacAppStoreCLI.appID(from: actionURL) != nil
+    }
+
     var actionTitle: String {
         if requiresHomebrewAdoption { return "Update & Adopt" }
         if requiresInAppInstallation { return "Open App" }
         return switch source {
         case .homebrew: "Update"
-        case .appStore: "Open App Store"
+        case .appStore: usesMacAppStoreCLI ? "Update" : "Open App Store"
         case .developer: "Open App"
         case .sparkle: "Download"
         case .github: "View Release"
@@ -507,7 +513,7 @@ struct AvailableUpdate: Identifiable, Hashable, Sendable {
         if requiresInAppInstallation { return "Open the app to run its built-in updater" }
         return switch source {
         case .homebrew: "Install with Homebrew"
-        case .appStore: "Open in the App Store"
+        case .appStore: primaryCandidate.usesMacAppStoreCLI ? "Install with mas in Terminal (asks for your password)" : "Open in the App Store"
         case .developer: "Open the app's built-in updater"
         case .sparkle: "Open the developer download"
         case .github: "Open the GitHub release"
@@ -717,6 +723,7 @@ enum SidebarDestination: String, CaseIterable, Identifiable {
     case homebrewPackages = "Homebrew"
     case macOSUpdates = "macOS"
     case history = "History"
+    case duplicates = "Duplicates"
     case cveChecker = "CVE Checker"
     case developerPackages = "Developer"
     case localModels = "AI Models"
@@ -765,6 +772,7 @@ enum SidebarDestination: String, CaseIterable, Identifiable {
         case .macOSUpdates: "apple.logo"
         case .cveChecker: "shield.lefthalf.filled"
         case .history: "clock.arrow.circlepath"
+        case .duplicates: "square.on.square"
         case .developerPackages: "curlybraces.square"
         case .localModels: "brain.head.profile"
         }
@@ -789,6 +797,7 @@ enum SidebarDestination: String, CaseIterable, Identifiable {
         case .macOSUpdates: "apple.logo"
         case .cveChecker: "shield.lefthalf.filled"
         case .history: "clock.arrow.circlepath"
+        case .duplicates: "square.on.square"
         case .developerPackages: "curlybraces.square.fill"
         case .localModels: "brain.head.profile.fill"
         }
@@ -849,6 +858,17 @@ func homebrewProductNameVariants(_ value: String) -> Set<String> {
     return values
 }
 
+extension HomebrewPackage {
+    /// A pinned copy: still knows the newer version, but is not outdated.
+    init(pinning package: HomebrewPackage) {
+        self = HomebrewPackage(token: package.token, displayName: package.displayName, description: package.description,
+            homepage: package.homepage, license: package.license, installedVersion: package.installedVersion,
+            currentVersion: package.currentVersion, kind: package.kind, isOutdated: false,
+            isDependency: package.isDependency, dependencies: package.dependencies, versionScheme: package.versionScheme,
+            tap: package.tap, autoUpdates: package.autoUpdates, appArtifactNames: package.appArtifactNames, isPinned: true)
+    }
+}
+
 struct HomebrewPackage: Identifiable, Hashable, Sendable {
     var id: String { "\(kind.rawValue):\(token)" }
     let token: String
@@ -869,6 +889,10 @@ struct HomebrewPackage: Identifiable, Hashable, Sendable {
     var autoUpdates = false
     /// App bundles the cask installs, such as `Docker.app` for docker-desktop.
     var appArtifactNames: [String] = []
+    /// `brew pin` holds a formula at its installed version; `brew upgrade`
+    /// skips it, so Upkeep shows it as current.
+    var isPinned = false
+
     /// Cask names, token and app bundle names, normalized for matching apps.
     var appMatchNames: Set<String> {
         guard kind == .cask else { return [] }

@@ -32,6 +32,7 @@ struct UpkeepSidebarView: View {
                 if settings.sidebarViewMode == .advanced, settings.checkHomebrew {
                     item(.adoptable)
                 }
+                item(.duplicates)
             } header: {
                 WorkspaceSectionLabel(title: "Library")
             }

@@ -101,11 +101,14 @@ protocol HomebrewManaging: Sendable {
     func installOrReplace(_ item: AdoptableApp) async throws
     func upgradeCask(token: String) async throws
     func uninstall(_ package: HomebrewPackage) async throws
+    /// Runs `brew pin` or `brew unpin` for a formula.
+    func setPinned(_ package: HomebrewPackage, _ pinned: Bool) async throws
 }
 
 extension HomebrewManaging {
     func services() async throws -> [HomebrewService] { throw ScopedScanError.unavailable }
     func uninstall(_ package: HomebrewPackage) async throws { throw ScopedScanError.unavailable }
+    func setPinned(_ package: HomebrewPackage, _ pinned: Bool) async throws { throw ScopedScanError.unavailable }
 }
 
 typealias DeveloperScanProgressReporter = @Sendable (DeveloperPackageClient.Report, Set<DeveloperPackageManager>) async -> Void
@@ -272,6 +275,8 @@ struct UpkeepDependencies: Sendable {
     /// ~/Library, where app data removed with an uninstall is found.
     let appDataLibrary: URL
     let unattendedConditions: any UnattendedConditionsChecking
+    let appStoreUpdater: any AppStoreUpdating
+    let packageReleaseNotes: any PackageReleaseNotesProviding
     let externalVerificationInterval: Duration
     let makeCVEClient: (@MainActor @Sendable () -> CVEInventoryClient)?
 
@@ -291,6 +296,8 @@ struct UpkeepDependencies: Sendable {
         descriptionCacheURL: URL? = ItemDescriptionCache.defaultURL,
         appDataLibrary: URL = AppDataLocator.defaultLibrary,
         unattendedConditions: any UnattendedConditionsChecking = LiveUnattendedConditions(),
+        appStoreUpdater: any AppStoreUpdating = MasAppStoreUpdater(),
+        packageReleaseNotes: any PackageReleaseNotesProviding = PackageReleaseNotesClient(),
         externalVerificationInterval: Duration = .seconds(3),
         makeCVEClient: (@MainActor @Sendable () -> CVEInventoryClient)? = nil
     ) {
@@ -309,6 +316,8 @@ struct UpkeepDependencies: Sendable {
         self.descriptionCacheURL = descriptionCacheURL
         self.appDataLibrary = appDataLibrary
         self.unattendedConditions = unattendedConditions
+        self.appStoreUpdater = appStoreUpdater
+        self.packageReleaseNotes = packageReleaseNotes
         self.externalVerificationInterval = externalVerificationInterval
         self.makeCVEClient = makeCVEClient
     }

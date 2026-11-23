@@ -220,6 +220,12 @@ private struct PackageRow: View, Equatable {
             if isRefreshing {
                 RefreshingIndicator(itemName: package.displayName)
             }
+            if package.isPinned {
+                Image(systemName: "pin.fill")
+                    .foregroundStyle(.blue)
+                    .help("Pinned with brew pin. Homebrew and Upkeep leave it at \(package.installedVersion).")
+                    .accessibilityLabel("Pinned")
+            }
             if isUnmapped {
                 Image(systemName: "questionmark.diamond.fill")
                     .foregroundStyle(.orange)
@@ -266,6 +272,12 @@ private struct PackageRow: View, Equatable {
                     ignoreFor: { store.ignore(package, duration: $0) }
                 )
             }
+            if package.kind == .formula {
+                Button(package.isPinned ? "Unpin" : "Pin Version \(package.installedVersion)") {
+                    Task { await store.setPinned(package, !package.isPinned) }
+                }
+                .disabled(isWorking)
+            }
             Divider()
             Button("Uninstall…", role: .destructive, action: requestUninstall)
                 .disabled(isWorking)
@@ -276,6 +288,7 @@ private struct PackageRow: View, Equatable {
         var details = [package.kind.rawValue]
         if package.isRevisionUpdate { details.append("Rebuild update") }
         if package.isDependency { details.append("Dependency") }
+        if package.isPinned { details.append("Pinned") }
         // The description leads so a narrow list still shows it.
         if let description = store.itemDescription(for: package) {
             details.insert(description, at: 0)
@@ -292,7 +305,12 @@ struct PackageDetail: View {
     @EnvironmentObject private var settings: AppSettings
     @StateObject private var inspection = AppSecurityInspectionModel()
     @UpkeepState private var packagePendingUninstall: HomebrewPackage?
+    @State private var releaseNotes = LoadedReleaseNotes()
     let package: HomebrewPackage?
+
+    private func releaseNotesKey(_ package: HomebrewPackage) -> String {
+        "\(package.id)|\(package.isOutdated ? package.currentVersion : package.installedVersion)"
+    }
 
     var body: some View {
         if let package {
@@ -314,6 +332,12 @@ struct PackageDetail: View {
                                              latest: package.isOutdated ? package.currentVersion : nil)
                         InfoChip(text: package.kind.rawValue, tint: .orange)
                         if package.isDependency { InfoChip(text: "Dependency") }
+                        if package.isPinned {
+                            InfoChip(text: "Pinned", systemImage: "pin.fill", tint: .blue)
+                                .help(VersionComparator.isNewer(package.currentVersion, than: package.installedVersion)
+                                      ? "Version \(package.currentVersion) is available. Unpin to update."
+                                      : "brew upgrade leaves this formula at its installed version.")
+                        }
                         if let channel = package.prereleaseChannel {
                             PrereleaseBadge(channel: channel, isInstalled: package.prereleaseIsInstalled, isChip: true)
                         }
@@ -321,6 +345,9 @@ struct PackageDetail: View {
                 } content: {
                     CVESecuritySummary(item: CVEInventoryItem(package))
                     if package.isOutdated { updateCard(package) }
+                    if let notes = releaseNotes.notes(for: releaseNotesKey(package)) {
+                        PackageReleaseNotesSection(notes: notes)
+                    }
                     detailCard(package)
                     uninstallButton(package)
                     if package.isOutdated {
@@ -350,6 +377,12 @@ struct PackageDetail: View {
                 if let app = store.homebrewPackageApp(for: package) {
                     await inspection.load(app)
                 }
+            }
+            .task(id: releaseNotesKey(package)) {
+                let key = releaseNotesKey(package)
+                let notes = await store.releaseNotes(for: package)
+                guard !Task.isCancelled else { return }
+                releaseNotes = LoadedReleaseNotes(key: key, notes: notes)
             }
         } else {
             WorkspaceEmptyState("Select a package", systemImage: "shippingbox")
@@ -395,6 +428,10 @@ struct PackageDetail: View {
                     ignoreFor: { store.ignore(package, duration: $0) }
                 )
             }
+            if package.kind == .formula {
+                Button("Pin Version \(package.installedVersion)") { Task { await store.setPinned(package, true) } }
+                    .disabled(isUpdating)
+            }
             Divider()
             Button("Uninstall…", role: .destructive) { packagePendingUninstall = package }
                 .disabled(isUpdating)
@@ -404,6 +441,16 @@ struct PackageDetail: View {
     private func uninstallButton(_ package: HomebrewPackage) -> some View {
         let isWorking = store.isWorking(.homebrewPackage(package.id))
         return HStack {
+            if package.kind == .formula {
+                Button { Task { await store.setPinned(package, !package.isPinned) } } label: {
+                    Label(package.isPinned ? "Unpin" : "Pin Version", systemImage: package.isPinned ? "pin.slash" : "pin")
+                }
+                .buttonStyle(.bordered)
+                .disabled(isWorking)
+                .help(package.isPinned
+                      ? "Let Homebrew and Upkeep update \(package.token) again"
+                      : "Keep \(package.token) at \(package.installedVersion); brew upgrade will skip it")
+            }
             Spacer(minLength: 0)
             Button(role: .destructive) { packagePendingUninstall = package } label: {
                 Label {

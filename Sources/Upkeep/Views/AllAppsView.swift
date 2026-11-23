@@ -972,7 +972,7 @@ struct AppDetailView: View {
 
 /// Release notes clipped to a few lines, with a toggle shown only when the
 /// notes are actually longer than the clipped text.
-private struct ReleaseNotesText: View {
+struct ReleaseNotesText: View {
     let notes: String
     @Binding var showsAll: Bool
     @UpkeepState private var fullHeight: CGFloat = 0

@@ -1464,6 +1464,20 @@ final class UpkeepStore: ObservableObject {
             return await verifyDirectInstallation(update, record: record, commandSucceeded: succeeded,
                 commandError: errorMessage, operationID: operationID)
 
+        } else if update.source == .appStore, dependencies.appStoreUpdater.isAvailable,
+                  let appID = MacAppStoreCLI.appID(from: update.primaryCandidate.actionURL) {
+            // mas installs the update without the App Store app; sudo asks for
+            // the password in Terminal. The App Store keeps the app's data.
+            let operationID = OperationID.applicationUpdate(update.id)
+            beginUpdateActivity(operationID, targets: mutationTargets(for: .application(update)), phase: .updating)
+            defer { endUpdateActivity(operationID) }
+            var metadata = updateDiagnosticMetadata(update)
+            metadata["Command"] = "sudo mas update \(appID)"
+            let succeeded = await execute(label: update.app.name, activity: operationID, metadata: metadata) {
+                try await self.dependencies.appStoreUpdater.update(appID: appID)
+            }
+            if succeeded { await refresh(update.app) }
+            return succeeded
         } else if let actionURL = update.externalActionURL {
             let operationID = OperationID.applicationUpdate(update.id)
             beginUpdateActivity(operationID, targets: mutationTargets(for: .application(update)), phase: .opening)
@@ -2008,13 +2022,13 @@ final class UpkeepStore: ObservableObject {
         return succeeded && errorMessage == nil
     }
 
-    func uninstallDeveloperPackage(_ package: DeveloperPackage) async {
+    func uninstallDeveloperPackage(_ package: DeveloperPackage, rescan: Bool = true) async {
         await mutationCoordinator.withAccess(to: mutationTargets(for: .developer(package)), otherwise: ()) {
-            await uninstallDeveloperPackageUnlocked(package)
+            await uninstallDeveloperPackageUnlocked(package, rescan: rescan)
         }
     }
 
-    private func uninstallDeveloperPackageUnlocked(_ package: DeveloperPackage) async {
+    private func uninstallDeveloperPackageUnlocked(_ package: DeveloperPackage, rescan: Bool) async {
         let operationID = OperationID.developerPackage(package.id)
         guard !isWorking(operationID) else { return }
         updateExecutionState.activeOperations.insert(operationID)
@@ -2034,7 +2048,7 @@ final class UpkeepStore: ObservableObject {
             if selectedDeveloperPackageID == package.id {
                 clearSelectionAfterUninstall { $0.selectedDeveloperPackageID = nil }
             }
-            await scan()
+            if rescan { await scan() }
         }
     }
 
@@ -2173,6 +2187,116 @@ final class UpkeepStore: ObservableObject {
         updates.removeAll { $0.app.id == app.id }
         adoptableApps.removeAll { $0.app.id == app.id }
         if selectedApp?.id == app.id { clearSelectionAfterUninstall { $0.selectedApp = nil } }
+    }
+
+    /// Pins or unpins a Homebrew formula. A pinned formula stays at its
+    /// installed version, so Upkeep shows it as current until it is unpinned.
+    func setPinned(_ package: HomebrewPackage, _ pinned: Bool) async {
+        guard package.kind == .formula, package.isPinned != pinned else { return }
+        await mutationCoordinator.withAccess(to: mutationTargets(for: .homebrew(package)), otherwise: ()) {
+            let operationID = OperationID.homebrewPackage(package.id)
+            guard !isWorking(operationID) else { return }
+            updateExecutionState.activeOperations.insert(operationID)
+            defer { updateExecutionState.activeOperations.remove(operationID) }
+            let succeeded = await execute(label: package.displayName, activity: operationID, metadata: [
+                "Source": "Homebrew formula \(package.token)",
+                "Action": pinned ? "Pin" : "Unpin"
+            ]) { try await self.dependencies.homebrew.setPinned(package, pinned) }
+            guard succeeded, let index = homebrewPackages.firstIndex(where: { $0.id == package.id }) else { return }
+            if pinned {
+                homebrewPackages[index] = HomebrewPackage(pinning: homebrewPackages[index])
+            } else if let refreshed = try? await dependencies.homebrew.package(
+                token: package.token, kind: .formula, includePrereleases: settings.scanSettings.includePrereleaseUpdates
+            ), let current = homebrewPackages.firstIndex(where: { $0.id == package.id }) {
+                homebrewPackages[current] = refreshed
+            } else if let current = homebrewPackages.firstIndex(where: { $0.id == package.id }) {
+                homebrewPackages[current].isPinned = false
+            }
+        }
+    }
+
+    func releaseNotes(for package: HomebrewPackage) async -> PackageReleaseNotes? {
+        guard let request = PackageReleaseNotesRequest.make(for: package) else { return nil }
+        return await dependencies.packageReleaseNotes.releaseNotes(for: request)
+    }
+
+    func releaseNotes(for package: DeveloperPackage) async -> PackageReleaseNotes? {
+        guard let request = PackageReleaseNotesRequest.make(for: package) else { return nil }
+        return await dependencies.packageReleaseNotes.releaseNotes(for: request)
+    }
+
+    /// "Update Recommended" from a notification. Updates that would quit a
+    /// running app or ask for a password open the review instead, so nothing
+    /// interrupts the user without them seeing it first.
+    func updateRecommendedFromNotification() async {
+        refreshRunningApplications()
+        let items = recommendedBatchUpdateItems
+        let needsReview = items.contains { item in
+            item.mayRequireAdministratorPassword || (batchApp(for: item).map(isRunning) ?? false)
+        }
+        guard !items.isEmpty, !needsReview, updateExecutionState.activeOperations.isEmpty else {
+            showBatchReview()
+            return
+        }
+        let summary = await performBatchUpdates(items)
+        await postInstallSummary(summary)
+    }
+
+    func postInstallSummary(_ summary: BatchUpdateSummary) async {
+        guard settings.notificationsEnabled, summary.updatedCount > 0 || summary.failedCount > 0 else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Upkeep installed updates"
+        var parts = ["\(summary.updatedCount) update\(summary.updatedCount == 1 ? " was" : "s were") installed."]
+        if summary.failedCount > 0 {
+            parts.append("\(summary.failedCount) couldn’t be installed; open Upkeep to see why.")
+        }
+        content.body = parts.joined(separator: " ")
+        try? await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "upkeep-installed-updates", content: content, trigger: nil))
+    }
+
+    /// Apps, packages and runtimes installed more than once, without the
+    /// groups marked "Not a Duplicate".
+    var duplicateGroups: [DuplicateGroup] {
+        DuplicateFinder.groups(apps: apps, developerPackages: developerPackages, homebrewPackages: homebrewPackages)
+            .filter { !settings.ignoredDuplicateGroups.contains($0.id) }
+    }
+
+    func canRemove(_ member: DuplicateMember) -> Bool {
+        switch member {
+        case let .app(app): canUninstall(app)
+        case let .developer(package): DeveloperPackageUninstallAdapters.supports(package)
+        case .homebrew: true
+        }
+    }
+
+    func isWorking(on member: DuplicateMember) -> Bool {
+        switch member {
+        case let .app(app): isWorking(.applicationUninstall(app.id))
+        case let .developer(package): isWorking(.developerPackage(package.id))
+        case let .homebrew(package): isWorking(.homebrewPackage(package.id))
+        }
+    }
+
+    /// Removes one copy with the same flow as its Uninstall button, so apps
+    /// go to the Trash and every removal is recorded in History.
+    func remove(_ member: DuplicateMember, rescan: Bool = true) async {
+        switch member {
+        case let .app(app): await uninstallApp(app)
+        case let .developer(package): await uninstallDeveloperPackage(package, rescan: rescan)
+        case let .homebrew(package): await uninstallHomebrewPackage(package)
+        }
+    }
+
+    /// Keeps one copy and removes the others that can be removed. Developer
+    /// packages are checked again once, after the last removal.
+    func keepOnly(_ kept: DuplicateMember, in group: DuplicateGroup) async {
+        let others = group.members.filter { $0.id != kept.id && canRemove($0) }
+        for member in others {
+            await remove(member, rescan: false)
+        }
+        if others.contains(where: { if case .developer = $0 { return true } else { return false } }) {
+            await scan()
+        }
     }
 
     /// Installed packages that list this one as a dependency.
@@ -2387,16 +2511,7 @@ final class UpkeepStore: ObservableObject {
             "Items": items.map(\.name).joined(separator: ", ")
         ])
         let summary = await performBatchUpdates(items)
-        if settings.notificationsEnabled, summary.updatedCount > 0 || summary.failedCount > 0 {
-            let content = UNMutableNotificationContent()
-            content.title = "Upkeep installed updates"
-            var parts = ["\(summary.updatedCount) update\(summary.updatedCount == 1 ? " was" : "s were") installed."]
-            if summary.failedCount > 0 {
-                parts.append("\(summary.failedCount) couldn’t be installed; open Upkeep to see why.")
-            }
-            content.body = parts.joined(separator: " ")
-            try? await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "upkeep-automatic-updates", content: content, trigger: nil))
-        }
+        await postInstallSummary(summary)
         return summary
     }
 
@@ -2814,6 +2929,7 @@ final class UpkeepStore: ObservableObject {
         content.title = "Upkeep found updates"
         content.body = "\(totalUpdateCount) update\(totalUpdateCount == 1 ? " is" : "s are") available."
         content.sound = .default
+        content.categoryIdentifier = UpdateNotificationAction.categoryIdentifier
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "upkeep-updates", content: content, trigger: nil))
     }
 

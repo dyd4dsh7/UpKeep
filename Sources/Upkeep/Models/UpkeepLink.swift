@@ -7,7 +7,7 @@ import Foundation
 ///     upkeep://updates            upkeep://check
 ///     upkeep://applications       upkeep://review
 ///     upkeep://homebrew           upkeep://search?q=firefox
-///     upkeep://developer, models, macos, history, cve, adoptable
+///     upkeep://developer, models, macos, history, duplicates, cve, adoptable
 enum UpkeepLink: Equatable {
     case show(SidebarDestination)
     case check
@@ -25,6 +25,7 @@ enum UpkeepLink: Equatable {
         "models": .localModels, "ai-models": .localModels,
         "macos": .macOSUpdates,
         "history": .history,
+        "duplicates": .duplicates,
         "cve": .cveChecker, "security": .cveChecker
     ]
 

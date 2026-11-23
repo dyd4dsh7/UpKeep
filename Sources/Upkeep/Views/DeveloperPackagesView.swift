@@ -316,7 +316,12 @@ struct DeveloperPackageDetail: View {
 private struct DeveloperPackageDetailContent: View {
     @UpkeepStoreReference private var store
     @StateObject private var detailState = DeveloperPackageDetailState()
+    @State private var releaseNotes = LoadedReleaseNotes()
     let package: DeveloperPackage
+
+    private var releaseNotesKey: String {
+        "\(package.id)|\(package.isOutdated ? package.latestVersion : package.currentVersion)"
+    }
 
     var body: some View {
         InfoPanel {
@@ -339,6 +344,9 @@ private struct DeveloperPackageDetailContent: View {
                 } content: {
                 CVESecuritySummary(item: CVEInventoryItem(package))
                 if package.isOutdated { updateCard }
+                if let notes = releaseNotes.notes(for: releaseNotesKey) {
+                    PackageReleaseNotesSection(notes: notes)
+                }
 
                 InspectorSection(title: "Installation") {
                     Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
@@ -425,6 +433,12 @@ private struct DeveloperPackageDetailContent: View {
             detailState.prepare(for: package)
         }
         .task(id: package.id) { await store.loadDescriptions(for: [package]) }
+        .task(id: releaseNotesKey) {
+            let key = releaseNotesKey
+            let notes = await store.releaseNotes(for: package)
+            guard !Task.isCancelled else { return }
+            releaseNotes = LoadedReleaseNotes(key: key, notes: notes)
+        }
         .onChange(of: package.id) { _, _ in
             detailState.prepare(for: package)
         }

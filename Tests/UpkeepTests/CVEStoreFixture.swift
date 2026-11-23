@@ -53,16 +53,20 @@ enum CVEStoreFixture {
         appUninstaller: any AppUninstalling = AppUninstaller(),
         appDataLibrary: URL = AppDataLocator.defaultLibrary,
         unattendedConditions: any UnattendedConditionsChecking = ReadyForUnattendedUpdates(),
+        homebrew: (any HomebrewManaging)? = nil,
+        appStoreUpdater: any AppStoreUpdating = MasAppStoreUpdater(),
+        packageReleaseNotes: any PackageReleaseNotesProviding = PackageReleaseNotesClient(fetch: { _ in nil }),
         makeCVEClient: (@MainActor @Sendable () -> CVEInventoryClient)? = nil
     ) -> UpkeepStore {
         let services = CVEStoreFixtureServices(includeCVEInventory: includeCVEInventory)
         let store = UpkeepStore(settings: settings, dependencies: UpkeepDependencies(
-            scanner: services, applicationDiscovery: services, homebrew: services,
+            scanner: services, applicationDiscovery: services, homebrew: homebrew ?? services,
             developerPackages: services, packageCleanup: services, localModels: services,
             history: services, externalOpener: services, directAppInstaller: services,
             applicationLifecycle: services, appUninstaller: appUninstaller,
             itemDescriber: OfflineItemDescriber(), descriptionCacheURL: nil, appDataLibrary: appDataLibrary,
-            unattendedConditions: unattendedConditions,
+            unattendedConditions: unattendedConditions, appStoreUpdater: appStoreUpdater,
+            packageReleaseNotes: packageReleaseNotes,
             makeCVEClient: makeCVEClient ?? { CVEStoreFixture.cveInventoryClient }))
         store.apps = services.apps
         store.updates = services.updates

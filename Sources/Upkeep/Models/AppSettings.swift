@@ -282,6 +282,8 @@ final class AppSettings: ObservableObject {
     @Published private(set) var enabledDeveloperManagers: Set<DeveloperPackageManager>
     @Published private(set) var updateExclusions: [UpdateExclusion]
     @Published private(set) var ignoredHomebrewAdoptionKeys: Set<String>
+    /// Duplicate groups the user marked "Not a Duplicate".
+    @Published private(set) var ignoredDuplicateGroups: Set<String>
     @Published private(set) var itemLastCheckedDates: [String: Date]
     @Published private(set) var sourceCheckFreshness: [String: CheckFreshness]
     @Published private(set) var customGitHubRepositories: [String: String]
@@ -372,6 +374,7 @@ final class AppSettings: ObservableObject {
             .filter { $0.isActive() }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         ignoredHomebrewAdoptionKeys = Set(defaults.stringArray(forKey: "ignoredHomebrewAdoptionKeys") ?? [])
+        ignoredDuplicateGroups = Set(defaults.stringArray(forKey: "ignoredDuplicateGroups") ?? [])
         itemLastCheckedDates = defaults.data(forKey: "itemLastCheckedDates")
             .flatMap { try? JSONDecoder().decode([String: Date].self, from: $0) } ?? [:]
         customGitHubRepositories = defaults.dictionary(forKey: "customGitHubRepositories")
@@ -514,6 +517,16 @@ final class AppSettings: ObservableObject {
         if ignored { ignoredHomebrewAdoptionKeys.insert(key) }
         else { ignoredHomebrewAdoptionKeys.remove(key) }
         defaults.set(ignoredHomebrewAdoptionKeys.sorted(), forKey: "ignoredHomebrewAdoptionKeys")
+    }
+
+    func setDuplicateGroupIgnored(_ ignored: Bool, id: String) {
+        if ignored { ignoredDuplicateGroups.insert(id) } else { ignoredDuplicateGroups.remove(id) }
+        defaults.set(ignoredDuplicateGroups.sorted(), forKey: "ignoredDuplicateGroups")
+    }
+
+    func restoreIgnoredDuplicateGroups() {
+        ignoredDuplicateGroups.removeAll()
+        defaults.removeObject(forKey: "ignoredDuplicateGroups")
     }
 
     func lastChecked(for key: String) -> Date? {

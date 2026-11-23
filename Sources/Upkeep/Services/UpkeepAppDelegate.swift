@@ -5,6 +5,25 @@ import UserNotifications
 /// The single main window (`Window(id: "main")`). Opening goes through SwiftUI's
 /// `openWindow`, which recreates the window after it was closed and brings an
 /// existing one forward instead of creating a second copy.
+/// Buttons on the "Upkeep found updates" notification.
+enum UpdateNotificationAction: String {
+    case review = "upkeep.review"
+    case updateRecommended = "upkeep.update-recommended"
+
+    static let categoryIdentifier = "upkeep.updates"
+
+    static var category: UNNotificationCategory {
+        UNNotificationCategory(
+            identifier: categoryIdentifier,
+            actions: [
+                UNNotificationAction(identifier: review.rawValue, title: "Review", options: [.foreground]),
+                UNNotificationAction(identifier: updateRecommended.rawValue, title: "Update Recommended", options: [])
+            ],
+            intentIdentifiers: []
+        )
+    }
+}
+
 @MainActor
 enum MainWindow {
     static let id = "main"
@@ -52,6 +71,7 @@ final class UpkeepAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
         // UserNotifications requires a bundled app; unbundled debug runs skip it.
         if Bundle.main.bundleIdentifier != nil {
             UNUserNotificationCenter.current().delegate = self
+            UNUserNotificationCenter.current().setNotificationCategories([UpdateNotificationAction.category])
         }
     }
 
@@ -78,7 +98,18 @@ final class UpkeepAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
-        await MainActor.run { Self.store?.showUpdates() }
+        let action = response.actionIdentifier
+        await MainActor.run {
+            guard let store = Self.store else { return }
+            switch action {
+            case UpdateNotificationAction.review.rawValue:
+                store.showBatchReview()
+            case UpdateNotificationAction.updateRecommended.rawValue:
+                Task { await store.updateRecommendedFromNotification() }
+            default:
+                store.showUpdates()
+            }
+        }
     }
 
     nonisolated func userNotificationCenter(
