@@ -70,6 +70,9 @@ struct HomebrewClient: Sendable {
         excluding packages: [HomebrewPackage]
     ) -> [AdoptableApp] {
         let installedTokens = Set(packages.lazy.filter { $0.kind == .cask }.map(\.token))
+        // An installed cask already owns these app names. A sibling cask such as
+        // `utm@beta` installs the same bundle and Homebrew refuses it as a conflict.
+        let claimedNames = packages.reduce(into: Set<String>()) { $0.formUnion($1.appMatchNames) }
         var catalogIndexByName: [String: Int] = [:]
         catalogIndexByName.reserveCapacity(catalog.count * 2)
         for (index, cask) in catalog.enumerated() {
@@ -92,7 +95,9 @@ struct HomebrewClient: Sendable {
             if catalogIndexByName[tokenKey] == nil { catalogIndexByName[tokenKey] = index }
         }
         return apps.compactMap { app in
-            guard app.allowsHomebrewAdoption else { return nil }
+            guard app.allowsHomebrewAdoption,
+                  homebrewProductNameVariants(app.name).isDisjoint(with: claimedNames)
+            else { return nil }
             guard let index = catalogIndexByName[normalize(app.name)] else { return nil }
             let cask = catalog[index]
             return AdoptableApp(app: app, caskToken: cask.token, caskVersion: cask.version)

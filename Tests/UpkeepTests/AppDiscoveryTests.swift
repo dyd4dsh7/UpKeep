@@ -47,7 +47,7 @@ import Testing
 
     #expect(app.hasBuiltInUpdater)
     #expect(app.githubRepository == "example/electron-app")
-    #expect(app.allowsHomebrewAdoption)
+    #expect(app.updateManagement == .direct)
 }
 
 @Test func applicationDiscoveryReadsElectronGenericProviderFeed() async throws {
@@ -94,7 +94,7 @@ import Testing
     let app = try #require(await AppDiscovery.discover(at: appURL))
 
     #expect(app.hasBuiltInUpdater)
-    #expect(app.allowsHomebrewAdoption)
+    #expect(app.updateManagement == .direct)
 }
 
 @Test func applicationDiscoveryRecognizesSteamLauncherShortcuts() async throws {

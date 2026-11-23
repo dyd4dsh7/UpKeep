@@ -103,8 +103,11 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
     /// Adoption is an explicit ownership change. Direct developer downloads
     /// remain eligible even when they embed an updater; the Homebrew catalog
     /// separately excludes casks that declare `auto_updates`.
+    /// `brew install --adopt` only adopts the bundle at the cask's target in
+    /// `/Applications`. Elsewhere it installs a second copy instead.
     var allowsHomebrewAdoption: Bool {
         updateManagement == .direct && !isWrappedIOSApp
+            && url.standardizedFileURL.deletingLastPathComponent().path == "/Applications"
     }
 
     func replacingGitHubRepository(_ repository: String?) -> InstalledApp {

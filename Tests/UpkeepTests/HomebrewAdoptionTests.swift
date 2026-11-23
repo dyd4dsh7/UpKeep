@@ -32,6 +32,39 @@ import Testing
     #expect(matches.map(\.caskToken) == ["sparkle-app", "token-only", "vscode-first"])
 }
 
+@Test func homebrewAdoptionSkipsAppsOwnedByAnInstalledSiblingCask() {
+    let catalog = [
+        CatalogCask(token: "utm", name: ["UTM"], version: "5.0.9", artifactAppNames: ["UTM.app"]),
+        CatalogCask(token: "utm@beta", name: ["UTM"], version: "5.0.9", artifactAppNames: ["UTM.app"])
+    ]
+    var installed = installedCask(token: "utm")
+    installed.appArtifactNames = ["UTM.app"]
+
+    let matches = HomebrewClient.adoptableApps(
+        from: [adoptionApp(name: "UTM")],
+        catalog: catalog,
+        excluding: [installed]
+    )
+
+    #expect(matches.isEmpty)
+}
+
+@Test func homebrewAdoptionSkipsAppsOutsideApplications() {
+    let catalog = [
+        CatalogCask(token: "utm", name: ["UTM"], version: "5.0.9"),
+        CatalogCask(token: "stats", name: ["Stats"], version: "3.0")
+    ]
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    let apps = [
+        adoptionApp(name: "UTM", url: home.appendingPathComponent("Applications/UTM.app")),
+        adoptionApp(name: "Stats", url: URL(fileURLWithPath: "/Applications/Utilities/Stats.app"))
+    ]
+
+    let matches = HomebrewClient.adoptableApps(from: apps, catalog: catalog, excluding: [])
+
+    #expect(matches.isEmpty)
+}
+
 @Test func homebrewCatalogDecodesAutoUpdateOwnership() throws {
     let data = Data(#"""
         [
@@ -67,14 +100,15 @@ import Testing
 private func adoptionApp(
     name: String,
     updateManagement: AppUpdateManagement = .direct,
-    hasBuiltInUpdater: Bool = false
+    hasBuiltInUpdater: Bool = false,
+    url: URL? = nil
 ) -> InstalledApp {
     InstalledApp(
         name: name,
         bundleIdentifier: "test.\(name)",
         installedVersion: "1.0",
         buildVersion: nil,
-        url: URL(fileURLWithPath: "/Applications/\(name).app"),
+        url: url ?? URL(fileURLWithPath: "/Applications/\(name).app"),
         sparkleFeedURL: nil,
         githubRepository: nil,
         hasAppStoreReceipt: updateManagement == .appStore,
