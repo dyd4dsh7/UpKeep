@@ -104,6 +104,16 @@ enum AppDataLocator {
 }
 
 struct AppUninstaller: AppUninstalling {
+    /// Moves an item to the Trash directly and says where it went.
+    var trashItem: @Sendable (URL) throws -> URL? = { url in
+        var trashed: NSURL?
+        try FileManager.default.trashItem(at: url, resultingItemURL: &trashed)
+        return trashed as URL?
+    }
+    /// Asks Finder to move an item to the Trash; returns its exit status and output.
+    var runFinder: @Sendable (URL) async throws -> (status: Int32, output: String) = AppUninstaller.finderDelete
+    var fileExists: @Sendable (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+
     /// System Integrity Protection marks bundles such as Safari as restricted;
     /// nothing, including Finder with an administrator password, can remove them.
     static func isSystemProtected(_ url: URL) -> Bool {
@@ -114,9 +124,7 @@ struct AppUninstaller: AppUninstalling {
 
     func moveToTrash(_ url: URL) async throws -> URL? {
         do {
-            var trashed: NSURL?
-            try FileManager.default.trashItem(at: url, resultingItemURL: &trashed)
-            return trashed as URL?
+            return try trashItem(url)
         } catch {
             // App Store and installer-package apps are owned by root. Finder can
             // still trash them after asking for an administrator password.
@@ -131,28 +139,33 @@ struct AppUninstaller: AppUninstalling {
     }
 
     private func trashWithFinder(_ url: URL) async throws {
+        let result: (status: Int32, output: String)
+        do {
+            result = try await runFinder(url)
+        } catch {
+            throw UninstallError.finderFailed(error.localizedDescription)
+        }
+        guard result.status == 0 else {
+            let message = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            // -128 is "User canceled", from the password prompt.
+            if message.contains("-128") { throw UninstallError.cancelled }
+            throw UninstallError.finderFailed(message)
+        }
+        guard !fileExists(url.path) else {
+            throw UninstallError.stillInstalled
+        }
+    }
+
+    @Sendable static func finderDelete(_ url: URL) async throws -> (status: Int32, output: String) {
         let script = """
         on run argv
             tell application "Finder" to delete (POSIX file (item 1 of argv) as alias)
         end run
         """
-        let result: CommandRunner.Result
-        do {
-            // Leave time for the administrator password prompt.
-            result = try await CommandRunner.run(URL(fileURLWithPath: "/usr/bin/osascript"),
+        // Leave time for the administrator password prompt.
+        let result = try await CommandRunner.run(URL(fileURLWithPath: "/usr/bin/osascript"),
                                                  ["-e", script, url.path], timeout: 300)
-        } catch {
-            throw UninstallError.finderFailed(error.localizedDescription)
-        }
-        guard result.status == 0 else {
-            let message = String(decoding: result.output, as: UTF8.self)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if message.contains("-128") { throw UninstallError.cancelled }
-            throw UninstallError.finderFailed(message)
-        }
-        guard !FileManager.default.fileExists(atPath: url.path) else {
-            throw UninstallError.stillInstalled
-        }
+        return (result.status, String(decoding: result.output, as: UTF8.self))
     }
 
     enum UninstallError: LocalizedError {

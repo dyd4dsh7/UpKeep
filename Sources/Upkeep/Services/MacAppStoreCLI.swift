@@ -27,13 +27,22 @@ protocol AppStoreUpdating: Sendable {
 }
 
 struct MasAppStoreUpdater: AppStoreUpdating {
-    var isAvailable: Bool { MacAppStoreCLI.isInstalled }
+    var mas: URL? = MacAppStoreCLI.executable
+    /// Runs a command that needs the administrator password in Terminal.
+    var launch: @Sendable (URL, [String], String) async throws -> Void = { executable, arguments, subject in
+        _ = try await runInTerminal(executable, arguments, subject: subject)
+    }
+
+    var isAvailable: Bool { mas != nil }
 
     func update(appID: String) async throws {
-        guard let mas = MacAppStoreCLI.executable, appID.allSatisfy(\.isNumber) else {
+        guard let mas else {
             throw UpdateSourceError.malformedData("The mas command-line tool is not installed.")
         }
-        _ = try await runInTerminal(URL(fileURLWithPath: "/usr/bin/sudo"), [mas.path, "update", appID],
-                                    subject: "App Store update")
+        // App IDs are digits only, so nothing else reaches sudo.
+        guard !appID.isEmpty, appID.allSatisfy(\.isASCII), appID.allSatisfy(\.isNumber) else {
+            throw UpdateSourceError.malformedData("“\(appID)” is not an App Store app ID.")
+        }
+        try await launch(URL(fileURLWithPath: "/usr/bin/sudo"), [mas.path, "update", appID], "App Store update")
     }
 }
