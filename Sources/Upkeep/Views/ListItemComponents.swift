@@ -7,6 +7,12 @@ enum UpkeepLayout {
     static let inspectorMinimumWidth: CGFloat = 320
     static let inspectorIdealWidth: CGFloat = 380
     static let inspectorMaximumWidth: CGFloat = 500
+    /// Inspector cards: corner radius and inner padding. Controls inset inside
+    /// a card use `cardRadius - inset` so their corners stay concentric.
+    static let cardRadius: CGFloat = 12
+    static let cardPadding: CGFloat = 16
+    /// The inspector's action card is the most prominent surface in the panel.
+    static let actionCardRadius: CGFloat = 14
 }
 
 enum UpkeepColors {
@@ -510,35 +516,17 @@ struct InspectorUpdateStatusCard<Actions: View, Options: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 14) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 22, weight: .medium))
-                    .foregroundStyle(color)
-                    .symbolRenderingMode(.hierarchical)
-                    .frame(width: 32)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title).font(.headline)
-                    Text(subtitle).font(.callout).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 0)
-                Menu { options } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .font(.body)
-                        .frame(width: 24, height: 24)
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .accessibilityLabel("Update options")
-            }
+        InspectorActionCard(systemImage: systemImage, color: color) {
+            Text(title).font(.headline)
+            Text(subtitle).font(.callout).foregroundStyle(.secondary)
+        } primary: {
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 10) { actions }
-                VStack(alignment: .leading, spacing: 10) { actions }
+                HStack(spacing: 8) { actions }
+                VStack(alignment: .leading, spacing: 8) { actions }
             }
+        } options: {
+            options
         }
-        .upkeepOutlinedInspectorCard()
         .upkeepAnimated(for: title)
     }
 }
@@ -547,8 +535,8 @@ private struct OutlinedInspectorCardStyle: ViewModifier {
     func body(content: Content) -> some View {
         content
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
-            .upkeepSurface()
+            .padding(UpkeepLayout.cardPadding)
+            .upkeepSurface(radius: UpkeepLayout.cardRadius)
     }
 }
 

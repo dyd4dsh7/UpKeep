@@ -176,14 +176,33 @@ struct WorkspaceDialogFooter<Content: View>: View {
     }
 }
 
-struct InspectorSection<Content: View>: View {
+struct InspectorSection<Accessory: View, Content: View>: View {
     let title: String
+    @ViewBuilder let accessory: Accessory
     @ViewBuilder let content: Content
 
+    init(title: String, @ViewBuilder accessory: () -> Accessory, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.accessory = accessory()
+        self.content = content()
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            WorkspaceSectionLabel(title: title)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                WorkspaceSectionLabel(title: title)
+                Spacer(minLength: 0)
+                accessory
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
             content.upkeepOutlinedInspectorCard()
         }
+    }
+}
+
+extension InspectorSection where Accessory == EmptyView {
+    init(title: String, @ViewBuilder content: () -> Content) {
+        self.init(title: title, accessory: { EmptyView() }, content: content)
     }
 }

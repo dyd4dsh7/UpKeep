@@ -396,19 +396,19 @@ struct AppDetailView: View {
                         AppleSiliconMigrationWarning { detailState.showsAppleSiliconMigration = true }
                     }
                     updateStatus
-                    RelatedInstallations(app: app)
                     releaseNotes
-                    if settings.sidebarViewMode == .advanced {
-                        DisclosureGroup("Update sources") {
-                            updateSources.padding(.top, 10)
-                        }
-                        DisclosureGroup("Manage GitHub repository") {
-                            githubSourceManagement.padding(.top, 10)
-                        }
-                    }
                     homebrewManagement
-                    if settings.sidebarViewMode == .advanced {
-                        technicalDisclosure
+                    VStack(alignment: .leading, spacing: 8) {
+                        RelatedInstallations(app: app)
+                        if settings.sidebarViewMode == .advanced {
+                            if let update, update.candidates.count > 1 {
+                                DisclosureGroup("Update sources") { updateSources }
+                            }
+                            if app.bundleIdentifier != nil {
+                                DisclosureGroup("Manage GitHub repository") { githubSourceManagement }
+                            }
+                            technicalDisclosure
+                        }
                     }
         }
         .frame(minHeight: 0)
@@ -431,19 +431,15 @@ struct AppDetailView: View {
         InfoPanelHeader(title: app.name) {
             AppIcon(url: app.url, size: 44)
         } detail: {
-                if store.isRunning(app) { RunningBadge() }
                 if let update {
-                    VersionTransitionView(
-                        current: app.installedVersion,
-                        latest: update.displayAvailableVersion,
-                        usesFixedWidth: false
-                    )
+                    InspectorVersionChange(current: app.installedVersion, latest: update.displayAvailableVersion)
                 } else {
                     Text("Version \(app.installedVersion)" + buildText)
-                        .font(.callout.monospacedDigit())
+                        .font(.body.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
+                    if store.isRunning(app) { RunningBadge() }
                     ForEach(store.sources(for: app)) { source in SourceBadge(source: source) }
                     if app.updateManagement.isExternallyManaged {
                         ManagementBadge(management: app.updateManagement)
@@ -468,28 +464,19 @@ struct AppDetailView: View {
     }
 
     private var technicalDisclosure: some View {
-        DisclosureGroup(isExpanded: $detailState.showsTechnicalDetails) {
-            VStack(alignment: .leading, spacing: 20) {
+        DisclosureGroup("Technical details", isExpanded: $detailState.showsTechnicalDetails) {
+            VStack(alignment: .leading, spacing: 24) {
                 technicalDetails
                 AppPermissionsSection(report: inspection.report)
                 AppSecuritySection(report: inspection.report)
             }
-            .padding(.top, 14)
-        } label: {
-            VStack(alignment: .leading, spacing: 3) {
-                Label("Technical Details", systemImage: "info.circle")
-                    .font(.headline)
-            }
         }
-        .padding(14)
-        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
     }
 
     @ViewBuilder
     private var updateSources: some View {
         if let update, update.candidates.count > 1 {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Update Sources").font(.headline)
+            VStack(alignment: .leading, spacing: 12) {
                 Text("Upkeep prefers the first source below, but every source that reported a newer version remains available.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -538,7 +525,7 @@ struct AppDetailView: View {
                         .padding(12)
                     }
                 }
-                .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 14))
+                .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
         }
     }
@@ -546,8 +533,7 @@ struct AppDetailView: View {
     @ViewBuilder
     private var githubSourceManagement: some View {
         if app.bundleIdentifier != nil {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("GitHub Source").font(.headline)
+            VStack(alignment: .leading, spacing: 12) {
                 Text("Attach a publisher repository when Upkeep cannot discover one from the app. The repository must have published releases.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -586,86 +572,61 @@ struct AppDetailView: View {
                         .controlSize(.small)
                 }
             }
-            .padding(16)
-            .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 14))
         }
     }
 
     private var updateStatus: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 14) {
-                Image(systemName: statusIcon)
-                    .font(.system(size: 22, weight: .medium))
-                    .foregroundStyle(statusColor)
-                    .symbolRenderingMode(.hierarchical)
-                    .frame(width: 32)
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(statusTitle).font(.headline)
-                    Text(primaryDescription)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                    if let detail = Self.additionalManagedDetail(
-                        app.managedUpdateStatus?.detail,
-                        primaryDescription: primaryDescription
-                    ) {
-                        Text(detail)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    if let verification = store.externalUpdateVerification(for: app) {
-                        Text(verification.detail)
-                            .font(.caption)
-                            .foregroundStyle(
-                                verification.state == .attention ? Color.orange : Color.secondary
-                            )
-                    }
-                }
-                .fixedSize(horizontal: false, vertical: true)
-                .layoutPriority(1)
-                Spacer(minLength: 0)
-                updateOptionsMenu
+        InspectorActionCard(
+            systemImage: statusIcon,
+            color: statusColor,
+            optionsLabel: "App options",
+            optionsHelp: "Refresh, update, exclusion, and app options"
+        ) {
+            Text(statusTitle).font(.headline)
+            if let statusSubtitle {
+                Text(statusSubtitle)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
+            if let detail = Self.additionalManagedDetail(
+                app.managedUpdateStatus?.detail,
+                primaryDescription: primaryDescription
+            ) {
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let verification = store.externalUpdateVerification(for: app) {
+                Text(verification.detail)
+                    .font(.caption)
+                    .foregroundStyle(
+                        verification.state == .attention ? Color.orange : Color.secondary
+                    )
+            }
+        } primary: {
             if let progress = app.managedUpdateStatus?.progress {
                 ProgressView(value: progress)
                     .accessibilityLabel(app.managedUpdateStatus?.state.rawValue ?? "Update progress")
             }
-            actionGrid
+            primaryAction
+        } secondary: {
+            secondaryActions
+        } options: {
+            updateOptionCommands
         }
-        .upkeepOutlinedInspectorCard()
         .upkeepAnimated(for: statusTitle)
     }
 
     @ViewBuilder
     private var releaseNotes: some View {
         if let update {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("What’s New").font(.headline)
-                    Spacer()
-                    Text("Version \(update.displayAvailableVersion)")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-                VStack(alignment: .leading, spacing: 8) {
-                    let notes = update.releaseNotes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                    Text(notes.isEmpty
-                         ? AttributedString("No release notes available")
-                         : ReleaseNotesFormatter.attributedString(from: notes))
-                        .lineLimit(showsFullReleaseNotes ? nil : 10)
-                        .font(.callout)
-                        .lineSpacing(3)
-                        .foregroundStyle(notes.isEmpty ? .secondary : .primary)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    if !notes.isEmpty {
-                        Button(showsFullReleaseNotes ? "Show Less" : "Read All Release Notes") {
-                            showsFullReleaseNotes.toggle()
-                        }
-                        .buttonStyle(.link)
-                    }
-                }
-                .padding(16)
-                .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 14))
+            InspectorSection(title: "What’s New") {
+                Text("Version \(update.displayAvailableVersion)")
+            } content: {
+                ReleaseNotesText(
+                    notes: update.releaseNotes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+                    showsAll: $showsFullReleaseNotes
+                )
             }
         }
     }
@@ -673,31 +634,29 @@ struct AppDetailView: View {
     @ViewBuilder
     private var homebrewManagement: some View {
         if let adoptableItem, !adoptionHandledByUpdate, !homebrewAdoptionIgnored {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Homebrew").font(.headline)
-                HStack(spacing: 16) {
+            InspectorSection(title: "Homebrew") {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Image(systemName: "shippingbox.fill")
-                        .font(.title2)
+                        .font(.system(size: 18))
                         .foregroundStyle(.orange)
-                        .frame(width: 38)
+                        .frame(width: 24)
+                        .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Manage this app with Homebrew").font(.headline)
                         Text("Adopt the existing installation with the \(adoptableItem.caskToken) cask.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    Spacer()
                 }
-                .padding(16)
-                .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 14))
             }
         }
     }
 
     private var technicalDetails: some View {
         VStack(alignment: .leading, spacing: 10) {
-            WorkspaceSectionLabel(title: "App information")
-            Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 10) {
+            Text("App Information").font(.headline)
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
                 GridRow { detailLabel("Bundle ID"); Text(app.bundleIdentifier ?? "Not declared").textSelection(.enabled) }
                 GridRow { detailLabel("Location"); Text(app.url.path).lineLimit(2).textSelection(.enabled) }
                 GridRow { detailLabel("Installed version"); Text(app.installedVersion).monospacedDigit() }
@@ -726,76 +685,71 @@ struct AppDetailView: View {
                 if let adoptableItem { GridRow { detailLabel("Homebrew cask"); Text(adoptableItem.caskToken).textSelection(.enabled) } }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .upkeepOutlinedInspectorCard()
         }
     }
 
-    private var actionGrid: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 10)], alignment: .leading, spacing: 10) {
-            if let exclusion {
-                Button { store.restore(exclusion) } label: {
-                    Label("Restore Updates", systemImage: "arrow.uturn.backward")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-            } else if let update {
-                Button {
-                    Task { await store.performUpdate(update) }
-                } label: {
-                    WorkingActionLabel(
-                        isWorking: store.isUpdating(update),
-                        idleTitle: primaryActionTitle,
-                        phase: store.updatePhase(for: .applicationUpdate(update.id))
-                    )
+    @ViewBuilder
+    private var primaryAction: some View {
+        if let exclusion {
+            Button { store.restore(exclusion) } label: {
+                Label("Restore Updates", systemImage: "arrow.uturn.backward")
                     .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(store.isUpdating(update))
             }
-            if let adoptableItem, !adoptionHandledByUpdate, !homebrewAdoptionIgnored {
-                Button {
-                    Task { await store.adopt(adoptableItem) }
-                } label: {
+            .buttonStyle(.borderedProminent)
+        } else if let update {
+            Button {
+                Task { await store.performUpdate(update) }
+            } label: {
+                WorkingActionLabel(
+                    isWorking: store.isUpdating(update),
+                    idleTitle: primaryActionTitle,
+                    phase: store.updatePhase(for: .applicationUpdate(update.id))
+                )
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(store.isUpdating(update))
+        }
+    }
+
+    @ViewBuilder
+    private var secondaryActions: some View {
+        if let adoptableItem, !adoptionHandledByUpdate, !homebrewAdoptionIgnored {
+            Button {
+                Task { await store.adopt(adoptableItem) }
+            } label: {
+                Label {
                     WorkingActionLabel(
                         isWorking: store.isWorking(.homebrewAdoption(adoptableItem.id)),
                         idleTitle: "Adopt",
                         workingTitle: "Adopting…",
                         phase: store.updatePhase(for: .homebrewAdoption(adoptableItem.id))
                     )
-                    .frame(maxWidth: .infinity)
+                } icon: {
+                    Image(systemName: "shippingbox")
                 }
-                .buttonStyle(.bordered)
-                .disabled(store.isWorking(.homebrewAdoption(adoptableItem.id)))
-                .help("Adopt with Homebrew using the \(adoptableItem.caskToken) cask")
             }
-            if app.updateManagement.isExternallyManaged {
-                Button { store.openUpdateManager(for: app) } label: {
-                    Label(app.updateManagement.actionTitle, systemImage: app.updateManagement.systemImage)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-            }
-            if update?.actionTitle != "Open App" {
-                Button { NSWorkspace.shared.open(app.url) } label: {
-                    Label("Open App", systemImage: "arrow.up.forward.app")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-            }
-            Button { NSWorkspace.shared.activateFileViewerSelecting([app.url]) } label: {
-                Label("Show in Finder", systemImage: "folder")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            if let sourceURL, sourceURL.standardizedFileURL != app.url.standardizedFileURL {
-                Button { NSWorkspace.shared.open(sourceURL) } label: {
-                    Label(sourceActionTitle, systemImage: sourceActionSystemImage)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
+            .disabled(store.isWorking(.homebrewAdoption(adoptableItem.id)))
+            .help("Adopt with Homebrew using the \(adoptableItem.caskToken) cask")
+        }
+        if app.updateManagement.isExternallyManaged {
+            Button { store.openUpdateManager(for: app) } label: {
+                Label(app.updateManagement.actionTitle, systemImage: app.updateManagement.systemImage)
             }
         }
-        .controlSize(.regular)
+        if update?.actionTitle != "Open App" {
+            Button { NSWorkspace.shared.open(app.url) } label: {
+                Label("Open App", systemImage: "arrow.up.forward.app")
+            }
+        }
+        Button { NSWorkspace.shared.activateFileViewerSelecting([app.url]) } label: {
+            Label("Show in Finder", systemImage: "folder")
+        }
+        if let sourceURL, sourceURL.standardizedFileURL != app.url.standardizedFileURL {
+            Button { NSWorkspace.shared.open(sourceURL) } label: {
+                Label(sourceActionTitle, systemImage: sourceActionSystemImage)
+            }
+        }
     }
 
     private var primaryActionTitle: String {
@@ -875,6 +829,14 @@ struct AppDetailView: View {
         if store.sources(for: app).isEmpty { return "No update source" }
         if store.lastChecked(for: app) == nil { return "Not checked yet" }
         return "Up to date"
+    }
+
+    /// The status line under the card title. A lone update source is already
+    /// shown as a badge in the header, so it isn't repeated here.
+    private var statusSubtitle: String? {
+        guard let update else { return statusDescription }
+        if !update.requiresInAppInstallation, store.sources(for: app) == [update.source] { return nil }
+        return primaryDescription
     }
 
     private var primaryDescription: String {
@@ -976,6 +938,50 @@ struct AppDetailView: View {
         return app.hasBuiltInUpdater ? "Built-in updater" : "No source"
     }
     private func detailLabel(_ text: String) -> some View { Text(text).foregroundStyle(.secondary) }
+}
+
+/// Release notes clipped to a few lines, with a toggle shown only when the
+/// notes are actually longer than the clipped text.
+private struct ReleaseNotesText: View {
+    let notes: String
+    @Binding var showsAll: Bool
+    @UpkeepState private var fullHeight: CGFloat = 0
+    @UpkeepState private var visibleHeight: CGFloat = 0
+    private static let collapsedLineLimit = 10
+
+    var body: some View {
+        let text = notes.isEmpty
+            ? AttributedString("No release notes available")
+            : ReleaseNotesFormatter.attributedString(from: notes)
+        VStack(alignment: .leading, spacing: 12) {
+            styled(Text(text))
+                .lineLimit(showsAll ? nil : Self.collapsedLineLimit)
+                .foregroundStyle(notes.isEmpty ? .secondary : .primary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { visibleHeight = $0 }
+                .background(alignment: .topLeading) {
+                    if !showsAll {
+                        styled(Text(text))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .hidden()
+                            .accessibilityHidden(true)
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fullHeight = $0 }
+                    }
+                }
+            if !notes.isEmpty, showsAll || fullHeight > visibleHeight + 1 {
+                Button(showsAll ? "Show Less" : "Read All Release Notes") {
+                    showsAll.toggle()
+                }
+                .buttonStyle(.link)
+                .font(.callout)
+            }
+        }
+    }
+
+    private func styled(_ text: Text) -> some View {
+        text.font(.callout).lineSpacing(3)
+    }
 }
 
 @MainActor
