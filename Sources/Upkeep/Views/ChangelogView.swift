@@ -118,6 +118,11 @@ private struct UpkeepRelease: Identifiable {
     static let fullChangelogURL = URL(string: "https://github.com/\(SelfUpdate.repository)/blob/main/CHANGELOG.md")!
 
     static let all = [
+        UpkeepRelease(version: "0.25.14", date: "23 November 2026", changes: [
+            "Checks Microsoft Office and Teams for updates on the channel Microsoft AutoUpdate uses, and opens AutoUpdate to install them.",
+            "Adds Claude Code installed with its native installer to developer packages.",
+            "Removes invisible characters from app names, and shows Apple utilities and Claude Code's helper app as managed."
+        ]),
         UpkeepRelease(version: "0.25.13", date: "23 November 2026", changes: [
             "Adds pixi, Krew, juliaup, opam, Dart, Poetry, Flutter, GHCup, swiftly, Conda, and SDKMAN! to developer packages.",
             "Keeps SDKMAN! candidates on their vendor, so a Temurin JDK is never offered a different distribution."

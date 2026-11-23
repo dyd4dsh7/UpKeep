@@ -4,6 +4,13 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+## 0.25.14 — 2026-11-23
+
+- Microsoft Office apps and Teams are now checked for updates. Upkeep reads the app ID and channel Microsoft AutoUpdate records for each app (Teams can follow a different channel from Office), compares the installed build with Microsoft's published manifest for that channel, and opens AutoUpdate to install. It never runs `msupdate`, which can start downloads.
+- Claude Code installed with its native installer is now listed under developer packages and checked on the release channel set in its settings (`latest` unless changed). Updates run `claude install <version>`.
+- App names no longer keep invisible formatting characters; WhatsApp's started with a hidden left-to-right mark.
+- Apple utilities in `/Applications/Utilities`, such as Feedback Assistant, are shown as updated with macOS, and the helper app Claude Code creates is shown as managed by Claude Code instead of having no update source.
+
 ## 0.25.13 — 2026-11-23
 
 - Added 11 developer package sources: pixi global packages, Krew kubectl plugins, juliaup Julia channels, opam packages, Dart global packages, Poetry (from the official installer), the Flutter SDK, GHCup Haskell tools, swiftly Swift toolchains, Conda base environments, and SDKMAN! candidates. Each lists what is installed, compares it with its own release source, and updates through the manager's own command.
