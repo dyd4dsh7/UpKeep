@@ -4,6 +4,10 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+## 0.25.24 — 2026-11-24
+
+- Apps, Homebrew packages, developer packages and local AI models show a short description of what they are, in the list under the name and in the details panel. Descriptions come from each package's registry, the App Store, Homebrew, Hugging Face, or Upkeep's own descriptions for runtimes, Apple apps and common model families, and are kept for 30 days. Where an item has no description, the list shows what it did before.
+
 ## 0.25.23 — 2026-11-24
 
 - After an uninstall, nothing is selected instead of the list jumping to another app, package or model. Selecting an item or changing section works as before.
