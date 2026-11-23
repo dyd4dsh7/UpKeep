@@ -4,6 +4,10 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+## 0.25.20 — 2026-11-23
+
+- Every app can now be uninstalled from its details panel, its options menu, or by right-clicking it in the list. Apps installed with Homebrew are removed with `brew uninstall --cask`; other apps are moved to the Trash, so they can be restored. A running app is quit first, and settings in your Library folder are kept. App Store and other administrator-owned apps are moved through Finder, which asks for your password. Upkeep itself and apps that come with macOS can't be uninstalled.
+
 ## 0.25.19 — 2026-11-23
 
 - Versions line up in app and source lists. A row without an update now shows its version in the same column as the current version of rows with one, instead of at the far right.
