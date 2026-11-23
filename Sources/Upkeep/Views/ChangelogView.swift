@@ -118,6 +118,9 @@ private struct UpkeepRelease: Identifiable {
     static let fullChangelogURL = URL(string: "https://github.com/\(SelfUpdate.repository)/blob/main/CHANGELOG.md")!
 
     static let all = [
+        UpkeepRelease(version: "0.25.29", date: "24 November 2026", changes: [
+            "Redesigns Duplicates and marks the copy Terminal or macOS uses, so you keep the right one."
+        ]),
         UpkeepRelease(version: "0.25.28", date: "24 November 2026", changes: [
             "Adds a Duplicates section to keep one copy of apps, tools and runtimes installed more than once.",
             "Shows release notes for Homebrew and developer packages, and lets you pin Homebrew formulae.",

@@ -4,6 +4,11 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+## 0.25.29 — 2026-11-24
+
+- Duplicates has a clearer layout: groups are cards under one heading per kind, each copy shows where it lives instead of repeating its name, and Keep is the main button only on the recommended copy.
+- The copy in use is marked: for tools, the one that runs first on the PATH your Terminal uses (including folders added by nvm and similar tools); for apps, the copy macOS opens by default. Upkeep recommends keeping that copy over the newest one, and warns before you remove it.
+
 ## 0.25.28 — 2026-11-24
 
 - A new Duplicates section lists apps installed in more than one place, command-line tools installed more than once (for example the same npm package under Homebrew's npm and under nvm), tools managed by two installers, and runtimes with several versions installed. Keep Only This removes the other copies with the normal uninstall steps, so apps go to the Trash and every removal is recorded in History. Runtime versions are removed one at a time, and Not a Duplicate hides a group.
