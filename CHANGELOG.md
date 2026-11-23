@@ -4,6 +4,12 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+## 0.25.15 — 2026-11-23
+
+- Homebrew updates are no longer stale. `brew info` never refreshes Homebrew's cached catalog, so Upkeep now runs `brew update --auto-update` (the refresh Homebrew runs before installs) before reading your packages, at most once an hour or every `HOMEBREW_AUTO_UPDATE_SECS`. Setting `HOMEBREW_NO_AUTO_UPDATE`, in the environment or a `brew.env` file, turns it off; Homebrew's own command ignores that setting, so Upkeep checks it.
+- macOS updates now include every product Software Update offers, such as Command Line Tools for Xcode and Safari. Upkeep used to ask only for macOS itself.
+- nvm itself is now checked against its latest GitHub release and updated with nvm's documented steps when its checkout is clean and on a release tag.
+
 ## 0.25.14 — 2026-11-23
 
 - Microsoft Office apps and Teams are now checked for updates. Upkeep reads the app ID and channel Microsoft AutoUpdate records for each app (Teams can follow a different channel from Office), compares the installed build with Microsoft's published manifest for that channel, and opens AutoUpdate to install. It never runs `msupdate`, which can start downloads.

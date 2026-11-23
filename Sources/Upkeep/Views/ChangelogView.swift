@@ -118,6 +118,11 @@ private struct UpkeepRelease: Identifiable {
     static let fullChangelogURL = URL(string: "https://github.com/\(SelfUpdate.repository)/blob/main/CHANGELOG.md")!
 
     static let all = [
+        UpkeepRelease(version: "0.25.15", date: "23 November 2026", changes: [
+            "Refreshes Homebrew's catalog before checking your packages, so Homebrew updates are no longer stale. Set HOMEBREW_NO_AUTO_UPDATE to turn this off.",
+            "Shows every Software Update product, including Command Line Tools for Xcode and Safari.",
+            "Checks nvm itself against its latest release."
+        ]),
         UpkeepRelease(version: "0.25.14", date: "23 November 2026", changes: [
             "Checks Microsoft Office and Teams for updates on the channel Microsoft AutoUpdate uses, and opens AutoUpdate to install them.",
             "Adds Claude Code installed with its native installer to developer packages.",
