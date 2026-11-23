@@ -4,6 +4,14 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+## 0.25.28 — 2026-11-24
+
+- A new Duplicates section lists apps installed in more than one place, command-line tools installed more than once (for example the same npm package under Homebrew's npm and under nvm), tools managed by two installers, and runtimes with several versions installed. Keep Only This removes the other copies with the normal uninstall steps, so apps go to the Trash and every removal is recorded in History. Runtime versions are removed one at a time, and Not a Duplicate hides a group.
+- Homebrew and developer packages show "What's New" from their GitHub releases for the version being installed, found through each package's registry.
+- Homebrew formulae can be pinned. A pinned formula stays at its installed version, counts as up to date, and is skipped by automatic updates until you unpin it.
+- When the mas command-line tool is installed, App Store updates install with sudo mas update in Terminal, which asks for your password, instead of opening the App Store.
+- "Upkeep found updates" notifications have Review and Update Recommended buttons. Update Recommended opens the review instead when an update would quit a running app or ask for a password.
+
 ## 0.25.27 — 2026-11-24
 
 - History now records uninstalls of apps, Homebrew packages, developer packages, and AI models. Items Upkeep moved to the Trash have a Put Back button that returns them, and any app data removed with them, to where they were. Homebrew and other package-manager uninstalls show the command that was run.
