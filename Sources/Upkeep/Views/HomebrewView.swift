@@ -4,6 +4,7 @@ struct HomebrewView: View {
     @UpkeepStoreReference private var store
     @EnvironmentObject private var settings: AppSettings
     @UpkeepState private var cleanupResult: PackageCleanupResult?
+    @UpkeepState private var packagePendingUninstall: HomebrewPackage?
 
     var body: some View {
         let packages = sortedPackages
@@ -38,6 +39,7 @@ struct HomebrewView: View {
                 systemImage: "shippingbox")
         }
         .toolbar { packageToolbar }
+        .homebrewUninstallConfirmation($packagePendingUninstall)
     }
 
     @ToolbarContentBuilder private var packageToolbar: some ToolbarContent {
@@ -125,7 +127,8 @@ struct HomebrewView: View {
                 isRefreshing: store.isRefreshing(package),
                 isUnmapped: store.isUnmapped(package),
                 exclusion: store.exclusion(for: package),
-                isWorking: store.isWorking(.homebrewPackage(package.id))
+                isWorking: store.isWorking(.homebrewPackage(package.id)),
+                requestUninstall: { packagePendingUninstall = package }
             )
             .equatable()
             .tag(package.id)
@@ -191,6 +194,7 @@ private struct PackageRow: View, Equatable {
     let isUnmapped: Bool
     let exclusion: UpdateExclusion?
     let isWorking: Bool
+    let requestUninstall: () -> Void
 
     nonisolated static func == (left: Self, right: Self) -> Bool {
         left.package == right.package
@@ -262,6 +266,11 @@ private struct PackageRow: View, Equatable {
                     ignoreFor: { store.ignore(package, duration: $0) }
                 )
             }
+            if store.canUninstall(package) {
+                Divider()
+                Button("Uninstall…", role: .destructive, action: requestUninstall)
+                    .disabled(isWorking)
+            }
         }
     }
 
@@ -279,6 +288,7 @@ struct PackageDetail: View {
     @UpkeepStoreReference private var store
     @EnvironmentObject private var settings: AppSettings
     @StateObject private var inspection = AppSecurityInspectionModel()
+    @UpkeepState private var packagePendingUninstall: HomebrewPackage?
     let package: HomebrewPackage?
 
     var body: some View {
@@ -300,6 +310,7 @@ struct PackageDetail: View {
                     CVESecuritySummary(item: CVEInventoryItem(package))
                     if package.isOutdated { updateCard(package) }
                     detailCard(package)
+                    if store.canUninstall(package) { uninstallButton(package) }
                     if package.isOutdated {
                         HomebrewImpactView(library: store.library, package: package, inventory: store.homebrewPackages)
                     }
@@ -322,6 +333,7 @@ struct PackageDetail: View {
                         PackageSecurityExplanation(manager: "Homebrew")
                     }
                 }
+            .homebrewUninstallConfirmation($packagePendingUninstall)
             .task(id: package.id) {
                 if let app = store.homebrewPackageApp(for: package) {
                     await inspection.load(app)
@@ -371,6 +383,29 @@ struct PackageDetail: View {
                     ignoreFor: { store.ignore(package, duration: $0) }
                 )
             }
+            if store.canUninstall(package) {
+                Divider()
+                Button("Uninstall…", role: .destructive) { packagePendingUninstall = package }
+                    .disabled(isUpdating)
+            }
+        }
+    }
+
+    private func uninstallButton(_ package: HomebrewPackage) -> some View {
+        let isWorking = store.isWorking(.homebrewPackage(package.id))
+        return HStack {
+            Spacer(minLength: 0)
+            Button(role: .destructive) { packagePendingUninstall = package } label: {
+                Label {
+                    WorkingActionLabel(isWorking: isWorking, idleTitle: "Uninstall", workingTitle: "Uninstalling…")
+                } icon: {
+                    Image(systemName: "trash")
+                }
+            }
+            .buttonStyle(.bordered)
+            .tint(.red)
+            .disabled(isWorking)
+            .help("Uninstall \(package.token) with Homebrew")
         }
     }
 
@@ -414,5 +449,45 @@ private struct FlowLayout: Layout {
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         var x = bounds.minX; var y = bounds.minY; var line: CGFloat = 0
         for view in subviews { let size = view.sizeThatFits(.unspecified); if x + size.width > bounds.maxX { x = bounds.minX; y += line + spacing; line = 0 }; view.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size)); x += size.width + spacing; line = max(line, size.height) }
+    }
+}
+
+private struct HomebrewUninstallConfirmation: ViewModifier {
+    @UpkeepStoreReference private var store
+    @Binding var package: HomebrewPackage?
+
+    func body(content: Content) -> some View {
+        content.confirmationDialog(
+            package.map { "Uninstall \($0.displayName)?" } ?? "Uninstall Package?",
+            isPresented: Binding(get: { package != nil }, set: { if !$0 { package = nil } }),
+            titleVisibility: .visible,
+            presenting: package
+        ) { package in
+            Button("Uninstall", role: .destructive) {
+                Task { await store.uninstallHomebrewPackage(package) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { package in
+            Text(message(for: package))
+        }
+    }
+
+    private func message(for package: HomebrewPackage) -> String {
+        var parts = ["Homebrew will uninstall the \(package.token) \(package.kind == .cask ? "cask" : "formula")."]
+        if let app = store.homebrewPackageApp(for: package) {
+            parts.append("This removes \(app.name)\(store.isRunning(app) ? ", which Upkeep will quit first" : "").")
+        }
+        let dependents = store.homebrewDependents(of: package)
+        if !dependents.isEmpty {
+            parts.append("\(dependents.map(\.displayName).formatted()) \(dependents.count == 1 ? "depends" : "depend") on it, so Homebrew may refuse.")
+        }
+        if package.kind == .cask { parts.append("Homebrew may ask for an administrator password in Terminal.") }
+        return parts.joined(separator: " ")
+    }
+}
+
+extension View {
+    func homebrewUninstallConfirmation(_ package: Binding<HomebrewPackage?>) -> some View {
+        modifier(HomebrewUninstallConfirmation(package: package))
     }
 }

@@ -2083,6 +2083,54 @@ final class UpkeepStore: ObservableObject {
         if selectedApp?.id == app.id { selectedApp = nil }
     }
 
+    func canUninstall(_ package: HomebrewPackage) -> Bool {
+        homebrewPackageApp(for: package)?.isUpkeep != true
+    }
+
+    /// Installed packages that list this one as a dependency.
+    func homebrewDependents(of package: HomebrewPackage) -> [HomebrewPackage] {
+        guard package.kind == .formula else { return [] }
+        return homebrewPackages.filter { $0.id != package.id && $0.dependencies.contains(package.token) }
+    }
+
+    func uninstallHomebrewPackage(_ package: HomebrewPackage) async {
+        await mutationCoordinator.withAccess(to: mutationTargets(for: .homebrew(package)), otherwise: ()) {
+            await uninstallHomebrewPackageUnlocked(package)
+        }
+    }
+
+    private func uninstallHomebrewPackageUnlocked(_ package: HomebrewPackage) async {
+        guard canUninstall(package) else {
+            errorMessage = "\(package.displayName) cannot be uninstalled by Upkeep."
+            return
+        }
+        let operationID = OperationID.homebrewPackage(package.id)
+        guard !isWorking(operationID) else { return }
+        updateExecutionState.activeOperations.insert(operationID)
+        defer { updateExecutionState.activeOperations.remove(operationID) }
+
+        let app = package.kind == .cask ? homebrewPackageApp(for: package) : nil
+        let succeeded = await execute(label: package.displayName, activity: operationID, metadata: [
+            "Source": "Homebrew \(package.kind.rawValue.lowercased()) \(package.token)",
+            "Version": package.installedVersion,
+            "Action": "Uninstall"
+        ]) {
+            if let app, self.dependencies.applicationLifecycle.runningApplications().contains(app) {
+                try await self.dependencies.applicationLifecycle.quit([app])
+            }
+            try await self.dependencies.homebrew.uninstall(package)
+        }
+        guard succeeded else { return }
+        homebrewPackages.removeAll { $0.id == package.id }
+        if selectedPackageID == package.id { selectedPackageID = nil }
+        if let app {
+            apps.removeAll { $0.id == app.id }
+            updates.removeAll { $0.app.id == app.id }
+            adoptableApps.removeAll { $0.app.id == app.id }
+            if selectedApp?.id == app.id { selectedApp = nil }
+        }
+    }
+
     @discardableResult
     func scanLocalModels(runtime: LocalModelRuntime? = nil) async -> LocalModelClient.Report? {
         let targets = Set((runtime.map { [$0] } ?? LocalModelRuntime.allCases).map(MutationTarget.modelRuntime))

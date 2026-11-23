@@ -2058,3 +2058,66 @@ func cancelledDirectMutationReconcilesObservedVersionWithoutReportingSuccess(bat
     #expect(await f.uninstaller.trashed.isEmpty)
     #expect(f.store.apps == [app])
 }
+
+private actor UninstallRecordingBrew: HomebrewManaging {
+    var uninstalled: [String] = []
+    let fails: Bool
+    init(fails: Bool = false) { self.fails = fails }
+    func package(token: String, kind: HomebrewPackageKind, includePrereleases: Bool) async throws -> HomebrewPackage? { nil }
+    func upgrade(_ package: HomebrewPackage) async throws {}
+    func adopt(_ item: AdoptableApp) async throws {}
+    func installOrReplace(_ item: AdoptableApp) async throws {}
+    func upgradeCask(token: String) async throws {}
+    func uninstall(_ package: HomebrewPackage) async throws {
+        if fails { throw ReviewError.historyWrite }
+        uninstalled.append(package.id)
+    }
+}
+
+private func reviewPackage(_ token: String, kind: HomebrewPackageKind, name: String? = nil,
+                           dependencies: [String] = []) -> HomebrewPackage {
+    HomebrewPackage(token: token, displayName: name ?? token, description: nil, homepage: nil, license: nil,
+                    installedVersion: "1.0", currentVersion: "1.0", kind: kind, isOutdated: false,
+                    isDependency: false, dependencies: dependencies)
+}
+
+@MainActor
+@Test func uninstallingCaskQuitsItsAppAndForgetsBoth() async {
+    let brew = UninstallRecordingBrew()
+    let f = ReviewFixture(homebrew: brew)
+    defer { f.cleanUp() }
+    let app = reviewApp()
+    let cask = reviewPackage("review-fixture", kind: .cask, name: app.name)
+    f.store.apps = [app]; f.store.homebrewPackages = [cask]
+    f.store.selectedPackageID = cask.id; f.store.selectedApp = app
+    f.lifecycle.running = [app]
+    await f.store.uninstallHomebrewPackage(cask)
+    #expect(await brew.uninstalled == [cask.id])
+    #expect(f.lifecycle.quitCalls == [[app]])
+    #expect(f.store.homebrewPackages.isEmpty)
+    #expect(f.store.apps.isEmpty)
+    #expect(f.store.selectedPackageID == nil)
+    #expect(f.store.selectedApp == nil)
+}
+
+@MainActor
+@Test func failedFormulaUninstallKeepsThePackage() async {
+    let f = ReviewFixture(homebrew: UninstallRecordingBrew(fails: true))
+    defer { f.cleanUp() }
+    let formula = reviewPackage("libfixture", kind: .formula)
+    f.store.homebrewPackages = [formula]
+    await f.store.uninstallHomebrewPackage(formula)
+    #expect(f.store.homebrewPackages == [formula])
+    #expect(f.store.errorMessage != nil)
+}
+
+@MainActor
+@Test func formulaDependentsAreListed() {
+    let f = ReviewFixture()
+    defer { f.cleanUp() }
+    let library = reviewPackage("libfixture", kind: .formula)
+    let tool = reviewPackage("toolfixture", kind: .formula, dependencies: ["libfixture"])
+    f.store.homebrewPackages = [library, tool]
+    #expect(f.store.homebrewDependents(of: library) == [tool])
+    #expect(f.store.homebrewDependents(of: tool).isEmpty)
+}
