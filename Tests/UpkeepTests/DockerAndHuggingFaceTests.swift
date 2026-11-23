@@ -47,6 +47,11 @@ import Testing
 @Test func stoppedDockerDaemonIsNotAFailure() {
     #expect(dockerDaemonIsUnavailable(Data(
         "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?".utf8)))
+    // Docker 28+ wording when Docker Desktop is quit.
+    #expect(dockerDaemonIsUnavailable(Data("""
+        failed to connect to the docker API at unix:///Users/test/.docker/run/docker.sock; check if the path is correct \
+        and if the daemon is running: dial unix /Users/test/.docker/run/docker.sock: connect: no such file or directory
+        """.utf8)))
     #expect(!dockerDaemonIsUnavailable(Data("permission denied".utf8)))
 }
 

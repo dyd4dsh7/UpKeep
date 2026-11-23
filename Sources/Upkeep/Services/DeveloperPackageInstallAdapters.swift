@@ -130,6 +130,21 @@ enum DeveloperPackageInstallAdapters {
                     package.executablePath, package.registryIdentifier ?? package.name, version],
                 failureMessage: "SDKMAN! update failed"
             )
+        },
+        // A new patch installs beside the old one; `--skip-existing` makes a retry harmless.
+        .pyenv: adapter { command($0, ["install", "--skip-existing", $1], "Python install failed") },
+        .rbenv: adapter { command($0, ["install", "--skip-existing", $1], "Ruby install failed") },
+        .googleCloud: adapter { command($0, ["components", "update", "--version=\($1)", "--quiet"], "Google Cloud CLI update failed") },
+        .azureCLI: adapter { command($0, ["extension", "add", "--name", $0.registryIdentifier ?? $0.name, "--version", $1,
+                                          "--upgrade", "--yes"], "Azure CLI extension update failed") },
+        // Downloads the runtime that matches the selected Xcode's SDK, which is
+        // the build Upkeep offers.
+        .xcodeSimulators: adapter { package, _ in
+            .command(
+                executable: URL(fileURLWithPath: package.executablePath),
+                arguments: ["xcodebuild", "-downloadPlatform", package.registryIdentifier ?? package.name],
+                failureMessage: "Simulator runtime download failed"
+            )
         }
     ]
 

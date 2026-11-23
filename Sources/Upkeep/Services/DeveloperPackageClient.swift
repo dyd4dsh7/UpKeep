@@ -85,6 +85,11 @@ struct DeveloperPackageClient: Sendable {
         if enabledManagers.contains(.sdkman), let script = sdkmanInitScript() { tools.append((.sdkman, script)) }
         if enabledManagers.contains(.claudeCode), let launcher = claudeCodeNativeLauncher() { tools.append((.claudeCode, launcher)) }
         if enabledManagers.contains(.nvm), let script = nvmCheckoutScript() { tools.append((.nvm, script)) }
+        if enabledManagers.contains(.pyenv), let pyenv = pyenvExecutable() { tools.append((.pyenv, pyenv)) }
+        if enabledManagers.contains(.rbenv), let rbenv = rbenvExecutable() { tools.append((.rbenv, rbenv)) }
+        if enabledManagers.contains(.googleCloud), let gcloud = googleCloudExecutable() { tools.append((.googleCloud, gcloud)) }
+        appendDetected(.azureCLI, named: "az", extra: [], enabledManagers: enabledManagers, to: &tools)
+        if enabledManagers.contains(.xcodeSimulators), let xcrun = xcodeSimulatorExecutable() { tools.append((.xcodeSimulators, xcrun)) }
 
         var seenTargets = Set<String>()
         tools = tools.filter { seenTargets.insert("\($0.0.rawValue):\($0.1)").inserted }
@@ -253,7 +258,8 @@ struct DeveloperPackageClient: Sendable {
             discovered = []
         case .dart:
             discovered = await pubDevVersions(package.registryIdentifier ?? package.name)
-        case .pixi, .krew, .juliaup, .opam, .poetry, .flutter, .ghcup, .swiftly, .conda, .sdkman, .claudeCode, .nvm:
+        case .pixi, .krew, .juliaup, .opam, .poetry, .flutter, .ghcup, .swiftly, .conda, .sdkman, .claudeCode, .nvm,
+             .pyenv, .rbenv, .googleCloud, .azureCLI, .xcodeSimulators:
             discovered = [package.currentVersion, package.latestVersion]
         case .githubCLI:
             discovered = await latestPublisherReleaseVersions(repository: package.registryIdentifier ?? package.name)
@@ -513,9 +519,14 @@ func scanNPM(_ path: String) async -> ManagerScanResult {
         return failedManagerScan(.npm, command: "inventory", result: installedResult)
     }
     let outdated = try? JSONDecoder().decode([String: NPMOutdated].self, from: outdatedResult.data)
+    var latestNPM = outdated?["npm"]?.latest
+    if let current = installed["npm"]?.version, let latest = latestNPM, latest != current {
+        latestNPM = await newestNPMSupportingNode(nextTo: path, current: current, latest: latest)
+    }
     let packages = installed.map { name, entry in
         DeveloperPackage(
-            name: name, currentVersion: entry.version, latestVersion: outdated?[name]?.latest ?? entry.version,
+            name: name, currentVersion: entry.version,
+            latestVersion: (name == "npm" ? latestNPM : outdated?[name]?.latest) ?? entry.version,
             manager: .npm, executablePath: path, installationContext: nvmInstallationContext(for: path)
         )
     }
@@ -827,10 +838,19 @@ func parseDockerImageList(_ data: Data) -> [DockerImageRow] {
 }
 
 /// A stopped Docker daemon is normal on a Mac, so it is not a failed check.
+/// Docker Desktop that isn't running is not a failure; there is nothing to
+/// list. Docker 28 and later word this "failed to connect to the docker API …
+/// check if … the daemon is running" instead of "Cannot connect to the Docker
+/// daemon".
 func dockerDaemonIsUnavailable(_ output: Data) -> Bool {
-    let text = String(decoding: output, as: UTF8.self)
-    return text.contains("Cannot connect to the Docker daemon") || text.contains("Is the docker daemon running")
-        || text.contains("error during connect")
+    let text = String(decoding: output, as: UTF8.self).lowercased()
+    return [
+        "cannot connect to the docker daemon",
+        "is the docker daemon running",
+        "failed to connect to the docker api",
+        "if the daemon is running",
+        "error during connect"
+    ].contains { text.contains($0) }
 }
 
 func scanDockerImages(_ path: String, registry: DockerImageRegistry = DockerImageRegistry()) async -> ManagerScanResult {
@@ -1005,7 +1025,51 @@ func scanMacPorts(_ path: String) async -> ManagerScanResult {
             canUpdateAutomatically: false
         )
     }
-    return ManagerScanResult(manager: .macPorts, packages: packages, warning: nil)
+    let prefix = URL(fileURLWithPath: path).deletingLastPathComponent().deletingLastPathComponent()
+    return ManagerScanResult(
+        manager: .macPorts, packages: packages,
+        warning: macPortsIndexWarning(lastRefreshed: macPortsIndexDate(sources: prefix.appendingPathComponent("var/macports/sources")))
+    )
+}
+
+/// `port outdated` compares against the local ports tree, which only
+/// `sudo port selfupdate` (or `sync`) refreshes. Upkeep can't run that without
+/// an administrator password, so it says when the tree is old.
+let macPortsIndexMaximumAge: TimeInterval = 14 * 24 * 60 * 60
+
+func macPortsIndexWarning(lastRefreshed: Date?, now: Date = Date()) -> String? {
+    guard let lastRefreshed else { return nil }
+    let age = now.timeIntervalSince(lastRefreshed)
+    guard age > macPortsIndexMaximumAge else { return nil }
+    let days = Int(age / (24 * 60 * 60))
+    return "MacPorts' list of ports was last refreshed \(days) days ago, so newer versions may be missing. "
+        + "Run `sudo port selfupdate` in Terminal to refresh it."
+}
+
+/// The newest `PortIndex` under MacPorts' sources folder. Each source tree
+/// keeps one at its root (`rsync.macports.org/macports/release/tarballs/ports`),
+/// so the search stops at the first `PortIndex` on each branch rather than
+/// walking thousands of port folders.
+func macPortsIndexDate(sources: URL, maximumDepth: Int = 6) -> Date? {
+    let fileManager = FileManager.default
+    var newest: Date?
+    var queue: [(URL, Int)] = [(sources, 0)]
+    while !queue.isEmpty {
+        let (directory, depth) = queue.removeFirst()
+        let index = directory.appendingPathComponent("PortIndex")
+        if let date = (try? fileManager.attributesOfItem(atPath: index.path))?[.modificationDate] as? Date {
+            newest = max(newest ?? date, date)
+            continue
+        }
+        guard depth < maximumDepth,
+              let children = try? fileManager.contentsOfDirectory(
+                at: directory, includingPropertiesForKeys: [.isDirectoryKey], options: .skipsHiddenFiles)
+        else { continue }
+        for child in children where (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+            queue.append((child, depth + 1))
+        }
+    }
+    return newest
 }
 
 func scanNixProfile(_ path: String) async -> ManagerScanResult {
@@ -1306,15 +1370,32 @@ func latestNodeRelease(in releases: [String], installed: String, preferLatestMaj
 /// the system Ruby, whose gems macOS ships and updates; it is used only when
 /// no other Ruby is installed. Homebrew's Ruby is keg-only, so its `opt` path
 /// is checked as well as the linked one.
-func rubyGemExecutableCandidates(home: String = NSHomeDirectory()) -> [String] {
-    [
-        home + "/.rbenv/shims/gem",
+///
+/// rbenv's shim runs whichever Ruby `rbenv global` names. Upkeep runs outside
+/// any project, so that is the version in `<rbenv root>/version`; with no file
+/// or `system` the shim runs `/usr/bin/gem` while looking like a user Ruby, so
+/// it is skipped.
+func rubyGemExecutableCandidates(
+    home: String = NSHomeDirectory(),
+    environment: [String: String] = ProcessInfo.processInfo.environment
+) -> [String] {
+    let rbenvRoot = environment["RBENV_ROOT"].flatMap { $0.isEmpty ? nil : $0 } ?? home + "/.rbenv"
+    let rbenvShim = rbenvGlobalVersion(root: rbenvRoot).map { _ in rbenvRoot + "/shims/gem" }
+    return (rbenvShim.map { [$0] } ?? []) + [
         "/opt/homebrew/opt/ruby/bin/gem",
         "/usr/local/opt/ruby/bin/gem",
         "/opt/homebrew/bin/gem",
         "/usr/local/bin/gem",
         "/usr/bin/gem"
     ]
+}
+
+/// The Ruby `rbenv global` selects, or nil when it is unset or `system`.
+func rbenvGlobalVersion(root: String) -> String? {
+    guard let contents = try? String(contentsOfFile: root + "/version", encoding: .utf8) else { return nil }
+    let version = contents.split(whereSeparator: \.isNewline).first
+        .map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+    return version.isEmpty || version == "system" ? nil : version
 }
 
 private func executable(named name: String, extra: [String]) -> String? {
@@ -1701,6 +1782,147 @@ actor RegistryRequestCache {
             entries[oldKey] = nil
             totalBytes -= entry.data.count
         }
+    }
+}
+
+/// `npm outdated` offers npm's newest release whatever Node runs it, but each
+/// npm major supports only some Node versions (npm 12 needs Node 22.22.2,
+/// 24.15 or 26+). The newest npm whose `engines.node` accepts the Node beside
+/// this npm is offered instead. Without that Node version or the registry's
+/// data, npm's own answer is kept.
+private func newestNPMSupportingNode(nextTo npmPath: String, current: String, latest: String) async -> String {
+    let node = URL(fileURLWithPath: npmPath).deletingLastPathComponent().appendingPathComponent("node")
+    guard FileManager.default.isExecutableFile(atPath: node.path) else { return latest }
+    let result = await captureDeveloperCommandAsync(node, ["--version"])
+    guard result.status == 0,
+          let output = String(data: result.data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+          !output.isEmpty,
+          let url = URL(string: "https://registry.npmjs.org/npm")
+    else { return latest }
+    var request = URLRequest(url: url)
+    request.timeoutInterval = 20
+    request.setValue("Upkeep/0.9", forHTTPHeaderField: "User-Agent")
+    // The abbreviated document still carries `engines` and is a fifth the size.
+    request.setValue("application/vnd.npm.install-v1+json", forHTTPHeaderField: "Accept")
+    guard let data = await RegistryRequestCache.shared.data(for: request, key: "GET-abbreviated:\(url.absoluteString)"),
+          let document = try? JSONDecoder().decode(NPMEnginesDocument.self, from: data)
+    else { return latest }
+    let engines = document.versions.mapValues { $0.engines?.node }
+    return newestPackageVersion(
+        engines: engines, nodeVersion: output.trimmingCharacters(in: CharacterSet(charactersIn: "vV")),
+        current: current, latest: latest
+    )
+}
+
+/// The newest stable version up to `latest` whose Node range accepts
+/// `nodeVersion`, or `current` when none newer does.
+func newestPackageVersion(engines: [String: String?], nodeVersion: String, current: String, latest: String) -> String {
+    guard engines[latest] != nil else { return latest }
+    let candidates = VersionComparator.sortedNewestFirst(Set(engines.keys)).filter {
+        !VersionComparator.isPrerelease($0)
+            && !VersionComparator.isNewer($0, than: latest)
+            && VersionComparator.isNewer($0, than: current)
+    }
+    return candidates.first { version in
+        guard let range = engines[version] ?? nil else { return true }
+        return NodeEngineRange.satisfies(nodeVersion, range: range)
+    } ?? current
+}
+
+/// The subset of npm's semver ranges used in `engines.node`: `||` alternatives,
+/// space-separated comparators (`>=`, `>`, `<=`, `<`, `=`), caret, tilde,
+/// `x` wildcards and hyphen ranges. A range it can't read is treated as
+/// satisfied, matching npm, which only warns about engines.
+enum NodeEngineRange {
+    static func satisfies(_ version: String, range: String) -> Bool {
+        guard let installed = triple(version) else { return true }
+        let alternatives = range.components(separatedBy: "||")
+        return alternatives.contains { alternative in
+            let trimmed = alternative.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed == "*" { return true }
+            guard let comparators = comparators(trimmed) else { return true }
+            return comparators.allSatisfy { $0(installed) }
+        }
+    }
+
+    private typealias Comparator = ([Int]) -> Bool
+
+    private static func comparators(_ value: String) -> [Comparator]? {
+        let parts = value.split(separator: " ").map(String.init)
+        if parts.count == 3, parts[1] == "-", let low = triple(parts[0]), let high = triple(parts[2]) {
+            return [{ compare($0, low) >= 0 }, { compare($0, high) <= 0 }]
+        }
+        var result: [Comparator] = []
+        for part in parts {
+            guard let comparator = comparator(part) else { return nil }
+            result.append(contentsOf: comparator)
+        }
+        return result
+    }
+
+    private static func comparator(_ token: String) -> [Comparator]? {
+        for op in [">=", "<=", ">", "<", "="] where token.hasPrefix(op) {
+            guard let bound = triple(String(token.dropFirst(op.count))) else { return nil }
+            switch op {
+            case ">=": return [{ compare($0, bound) >= 0 }]
+            case "<=": return [{ compare($0, bound) <= 0 }]
+            case ">": return [{ compare($0, bound) > 0 }]
+            case "<": return [{ compare($0, bound) < 0 }]
+            default: return [{ compare($0, bound) == 0 }]
+            }
+        }
+        if token.hasPrefix("^") {
+            guard let low = triple(String(token.dropFirst())) else { return nil }
+            let high = low[0] > 0 ? [low[0] + 1, 0, 0] : low[1] > 0 ? [0, low[1] + 1, 0] : [0, 0, low[2] + 1]
+            return [{ compare($0, low) >= 0 }, { compare($0, high) < 0 }]
+        }
+        if token.hasPrefix("~") {
+            guard let low = triple(String(token.dropFirst())) else { return nil }
+            return [{ compare($0, low) >= 0 }, { compare($0, [low[0], low[1] + 1, 0]) < 0 }]
+        }
+        // `20`, `20.x` and `20.5.x` match within that major or minor.
+        let fields = token.split(separator: ".").map(String.init)
+        let numbers = fields.prefix { Int($0) != nil }.compactMap(Int.init)
+        guard !numbers.isEmpty, fields.dropFirst(numbers.count).allSatisfy({ ["x", "X", "*"].contains($0) }) else { return nil }
+        if numbers.count >= 3 { let exact = Array(numbers.prefix(3)); return [{ $0 == exact }] }
+        return [{ Array($0.prefix(numbers.count)) == numbers }]
+    }
+
+    private static func triple(_ value: String) -> [Int]? {
+        let core = value.trimmingCharacters(in: CharacterSet(charactersIn: "vV= "))
+            .split(separator: "-").first.map(String.init) ?? ""
+        var numbers: [Int] = []
+        for field in core.split(separator: ".") {
+            if ["x", "X", "*"].contains(String(field)) { break }
+            guard let number = Int(field) else { return nil }
+            numbers.append(number)
+        }
+        guard !numbers.isEmpty, numbers.count <= 3 else { return nil }
+        return numbers + Array(repeating: 0, count: 3 - numbers.count)
+    }
+
+    private static func compare(_ lhs: [Int], _ rhs: [Int]) -> Int {
+        for (left, right) in zip(lhs, rhs) where left != right { return left < right ? -1 : 1 }
+        return 0
+    }
+}
+
+private struct NPMEnginesDocument: Decodable {
+    let versions: [String: Version]
+    struct Version: Decodable {
+        let engines: Engines?
+        struct Engines: Decodable {
+            let node: String?
+            init(from decoder: Decoder) throws {
+                // Old releases list engines as an array or with non-string values.
+                node = try? decoder.container(keyedBy: CodingKeys.self).decodeIfPresent(String.self, forKey: .node)
+            }
+            enum CodingKeys: String, CodingKey { case node }
+        }
+        init(from decoder: Decoder) throws {
+            engines = try? decoder.container(keyedBy: CodingKeys.self).decodeIfPresent(Engines.self, forKey: .engines)
+        }
+        enum CodingKeys: String, CodingKey { case engines }
     }
 }
 

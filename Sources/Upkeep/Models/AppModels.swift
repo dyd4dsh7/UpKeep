@@ -1000,17 +1000,24 @@ enum DeveloperPackageManager: String, Codable, CaseIterable, Identifiable, Senda
     case sdkman = "SDKMAN!"
     case claudeCode = "Claude Code"
     case nvm = "nvm"
+    case pyenv = "pyenv"
+    case rbenv = "rbenv"
+    case googleCloud = "Google Cloud CLI"
+    case azureCLI = "Azure CLI Extensions"
+    case xcodeSimulators = "Xcode Simulator Runtimes"
     var id: Self { self }
     /// Docker images change by content digest, and SDKMAN identifiers carry a
     /// vendor suffix ("21.0.5-tem") that reads like a prerelease. Their
     /// scanners only offer a newer target, so any difference is an update.
-    var comparesExactVersions: Bool { self == .dockerImages || self == .sdkman }
+    /// Simulator runtimes are named by build ("24B8117"), which has no order.
+    var comparesExactVersions: Bool { self == .dockerImages || self == .sdkman || self == .xcodeSimulators }
     var belongsToJavaScriptEcosystem: Bool {
         switch self {
         case .node, .bun, .deno, .npm, .pnpm, .yarn, .volta, .fnm: true
         case .vsCode, .uv, .pipx, .python, .rubyGems, .rustup, .cargo,
              .githubCLI, .go, .composer, .dotnet, .macPorts, .nix, .mise, .asdf, .dockerImages,
-             .pixi, .krew, .juliaup, .opam, .dart, .poetry, .flutter, .ghcup, .swiftly, .conda, .sdkman, .claudeCode, .nvm: false
+             .pixi, .krew, .juliaup, .opam, .dart, .poetry, .flutter, .ghcup, .swiftly, .conda, .sdkman, .claudeCode, .nvm,
+             .pyenv, .rbenv, .googleCloud, .azureCLI, .xcodeSimulators: false
         }
     }
     var assetName: String {
@@ -1052,6 +1059,11 @@ enum DeveloperPackageManager: String, Codable, CaseIterable, Identifiable, Senda
         case .sdkman: "sdkman"
         case .claudeCode: "claude"
         case .nvm: "nvm"
+        case .pyenv: "pyenv"
+        case .rbenv: "rbenv"
+        case .googleCloud: "googlecloud"
+        case .azureCLI: "azure"
+        case .xcodeSimulators: "xcode"
         }
     }
     var packageLabel: String {
@@ -1090,6 +1102,11 @@ enum DeveloperPackageManager: String, Codable, CaseIterable, Identifiable, Senda
         case .sdkman: "SDKMAN! candidate"
         case .claudeCode: "Command-line coding agent"
         case .nvm: "Node.js version manager"
+        case .pyenv: "pyenv Python version"
+        case .rbenv: "rbenv Ruby version"
+        case .googleCloud: "Cloud command-line tools"
+        case .azureCLI: "Azure CLI extension"
+        case .xcodeSimulators: "Simulator runtime"
         }
     }
     var homepage: URL? {
@@ -1131,6 +1148,11 @@ enum DeveloperPackageManager: String, Codable, CaseIterable, Identifiable, Senda
         case .sdkman: URL(string: "https://sdkman.io")
         case .claudeCode: URL(string: "https://code.claude.com/docs/en/setup")
         case .nvm: URL(string: "https://github.com/nvm-sh/nvm")
+        case .pyenv: URL(string: "https://github.com/pyenv/pyenv")
+        case .rbenv: URL(string: "https://github.com/rbenv/rbenv")
+        case .googleCloud: URL(string: "https://cloud.google.com/sdk")
+        case .azureCLI: URL(string: "https://learn.microsoft.com/cli/azure/azure-cli-extensions-list")
+        case .xcodeSimulators: URL(string: "https://developer.apple.com/documentation/xcode/installing-additional-simulator-runtimes")
         }
     }
 }

@@ -537,6 +537,11 @@ private struct DeveloperPackageDetailContent: View {
         case .sdkman: return URL(string: "https://sdkman.io/sdks/\(encoded)")
         case .claudeCode: return URL(string: "https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md")
         case .nvm: return URL(string: "https://github.com/nvm-sh/nvm/releases")
+        case .pyenv: return URL(string: "https://www.python.org/downloads/")
+        case .rbenv: return URL(string: "https://www.ruby-lang.org/en/downloads/releases/")
+        case .googleCloud: return URL(string: "https://cloud.google.com/sdk/docs/release-notes")
+        case .azureCLI: return URL(string: "https://learn.microsoft.com/cli/azure/azure-cli-extensions-list")
+        case .xcodeSimulators: return URL(string: "https://developer.apple.com/documentation/xcode/installing-additional-simulator-runtimes")
         }
     }
 

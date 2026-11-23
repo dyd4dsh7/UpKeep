@@ -76,7 +76,12 @@ enum DeveloperPackageScanAdapters {
         .conda: adapter(.conda) { path, _ in await scanConda(path) },
         .sdkman: adapter(.sdkman) { path, _ in await scanSDKMAN(path) },
         .claudeCode: adapter(.claudeCode) { path, _ in await scanClaudeCode(path) },
-        .nvm: adapter(.nvm) { path, _ in await scanNVM(path) }
+        .nvm: adapter(.nvm) { path, _ in await scanNVM(path) },
+        .pyenv: adapter(.pyenv) { path, _ in await scanPyenv(path) },
+        .rbenv: adapter(.rbenv) { path, _ in await scanRbenv(path) },
+        .googleCloud: adapter(.googleCloud) { path, _ in await scanGoogleCloud(path) },
+        .azureCLI: adapter(.azureCLI) { path, _ in await scanAzureExtensions(path) },
+        .xcodeSimulators: adapter(.xcodeSimulators) { path, _ in await scanXcodeSimulatorRuntimes(path) }
     ]
 
     private static func adapter(

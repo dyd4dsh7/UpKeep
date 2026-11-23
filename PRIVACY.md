@@ -20,14 +20,18 @@ Edge, JetBrains, Zoom, Slack, and 1Password release services (which receive only
 a product code or platform), Microsoft AutoUpdate's public update manifests
 (which receive an app ID and channel), Claude Code's release service, Homebrew,
 language package registries (including pub.dev, the Krew plugin index on GitHub,
-Flutter's release list, and SDKMAN!'s version service), editor extension
+Flutter's release list, SDKMAN!'s version service, and the Google Cloud CLI
+release channel), Apple's simulator runtime list, editor extension
 galleries (the Visual Studio Marketplace, Open VSX, and Cursor's and Windsurf's
 marketplaces, which receive extension IDs), Docker image registries (which
 receive image names and digests, and only official names for unqualified
 images), GitHub's copy of Docker's official image list, Ollama's registry, and
 Hugging Face. Opening an external updater or a project page invokes that
 service's own privacy policy. Package managers and model runtimes continue to
-manage their own authentication and storage.
+manage their own authentication and storage. Tools Upkeep runs to check for
+updates contact their own services under your settings for that tool; for
+example, `az extension list-available` reads Microsoft's extension index and
+follows your Azure CLI telemetry setting.
 
 CVE checks run after launch, scheduled, and manual inventory refreshes when
 **Automatically check CVEs** is enabled in Settings (enabled by default). They

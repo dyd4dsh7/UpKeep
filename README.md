@@ -25,7 +25,7 @@
 
 ## Why Upkeep
 
-- **One list for everything.** Apps, Homebrew, macOS, packages from 37 developer
+- **One list for everything.** Apps, Homebrew, macOS, packages from 42 developer
   tools (npm, pip, Cargo, Go, Docker, Conda, and more), and local AI models share one
   **All Updates** view, with a live count in the toolbar, menu bar, and Dock.
 - **Uses what you already have.** Upkeep works through the tools installed on your
@@ -73,7 +73,7 @@ If a release has no build attached, [build from source](#build-from-source).
 | **Homebrew** | Installed formulae and casks, including dependencies |
 | **GitHub Releases** | Repos found in app or Electron update metadata, trusted mappings, or a repo you verify |
 | **macOS** | Apple's Software Update catalog (macOS, Safari, and Command Line Tools for Xcode) and full installers |
-| **Developer packages** | Global packages from 37 managers, including npm, pnpm, Yarn, Bun, pip, uv, Conda, RubyGems, Cargo, Go, and Docker images |
+| **Developer packages** | Global packages from 42 managers, including npm, pnpm, Yarn, Bun, pip, uv, Conda, RubyGems, Cargo, Go, and Docker images |
 | **Local AI models** | Ollama registry manifests, LM Studio's Hugging Face repos, and the Hugging Face cache |
 
 Apps with their own updater are recognised and handed to it: TestFlight, Setapp,
@@ -156,14 +156,16 @@ a Homebrew `brew.env` file. Nothing is installed or upgraded.
 Upkeep lists global packages for the managers you have installed:
 
 - **JavaScript:** Node.js, nvm itself, Bun, Deno, npm, pnpm, Yarn, Volta, and fnm
-- **Python:** Python/pip, pipx, uv, Poetry (official installer), Conda base
-  environments, and pixi global packages
-- **Ruby and Rust:** RubyGems, Rustup, and Cargo
+- **Python:** Python/pip, pipx, uv, pyenv Python versions, Poetry (official
+  installer), Conda base environments, and pixi global packages
+- **Ruby and Rust:** RubyGems, rbenv Ruby versions, Rustup, and Cargo
 - **Other tools:** Go, Composer, .NET tools, GitHub CLI, and editor extensions for
   VS Code, Cursor, VSCodium, and Windsurf (now Devin Desktop)
 - **Language toolchains:** Flutter, Dart global packages, swiftly (Swift),
   juliaup (Julia), GHCup (Haskell), opam (OCaml), and SDKMAN! (Java and JVM tools)
-- **Kubernetes:** Krew kubectl plugins
+- **Kubernetes and cloud:** Krew kubectl plugins, the Google Cloud CLI, and Azure
+  CLI extensions
+- **Xcode:** simulator runtimes for the selected Xcode
 - **AI tools:** Claude Code installed with its native installer, on the release
   channel set in its settings (npm and Homebrew copies update with those managers)
 - **System managers:** MacPorts, Nix, mise, and asdf
@@ -177,7 +179,16 @@ with nvm's documented steps, only when the checkout is clean and on a release
 tag. Some managers have their own update rules. swiftly toolchains update within
 their minor release, GHCup tools are compared with GHCup's recommended version,
 SDKMAN! candidates keep their vendor (a Temurin JDK is not offered Zulu), and
-opam packages follow your last `opam update`. Poetry is checked only when the
+opam packages follow your last `opam update`. pyenv and rbenv versions are
+grouped by release line (Python 3.12, Ruby 3.4) and offered the newest patch the
+tool can install; the new patch is installed beside the old one, which you can
+then remove. RubyGems checks the Ruby rbenv or Homebrew provides before macOS's
+own. npm is offered the newest release that supports the Node.js beside it. A
+simulator runtime is offered an update only when it is a beta or release
+candidate for the version the selected Xcode now ships; the update downloads the
+matching runtime with `xcodebuild -downloadPlatform`. MacPorts warns when its
+ports list has not been refreshed for two weeks, since only `sudo port
+selfupdate` can refresh it. Poetry is checked only when the
 official installer put it there; Homebrew and pipx copies update with those
 managers.
 
