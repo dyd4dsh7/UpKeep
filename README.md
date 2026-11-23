@@ -7,7 +7,7 @@
 
 # Upkeep
 
-**Keep your Mac's apps, packages, and developer tools up to date from one native app.**
+**Keep your Mac's apps, packages, and developer tools up to date, and tidy, from one native app.**
 
 [![Latest release](https://img.shields.io/github/v/release/dyd4dsh7/UpKeep?label=release)](https://github.com/dyd4dsh7/UpKeep/releases/latest)
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black?logo=apple)
@@ -30,11 +30,19 @@
   **All Updates** view, with a live count in the toolbar, menu bar, and Dock.
 - **Uses what you already have.** Upkeep works through the tools installed on your
   Mac. Homebrew and developer checks are opt-in.
-- **Updates from the real source.** App Store updates open in the App Store,
-  Sparkle downloads come from the developer's own feed, and Homebrew upgrades run
-  through your local Homebrew. Upkeep has no download servers of its own.
-- **Safe by default.** App updates are backed up first and can be restored from
-  History. Batch review only preselects stable updates Upkeep can finish itself.
+- **Updates from the real source.** App Store updates open in the App Store (or
+  install with [`mas`](https://github.com/mas-cli/mas) when you have it), Sparkle
+  downloads come from the developer's own feed, and Homebrew upgrades run through
+  your local Homebrew. Upkeep has no download servers of its own.
+- **Knows what everything is.** Each app, package, and model shows a one-line
+  description, and packages show the release notes for the version on offer.
+- **Tidy up as well as update.** Uninstall apps, Homebrew packages, developer
+  packages, and AI models, optionally with an app's leftover data, and find tools
+  and runtimes installed more than once.
+- **Safe by default.** App updates are backed up first, and uninstalled apps go
+  to the Trash; History can restore both. Batch review only preselects stable
+  updates Upkeep can finish itself, and automatic updates are off until you turn
+  them on.
 - **Security checks built in.** The CVE Checker flags known advisories for
   installed apps and packages.
 
@@ -71,7 +79,7 @@ If a release has no build attached, [build from source](#build-from-source).
 | **Publisher version services** | Chrome, Edge, Firefox, Thunderbird, Brave, standalone JetBrains IDEs, Zoom, Slack, and 1Password |
 | **Electron update servers** | The release manifest (such as `latest-mac.yml`) of apps that use electron-updater's generic provider |
 | **Homebrew** | Installed formulae and casks, including dependencies |
-| **GitHub Releases** | Repos found in app or Electron update metadata, trusted mappings, or a repo you verify |
+| **GitHub Releases** | Repos found in app or Electron update metadata, trusted mappings, or a repo you verify. Uses your GitHub CLI sign-in when there is one, to avoid GitHub's hourly limit |
 | **macOS** | Apple's Software Update catalog (macOS, Safari, and Command Line Tools for Xcode) and full installers |
 | **Developer packages** | Global packages from 42 managers, including npm, pnpm, Yarn, Bun, pip, uv, Conda, RubyGems, Cargo, Go, and Docker images |
 | **Local AI models** | Ollama registry manifests, LM Studio's Hugging Face repos, and the Hugging Face cache |
@@ -120,8 +128,36 @@ major releases, prereleases, dependencies, and developer-environment changes.
   expected version. Steam download progress is read from local manifests.
 - Settings cover every source and developer manager, launch and background
   checks, beta visibility, and notifications.
+- "Upkeep found updates" notifications have **Review** and **Update
+  Recommended** buttons. Update Recommended opens the review instead when an
+  update would quit a running app or ask for a password.
+- When the [`mas`](https://github.com/mas-cli/mas) command-line tool is
+  installed, App Store updates install with `sudo mas update` in Terminal, which
+  asks for your password, instead of opening the App Store.
+- GitHub allows 60 API requests an hour without signing in. When the GitHub CLI
+  is signed in, Upkeep uses that sign-in for `api.github.com` only, raising the
+  limit to 5,000. If the limit is reached, GitHub checks pause until it resets
+  instead of failing one by one.
 
 </details>
+
+### Automatic updates
+
+**Automatic updates** in Settings › General is off by default. It can install
+Homebrew formulae only, or all recommended updates (stable, non-major versions
+Upkeep can finish itself), after each scheduled check. Running apps, Homebrew
+casks (which may ask for a password), and major versions always wait for you.
+Nothing installs while the Mac is on battery, in Low Power Mode, offline, or on a
+metered or Low Data Mode network; Upkeep tries again every 30 minutes.
+
+### What's new and what it is
+
+Lists and details panels show a one-line description of each app, package, and
+model, from its package registry, the App Store, Homebrew, Steam, or Hugging
+Face, or from Upkeep's own descriptions of runtimes, Apple apps, and common model
+families. Homebrew and developer packages also show **What's New**: the GitHub
+release notes for the version being offered, found through the package's
+registry metadata or homepage.
 
 ### Backups and recovery
 
@@ -130,10 +166,54 @@ that can restore it. It keeps the 3 newest backups per app and 20 overall, and
 deletes a new backup if its update fails. For formulae and macOS, History explains
 the Time Machine, versioned-formula, or macOS Recovery route instead.
 
+History also records uninstalls. Anything Upkeep moved to the Trash has a **Put
+Back** button that returns it, and any app data removed with it, to where it was.
+Homebrew and package-manager uninstalls show the command that was run.
+
+### Uninstall
+
+Apps, Homebrew formulae and casks, developer packages, and local AI models can be
+uninstalled from their details panel, options menu, or context menu:
+
+- **Apps** move to the Trash after a running app is quit. Apps installed with a
+  Homebrew cask use `brew uninstall --cask`. Administrator-owned apps, such as App
+  Store apps, are moved by Finder, which asks for your password. Apps macOS
+  protects, such as Safari, can't be removed.
+- **App data:** the confirmation can also move the app's settings and caches in
+  `~/Library` to the Trash. Folders are found by the app's bundle identifier, or
+  by its exact name when no other app shares it; Apple apps and apps with more
+  than one copy installed are left alone, and the dialog lists which folders it
+  found.
+- **Packages and models** use their own tool (`brew uninstall`, `npm uninstall
+  -g`, `ollama rm`, and so on), or move a self-contained install such as Bun or
+  Deno to the Trash. Remove any lines a tool added to your shell profile yourself.
+
+### Duplicates
+
+**Duplicates** in the Library sidebar lists apps installed in more than one place,
+command-line tools installed more than once (for example the same npm package
+under Homebrew's npm and under nvm), tools managed by two installers, and runtimes
+with several versions installed.
+
+- The copy in use is marked: for tools, the one that runs first on the `PATH`
+  your Terminal uses (including folders nvm and similar tools add); for apps, the
+  copy macOS opens by default.
+- **Keep** keeps one copy and removes the others with the normal uninstall steps,
+  so every removal is recorded in History. The copy in use, or else the newest, is
+  the recommended one. Runtime versions are removed one at a time instead.
+- With nvm, each Node.js version has its own global packages, so a copy only runs
+  while its version is active. For JavaScript tools that Homebrew also packages,
+  such as pnpm, **Use Homebrew Instead** installs the tool once for every Node.js
+  version and then removes the copies; nothing is removed if the install fails.
+- **Not a Duplicate** hides a group; **Show Hidden Groups** brings it back.
+- npm and corepack bundled with each Node.js, Python and Ruby packages (each
+  environment needs its own), and Upkeep itself are never listed.
+
 ### Homebrew
 
 Browse installed formulae and casks, with requested packages separated from
-dependencies. Apps that match Homebrew's official cask catalog can be adopted with
+dependencies. **Pin Version** runs `brew pin`, so a formula stays at its installed
+version: it counts as up to date and automatic updates skip it until you unpin it. Apps that match Homebrew's official cask catalog can be adopted with
 Homebrew's `--adopt` workflow. Apps not managed by Homebrew also count as updates
 when the catalog has a newer version; Upkeep backs the app up before handing it
 to Homebrew.
@@ -172,7 +252,8 @@ Upkeep lists global packages for the managers you have installed:
 - **Containers:** Docker images pulled from a public registry
 
 It keeps the executable path it found (such as an NVM Node install) when
-updating, and lets you pick a specific published version.
+updating, and lets you pick a specific published version. pnpm keeps global
+packages in one folder whichever Node.js runs it, so they are listed once.
 
 nvm is checked as a git checkout against its latest GitHub release and updated
 with nvm's documented steps, only when the checkout is clean and on a release
@@ -272,16 +353,32 @@ branch. Updates run `hf download` for the files already cached, so the Hugging
 Face CLI must be installed. Models downloaded at a pinned revision are left
 alone, and gated or private models can't be checked without signing in.
 
+## Links
+
+`upkeep://` links open a section or start a check, for example from a script or
+Shortcuts' **Open URL** action. Links never install or remove anything.
+
+| Link | Opens |
+| --- | --- |
+| `upkeep://updates` | Updates (also `upkeep://`) |
+| `upkeep://applications`, `homebrew`, `developer`, `models`, `macos`, `history`, `duplicates`, `cve`, `adoptable` | That section |
+| `upkeep://search?q=firefox` | Search results |
+| `upkeep://review` | Update review |
+| `upkeep://check` | Starts a full check |
+
 ## Privacy and permissions
 
-Update checks contact the publishers and registries for the sources you enable.
-Preferences, diagnostics, history, and backups stay on your Mac, and Upkeep runs no
-analytics service of its own. See [PRIVACY.md](PRIVACY.md) for exactly what is read, sent, and kept.
+Update checks contact the publishers and registries for the sources you enable,
+and descriptions and release notes are looked up from the same registries and
+GitHub. Preferences, diagnostics, history, and backups stay on your Mac, and Upkeep
+runs no analytics service of its own. See [PRIVACY.md](PRIVACY.md) for exactly
+what is read, sent, and kept.
 
 macOS may ask for App Management access, notifications, permission to control
-Terminal (for Homebrew commands that need your password), or authentication for a
-specific action. Review updates and cleanup before confirming them. App backups are
-limited and do not replace a system backup.
+Terminal (for Homebrew and `mas` commands that need your password) or Finder (to
+move administrator-owned apps to the Trash), or authentication for a specific
+action. Review updates, uninstalls, and cleanup before confirming them. App
+backups are limited and do not replace a system backup.
 
 ## Limitations
 

@@ -29,6 +29,23 @@ URL validation, redirect checks, archive extraction limits, code-signing and
 identity checks, backup/restore transactions, and shell argument handling are
 security-sensitive. Scanning an update source must not itself install an update.
 
+Other sensitive areas:
+
+- **Uninstalling** must only move the item the user confirmed, and the app-data
+  folders listed in the confirmation, to the Trash or remove them with the
+  package manager's own command. Apps macOS protects and Upkeep's own data are
+  never targets.
+- **The GitHub CLI token** is read with `gh auth token`, kept in memory only, and
+  sent only to `https://api.github.com`; it is dropped from requests redirected to
+  another host and never written to disk or diagnostics.
+- **`upkeep://` links** can open views and start a check, but must never install,
+  remove, or change anything without a click in Upkeep.
+- **Commands that need a password** (`brew` casks, `sudo mas update`) run in a
+  Terminal window so the password goes to macOS, not Upkeep. Arguments are
+  validated (for example App Store IDs are digits only) and shell-quoted.
+- **Reading the shell `PATH`** runs the user's login shell with a fixed command;
+  only the printed `PATH` is used.
+
 Upkeep also updates itself. Before replacing itself it checks the release
 archive's SHA-256 checksum and Ed25519 signature against the public key built into
 the app, then checks the new app's bundle identifier, version, architecture, and

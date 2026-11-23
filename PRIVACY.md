@@ -41,6 +41,19 @@ model repository names go to Hugging Face, App Store bundle identifiers go to
 Apple's App Store lookup, and Steam app IDs go to the Steam store. Descriptions are
 cached in `~/Library/Caches/Upkeep/item-descriptions.json` for up to 30 days.
 
+When you open a Homebrew or developer package's details, Upkeep looks for its
+release notes: the package name goes to its registry (npm, PyPI, RubyGems, or
+crates.io) to find its GitHub repository, and the repository name and version go
+to `api.github.com` for that release. These results are kept in memory for the app
+session only.
+
+To mark which duplicate copy is in use, Upkeep runs your login shell at most once
+every ten minutes, when you open Duplicates (`$SHELL -lic`, which runs your shell
+startup files), and reads only the `PATH` it prints. Nothing from it is sent anywhere.
+**Use Homebrew Instead** asks your local Homebrew whether a formula exists
+(`brew info --formula`), which may contact Homebrew's servers as Homebrew
+normally does.
+
 GitHub allows 60 API requests an hour without signing in. When the GitHub CLI
 (`gh`) is installed and signed in, Upkeep reads its token with `gh auth token`
 and sends it only to `api.github.com`, which raises the limit to 5,000 requests
@@ -70,8 +83,10 @@ in Settings › General to stop the automatic checks; the menu item still works.
 
 ## What stays on the Mac
 
-Preferences, source selections, exclusions, and repository mappings use macOS
-UserDefaults. Diagnostics, update history, and app backups are stored under
+Preferences, source selections, exclusions, repository mappings, and duplicate
+groups you marked **Not a Duplicate** use macOS UserDefaults. History records of
+uninstalls include where the item was and where it went in the Trash, so it can be
+put back. Diagnostics, update history, and app backups are stored under
 `~/Library/Application Support/Upkeep/`. Diagnostics retain up to 2,000 entries;
 backups retain up to three per app and twenty in total. Installing an Upkeep update
 keeps the previous version in `Self Update Backup` in the same folder.
@@ -89,20 +104,34 @@ value is removed. Review exported logs before sharing them. Exports include app
 and macOS versions and may include installed application names and source hosts.
 Nothing automatically uploads diagnostic exports to the project.
 
-## Automatic updates and links
+## Automatic updates, uninstalls, and links
 
 **Automatic updates** in Settings › General is off by default. When turned on,
 Upkeep installs the updates you allowed after each scheduled check, using the
-same sources and backups as a manual update. `upkeep://` links only open views
-or start a check; installing always needs a click in Upkeep.
+same sources and backups as a manual update. It waits while the Mac is on battery,
+in Low Power Mode, offline, or on a metered network. The **Update Recommended**
+button on a notification installs the same kind of updates, and opens the review
+instead when an update would quit an app or ask for a password. `upkeep://` links
+only open views or start a check; installing or removing always needs a click in
+Upkeep.
+
+When the `mas` tool is installed, App Store updates run `sudo mas update` in a
+Terminal window, where macOS asks for your password; Upkeep never sees it.
+
+Uninstalling moves apps to the Trash or runs the package manager's own uninstall
+command. If you choose to remove an app's data too, only the `~/Library` folders
+listed in the confirmation are moved to the Trash. Anything moved to the Trash can
+be restored from the Trash or with **Put Back** in History; package-manager
+uninstalls can't be undone that way, so reinstall the package instead.
 
 ## Permissions and changes
 
 macOS may request App Management access, notification permission, permission to
-control Terminal (used when a Homebrew command needs your password), or
-authentication for an operation. Grant only what you want to use. Homebrew, developer tooling,
-and local-model checks are optional. Updates, package adoption, restores, and
-cleanup can modify your applications or development environment; review the
+control Terminal (used when a Homebrew or `mas` command needs your password) or
+Finder (used to move administrator-owned apps to the Trash), or authentication for
+an operation. Grant only what you want to use. Homebrew, developer tooling,
+and local-model checks are optional. Updates, uninstalls, package adoption,
+restores, and cleanup can modify your applications or development environment; review the
 operation before confirming it. Backups do not cover every package manager or
 replace a system backup.
 

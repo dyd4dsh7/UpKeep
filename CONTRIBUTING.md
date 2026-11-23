@@ -59,8 +59,9 @@ to open a Settings section, `--ui-fixture-batch` for the batch review sheet, or
 
 1. Create a branch from current `main`; keep unrelated changes separate.
 2. Explain the problem, resulting behaviour, and how you verified it.
-3. Run the test command above. For update/install changes, add a regression test
-   using temporary directories and injected dependencies, not real installed apps.
+3. Run the test command above. For update, install, or uninstall changes, add a
+   regression test using temporary directories and injected dependencies, not real
+   installed apps or packages.
 4. For UI changes, inspect the packaged app at a normal window size and at a
    narrow supported width. Check both appearances when changing colours/artwork.
 5. Update documentation and the Unreleased changelog where behaviour changes.
