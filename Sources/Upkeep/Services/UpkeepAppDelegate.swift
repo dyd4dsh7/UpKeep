@@ -55,6 +55,17 @@ final class UpkeepAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
         }
     }
 
+    /// `upkeep://` links; see `UpkeepLink`.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            guard let link = UpkeepLink(url) else {
+                DiagnosticsStore.shared.record(.warning, category: .command, "Unrecognized Upkeep link", metadata: ["Link": url.absoluteString])
+                continue
+            }
+            Self.store?.open(link)
+        }
+    }
+
     /// Upkeep keeps running for the menu bar item and background checks.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 

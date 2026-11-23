@@ -44,6 +44,31 @@ enum SidebarViewMode: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// Which updates Upkeep installs by itself after a scheduled check.
+enum AutomaticUpdateScope: String, CaseIterable, Identifiable, Sendable {
+    case off
+    case homebrewFormulae
+    case recommended
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .off: "Off"
+        case .homebrewFormulae: "Homebrew formulae"
+        case .recommended: "Recommended updates"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .off: "Upkeep only checks. You choose what to install."
+        case .homebrewFormulae: "After each scheduled check, Upkeep upgrades outdated Homebrew formulae that aren’t major versions or prereleases."
+        case .recommended: "After each scheduled check, Upkeep installs recommended updates: stable, non-major versions it can finish itself. App updates are backed up first. Running apps and Homebrew casks wait for you."
+        }
+    }
+}
+
 enum RefreshInterval: Int, CaseIterable, Identifiable, Sendable {
     case never = 0
     case hourly = 3600
@@ -228,6 +253,7 @@ final class AppSettings: ObservableObject {
     @Published var showMenuBarCount: Bool { didSet { save(showMenuBarCount, "showMenuBarCount") } }
     @Published var showDockBadge: Bool { didSet { save(showDockBadge, "showDockBadge") } }
     @Published var notificationsEnabled: Bool { didSet { save(notificationsEnabled, "notificationsEnabled") } }
+    @Published var automaticUpdates: AutomaticUpdateScope { didSet { save(automaticUpdates.rawValue, "automaticUpdates") } }
     @Published var listDensity: ListDensity { didSet { save(listDensity.rawValue, "listDensity") } }
     @Published var sidebarViewMode: SidebarViewMode { didSet { save(sidebarViewMode.rawValue, "sidebarViewMode") } }
     @Published var showCurrentDeveloperPackages: Bool { didSet { save(showCurrentDeveloperPackages, "showCurrentDeveloperPackages") } }
@@ -235,6 +261,14 @@ final class AppSettings: ObservableObject {
     @Published var checkSparkle: Bool { didSet { save(checkSparkle, "checkSparkle") } }
     @Published var checkHomebrew: Bool { didSet { save(checkHomebrew, "checkHomebrew") } }
     @Published var checkGitHub: Bool { didSet { save(checkGitHub, "checkGitHub") } }
+    /// Sends the GitHub CLI's sign-in to api.github.com to raise the hourly limit.
+    @Published var useGitHubCLISignIn: Bool {
+        didSet {
+            save(useGitHubCLISignIn, "useGitHubCLISignIn")
+            let value = useGitHubCLISignIn
+            Task { await GitHubAPIAccess.shared.setUsesGitHubCLI(value) }
+        }
+    }
     @Published var checkMacOS: Bool { didSet { save(checkMacOS, "checkMacOS") } }
     @Published var checkLocalModels: Bool { didSet { save(checkLocalModels, "checkLocalModels") } }
     @Published var includePrereleaseUpdates: Bool { didSet { save(includePrereleaseUpdates, "includePrereleaseUpdates") } }
@@ -286,6 +320,7 @@ final class AppSettings: ObservableObject {
             "showMenuBarCount": true,
             "showDockBadge": true,
             "notificationsEnabled": false,
+            "automaticUpdates": AutomaticUpdateScope.off.rawValue,
             "listDensity": ListDensity.comfortable.rawValue,
             "sidebarViewMode": SidebarViewMode.basic.rawValue,
             "showCurrentDeveloperPackages": true,
@@ -293,6 +328,7 @@ final class AppSettings: ObservableObject {
             "checkSparkle": true,
             "checkHomebrew": true,
             "checkGitHub": true,
+            "useGitHubCLISignIn": true,
             "checkMacOS": true,
             "checkLocalModels": true,
             "includePrereleaseUpdates": false
@@ -310,6 +346,7 @@ final class AppSettings: ObservableObject {
         showMenuBarCount = defaults.bool(forKey: "showMenuBarCount")
         showDockBadge = defaults.bool(forKey: "showDockBadge")
         notificationsEnabled = defaults.bool(forKey: "notificationsEnabled")
+        automaticUpdates = AutomaticUpdateScope(rawValue: defaults.string(forKey: "automaticUpdates") ?? "") ?? .off
         listDensity = ListDensity(rawValue: defaults.string(forKey: "listDensity") ?? "") ?? .comfortable
         sidebarViewMode = SidebarViewMode(rawValue: defaults.string(forKey: "sidebarViewMode") ?? "") ?? .basic
         showCurrentDeveloperPackages = defaults.bool(forKey: "showCurrentDeveloperPackages")
@@ -317,6 +354,9 @@ final class AppSettings: ObservableObject {
         checkSparkle = defaults.bool(forKey: "checkSparkle")
         checkHomebrew = defaults.bool(forKey: "checkHomebrew")
         checkGitHub = defaults.bool(forKey: "checkGitHub")
+        let usesGitHubCLI = defaults.bool(forKey: "useGitHubCLISignIn")
+        useGitHubCLISignIn = usesGitHubCLI
+        Task { await GitHubAPIAccess.shared.setUsesGitHubCLI(usesGitHubCLI) }
         checkMacOS = defaults.bool(forKey: "checkMacOS")
         checkLocalModels = defaults.bool(forKey: "checkLocalModels")
         includePrereleaseUpdates = defaults.bool(forKey: "includePrereleaseUpdates")

@@ -12,6 +12,17 @@
     <string>Upkeep</string>
     <key>CFBundleIdentifier</key>
     <string>nz.haydenthorn.Upkeep</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>nz.haydenthorn.Upkeep</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>upkeep</string>
+            </array>
+        </dict>
+    </array>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>

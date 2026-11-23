@@ -218,7 +218,10 @@ enum PublisherCurlTransport {
     }
 
     static func load(_ request: URLRequest, maximumBytes: Int64) async throws -> Result {
-        try await loadRedirects(request, maximumBytes: maximumBytes)
+        let prepared = try await GitHubAPIAccess.shared.prepare(request)
+        let result = try await loadRedirects(prepared, maximumBytes: maximumBytes)
+        await GitHubAPIAccess.shared.record(result.response, for: prepared)
+        return result
     }
 
     private static func loadRedirects(_ initialRequest: URLRequest, maximumBytes: Int64) async throws -> Result {

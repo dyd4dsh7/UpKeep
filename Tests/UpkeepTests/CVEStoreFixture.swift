@@ -50,6 +50,8 @@ enum CVEStoreFixture {
     @MainActor static func makeStore(
         settings: AppSettings,
         includeCVEInventory: Bool = false,
+        appUninstaller: any AppUninstalling = AppUninstaller(),
+        appDataLibrary: URL = AppDataLocator.defaultLibrary,
         makeCVEClient: (@MainActor @Sendable () -> CVEInventoryClient)? = nil
     ) -> UpkeepStore {
         let services = CVEStoreFixtureServices(includeCVEInventory: includeCVEInventory)
@@ -57,7 +59,8 @@ enum CVEStoreFixture {
             scanner: services, applicationDiscovery: services, homebrew: services,
             developerPackages: services, packageCleanup: services, localModels: services,
             history: services, externalOpener: services, directAppInstaller: services,
-            applicationLifecycle: services,
+            applicationLifecycle: services, appUninstaller: appUninstaller,
+            itemDescriber: OfflineItemDescriber(), descriptionCacheURL: nil, appDataLibrary: appDataLibrary,
             makeCVEClient: makeCVEClient ?? { CVEStoreFixture.cveInventoryClient }))
         store.apps = services.apps
         store.updates = services.updates

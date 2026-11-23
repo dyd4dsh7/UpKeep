@@ -542,8 +542,11 @@ func scanNVM(_ script: String) async -> ManagerScanResult {
         updatable = tag.status == 0 && status.status == 0
             && String(decoding: status.data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
-    var latest: String?
-    if let url = URL(string: "https://api.github.com/repos/nvm-sh/nvm/releases/latest"),
+    // The release page redirect does not use GitHub's hourly API limit.
+    var latest = await githubLatestReleaseTag(repository: "nvm-sh/nvm")
+        .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "vV")) }
+    if latest == nil,
+       let url = URL(string: "https://api.github.com/repos/nvm-sh/nvm/releases/latest"),
        let data = await fetchRegistryData(url) {
         struct Release: Decodable { let tag_name: String }
         latest = (try? JSONDecoder().decode(Release.self, from: data))?.tag_name

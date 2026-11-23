@@ -1991,6 +1991,10 @@ private func latestPublisherReleaseVersions(repository: String) async -> [String
     if repository == "oven-sh/bun" {
         return await BunReleaseLookup.latest { await registryData(from: $0) }
     }
+    // The release page redirect does not use GitHub's hourly API limit.
+    if let tag = await githubLatestReleaseTag(repository: repository) {
+        return [normalizedJavaScriptRuntimeVersion(tag)]
+    }
     guard let url = URL(string: "https://api.github.com/repos/\(repository)/releases/latest"),
           let data = await registryData(from: url),
           let release = try? JSONDecoder().decode(GitHubReleaseVersion.self, from: data)

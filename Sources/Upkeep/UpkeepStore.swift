@@ -1260,6 +1260,7 @@ final class UpkeepStore: ObservableObject {
         nextScheduledCheck = nextDate
         refreshScheduler.schedule(at: nextDate) { [weak self] in
             await self?.scan()
+            await self?.installAutomaticUpdates()
         }
     }
 
@@ -2057,17 +2058,23 @@ final class UpkeepStore: ObservableObject {
         return package
     }
 
-    func uninstallApp(_ app: InstalledApp) async {
+    /// Settings and caches the app keeps in ~/Library that an uninstall can
+    /// also move to the Trash.
+    func appData(for app: InstalledApp) -> [AppDataLocator.Item] {
+        app.isUpkeep ? [] : AppDataLocator.items(for: app, otherApps: apps, library: dependencies.appDataLibrary)
+    }
+
+    func uninstallApp(_ app: InstalledApp, removingData: Bool = false) async {
         var targets = mutationTargets(for: app)
         if let cask = uninstallingCask(for: app) {
             targets.formUnion([.homebrew(cask.id), .packageEnvironment("homebrew")])
         }
         await mutationCoordinator.withAccess(to: targets, otherwise: ()) {
-            await uninstallAppUnlocked(app)
+            await uninstallAppUnlocked(app, removingData: removingData)
         }
     }
 
-    private func uninstallAppUnlocked(_ app: InstalledApp) async {
+    private func uninstallAppUnlocked(_ app: InstalledApp, removingData: Bool) async {
         guard canUninstall(app) else {
             errorMessage = "\(app.name) cannot be uninstalled by Upkeep."
             return
@@ -2078,8 +2085,11 @@ final class UpkeepStore: ObservableObject {
         defer { updateExecutionState.activeOperations.remove(operationID) }
 
         let cask = uninstallingCask(for: app)
+        // Found before the app goes, while it can still be told apart from others.
+        let data = removingData ? appData(for: app) : []
         let succeeded = await execute(label: app.name, activity: operationID, metadata: [
             "Source": cask.map { "Homebrew cask \($0.token)" } ?? "Trash",
+            "App data": removingData ? "\(data.count) items" : "Kept",
             "Version": app.installedVersion,
             "Path": app.url.path,
             "Action": "Uninstall"
@@ -2098,6 +2108,13 @@ final class UpkeepStore: ObservableObject {
             // Upkeep is now in the Trash; quit so it is not left running from there.
             NSApplication.shared.terminate(nil)
             return
+        }
+        if !data.isEmpty {
+            let failed = await dependencies.appUninstaller.moveDataToTrash(data.map(\.url))
+            if !failed.isEmpty {
+                let locations = AppDataLocator.locationSummary(data.filter { failed.contains($0.url) })
+                errorMessage = "\(app.name) was uninstalled, but some of its data in \(locations) could not be moved to the Trash. macOS protects some app data; you can remove it in Finder."
+            }
         }
         if let cask { homebrewPackages.removeAll { $0.id == cask.id } }
         apps.removeAll { $0.id == app.id }
@@ -2269,6 +2286,49 @@ final class UpkeepStore: ObservableObject {
             errorMessage = "Installed \(observed.installedRevision), but \(observed.latestRevision) is still available for \(model.name)."
         }
         return succeeded && errorMessage == nil && !observed.isOutdated
+    }
+
+    /// Updates the Automatic updates setting allows without asking. Running
+    /// apps would be interrupted and Homebrew casks may ask for a password in
+    /// Terminal, so those wait for the user.
+    var automaticUpdateItems: [BatchUpdateItem] {
+        let scope = settings.automaticUpdates
+        guard scope != .off else { return [] }
+        refreshRunningApplications()
+        return recommendedBatchUpdateItems.filter { item in
+            if let app = batchApp(for: item), isRunning(app) { return false }
+            switch item {
+            case let .homebrew(package):
+                return package.kind == .formula
+            case let .application(update):
+                return scope == .recommended && update.homebrewToken == nil && !update.app.isUpkeep
+            case .developer, .model:
+                return false
+            }
+        }
+    }
+
+    /// Runs after a scheduled check when Automatic updates is on.
+    @discardableResult
+    func installAutomaticUpdates() async -> BatchUpdateSummary? {
+        let items = automaticUpdateItems
+        guard !items.isEmpty, updateExecutionState.activeOperations.isEmpty else { return nil }
+        DiagnosticsStore.shared.record(.info, category: .scan, "Installing automatic updates", metadata: [
+            "Setting": settings.automaticUpdates.title,
+            "Items": items.map(\.name).joined(separator: ", ")
+        ])
+        let summary = await performBatchUpdates(items)
+        if settings.notificationsEnabled, summary.updatedCount > 0 || summary.failedCount > 0 {
+            let content = UNMutableNotificationContent()
+            content.title = "Upkeep installed updates"
+            var parts = ["\(summary.updatedCount) update\(summary.updatedCount == 1 ? " was" : "s were") installed."]
+            if summary.failedCount > 0 {
+                parts.append("\(summary.failedCount) couldn’t be installed; open Upkeep to see why.")
+            }
+            content.body = parts.joined(separator: " ")
+            try? await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "upkeep-automatic-updates", content: content, trigger: nil))
+        }
+        return summary
     }
 
     func performBatchUpdates(_ items: [BatchUpdateItem]) async -> BatchUpdateSummary {

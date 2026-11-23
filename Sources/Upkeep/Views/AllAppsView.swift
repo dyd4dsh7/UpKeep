@@ -1101,8 +1101,18 @@ private struct AppUninstallConfirmation: ViewModifier {
             titleVisibility: .visible,
             presenting: app
         ) { app in
-            Button(store.uninstallingCask(for: app) == nil ? "Move to Trash" : "Uninstall", role: .destructive) {
-                Task { await store.uninstallApp(app) }
+            let isCask = store.uninstallingCask(for: app) != nil
+            if !store.appData(for: app).isEmpty {
+                Button(isCask ? "Uninstall and Remove Data" : "Move App and Data to Trash", role: .destructive) {
+                    Task { await store.uninstallApp(app, removingData: true) }
+                }
+                Button(isCask ? "Uninstall, Keep Data" : "Move App to Trash, Keep Data", role: .destructive) {
+                    Task { await store.uninstallApp(app) }
+                }
+            } else {
+                Button(isCask ? "Uninstall" : "Move to Trash", role: .destructive) {
+                    Task { await store.uninstallApp(app) }
+                }
             }
             Button("Cancel", role: .cancel) {}
         } message: { app in
@@ -1115,10 +1125,14 @@ private struct AppUninstallConfirmation: ViewModifier {
             return "Upkeep will move itself to the Trash and quit. Settings and data in your Library folder are kept."
         }
         let quit = store.isRunning(app) ? "Upkeep will quit \(app.name) first. " : ""
+        let data = store.appData(for: app)
+        let dataText = data.isEmpty
+            ? "No settings or caches were found in your Library folder."
+            : "Its settings and caches in \(AppDataLocator.locationSummary(data)) can also be moved to the Trash, so you can still restore them."
         if let cask = store.uninstallingCask(for: app) {
-            return quit + "Homebrew will uninstall the \(cask.token) cask and remove \(app.name). Settings and data in your Library folder are kept."
+            return quit + "Homebrew will uninstall the \(cask.token) cask and remove \(app.name). " + dataText
         }
-        return quit + "\(app.name) will be moved to the Trash. Settings and data in your Library folder are kept. macOS may ask for an administrator password."
+        return quit + "\(app.name) will be moved to the Trash. " + dataText + " macOS may ask for an administrator password."
     }
 }
 

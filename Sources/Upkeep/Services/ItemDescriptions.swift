@@ -24,6 +24,7 @@ struct AppDescriptionInput: Hashable, Sendable {
     let name: String
     let url: URL
     let isAppStore: Bool
+    var steamAppID: String? = nil
 
     var key: String { "app:" + (bundleIdentifier?.lowercased() ?? url.path) }
 }
@@ -78,7 +79,7 @@ enum ItemDescriptions {
         let identifier = (package.registryIdentifier ?? package.name).trimmingCharacters(in: .whitespaces)
         guard !identifier.isEmpty else { return nil }
         switch package.manager {
-        case .npm, .pnpm, .yarn, .uv, .pipx, .python, .rubyGems, .cargo, .dart, .composer, .conda, .pixi:
+        case .npm, .pnpm, .yarn, .uv, .pipx, .python, .rubyGems, .cargo, .dart, .composer, .conda, .pixi, .dotnet:
             // Registry names never contain spaces; display names such as
             // "CPython Python 3.10" are not packages.
             guard !identifier.contains(where: \.isWhitespace) else { return nil }
@@ -98,7 +99,8 @@ enum ItemDescriptions {
             bundleIdentifier: app.bundleIdentifier,
             name: app.name,
             url: app.url,
-            isAppStore: app.updateManagement == .appStore || app.hasAppStoreReceipt
+            isAppStore: app.updateManagement == .appStore || app.hasAppStoreReceipt,
+            steamAppID: app.steamAppID
         ))
     }
 
@@ -480,9 +482,12 @@ actor ItemDescriptionClient: ItemDescribing {
             catch { storeFailed = true }
         }
         let casks = await caskDescriptionIndex()
+        let steam = await steamDescriptions(apps.compactMap(\.steamAppID))
         for app in apps {
             if let bundleID = app.bundleIdentifier,
                let text = ItemDescriptions.clean(storeListings[AppStoreClient.lookupKey(bundleID)]?.description, name: app.name) {
+                results[app.key] = .found(text)
+            } else if let id = app.steamAppID, let text = steam[id] {
                 results[app.key] = .found(text)
             } else if let text = casks?[catalogKey(app.name)] {
                 results[app.key] = .found(text)
@@ -496,6 +501,26 @@ actor ItemDescriptionClient: ItemDescribing {
             }
         }
         return results
+    }
+
+    /// Short descriptions from the Steam store, keyed by Steam app ID.
+    private func steamDescriptions(_ ids: [String]) async -> [String: String] {
+        let fetch = self.fetch
+        var output: [String: String] = [:]
+        await withTaskGroup(of: (String, String?).self) { group in
+            for id in Set(ids) where id.allSatisfy(\.isNumber) {
+                group.addTask {
+                    let url = URL(string: "https://store.steampowered.com/api/appdetails?appids=\(id)&filters=basic&l=english")
+                    let lookup = await Self.json(url, fetch: fetch) { object in
+                        ((object[id] as? [String: Any])?["data"] as? [String: Any])?["short_description"] as? String
+                    }
+                    if case let .found(text)? = lookup { return (id, text) }
+                    return (id, nil)
+                }
+            }
+            for await (id, text) in group { if let text { output[id] = text } }
+        }
+        return output
     }
 
     private func caskDescriptionIndex() async -> [String: String]? {
@@ -590,6 +615,15 @@ actor ItemDescriptionClient: ItemDescribing {
             }
         case .vsCode:
             return await visualStudioMarketplaceDescription(extensionID: identifier, fetch: fetch)
+        case .dotnet:
+            var components = URLComponents(string: "https://azuresearch-usnc.nuget.org/query")
+            components?.queryItems = [URLQueryItem(name: "q", value: "packageid:\(identifier)"),
+                                      URLQueryItem(name: "take", value: "1")]
+            return await json(components?.url, fetch: fetch) { object in
+                let package = (object["data"] as? [[String: Any]])?.first
+                guard (package?["id"] as? String)?.caseInsensitiveCompare(identifier) == .orderedSame else { return nil }
+                return package?["description"] as? String
+            }
         default:
             return .notFound
         }
@@ -684,7 +718,9 @@ private func catalogKey(_ value: String) -> String { value.lowercased().filter(\
 struct ItemDescriptionCache: Codable, Sendable {
     static let foundLifetime: TimeInterval = 30 * 24 * 60 * 60
     static let notFoundLifetime: TimeInterval = 7 * 24 * 60 * 60
-    static let currentFormat = 1
+    /// Format 2 adds Steam and NuGet, so items cached as "nothing found" by
+    /// format 1 are looked up again.
+    static let currentFormat = 2
 
     struct Entry: Codable, Sendable, Equatable {
         let text: String?

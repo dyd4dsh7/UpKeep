@@ -183,6 +183,20 @@ struct SettingsView: View {
                     .onChange(of: settings.refreshInterval) { _, _ in store.scheduleNextRefresh() }
                 }
 
+                SettingsOptionRow(
+                    title: "Automatic updates",
+                    detail: settings.refreshInterval == .never && settings.automaticUpdates != .off
+                        ? "Turn on background checks for automatic updates to run."
+                        : settings.automaticUpdates.detail,
+                    systemImage: "wand.and.stars"
+                ) {
+                    Picker("Automatic updates", selection: $settings.automaticUpdates) {
+                        ForEach(AutomaticUpdateScope.allCases) { Text($0.title).tag($0) }
+                    }
+                    .labelsHidden()
+                    .frame(width: 190)
+                }
+
                 if settings.refreshInterval == .daily {
                     SettingsOptionRow(
                         title: "Daily check time",
@@ -272,6 +286,11 @@ struct SettingsView: View {
                 sourceToggle(
                     "GitHub Releases", "Releases for apps linked to GitHub.",
                     "chevron.left.forwardslash.chevron.right", $settings.checkGitHub
+                )
+                sourceToggle(
+                    "Use GitHub CLI sign-in",
+                    "Raises GitHub’s limit from 60 to 5,000 checks an hour. Upkeep reads it with gh auth token and sends it only to api.github.com.",
+                    "person.badge.key", $settings.useGitHubCLISignIn
                 )
             } header: {
                 Text("Application Sources")

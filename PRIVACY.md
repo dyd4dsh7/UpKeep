@@ -33,6 +33,21 @@ updates contact their own services under your settings for that tool; for
 example, `az extension list-available` reads Microsoft's extension index and
 follows your Azure CLI telemetry setting.
 
+To show what each item is, Upkeep looks up a one-line description for the apps,
+packages, and models it lists. Package names go to their registry (for example
+npm, PyPI, RubyGems, crates.io, pub.dev, Packagist, Anaconda, NuGet, Docker Hub,
+the Visual Studio Marketplace, and GitHub for GitHub CLI extensions and Go tools),
+model repository names go to Hugging Face, App Store bundle identifiers go to
+Apple's App Store lookup, and Steam app IDs go to the Steam store. Descriptions are
+cached in `~/Library/Caches/Upkeep/item-descriptions.json` for up to 30 days.
+
+GitHub allows 60 API requests an hour without signing in. When the GitHub CLI
+(`gh`) is installed and signed in, Upkeep reads its token with `gh auth token`
+and sends it only to `api.github.com`, which raises the limit to 5,000 requests
+an hour. The token is kept in memory, never written to disk or diagnostics, and
+not sent to any other host, including after a redirect. Turn off **Use GitHub CLI
+sign-in** in Settings › Sources to stop this.
+
 CVE checks run after launch, scheduled, and manual inventory refreshes when
 **Automatically check CVEs** is enabled in Settings (enabled by default). They
 also run when you choose **Check CVEs**. Turning off automatic CVE checks leaves
@@ -73,6 +88,13 @@ prefix before storage/export. Redaction cannot guarantee that every sensitive
 value is removed. Review exported logs before sharing them. Exports include app
 and macOS versions and may include installed application names and source hosts.
 Nothing automatically uploads diagnostic exports to the project.
+
+## Automatic updates and links
+
+**Automatic updates** in Settings › General is off by default. When turned on,
+Upkeep installs the updates you allowed after each scheduled check, using the
+same sources and backups as a manual update. `upkeep://` links only open views
+or start a check; installing always needs a click in Upkeep.
 
 ## Permissions and changes
 
