@@ -107,6 +107,17 @@ enum DeveloperPackageInstallAdapters {
         .flutter: adapter { package, _ in command(package, ["upgrade"]) },
         // `claude install <version>` installs that native build and repoints the launcher.
         .claudeCode: adapter { command($0, ["install", $1]) },
+        // nvm's documented manual upgrade: fetch tags, then check out the release.
+        .nvm: adapter { package, version in
+            guard let git = realGitExecutable() else { throw AdapterError.unsupported(.nvm) }
+            let directory = URL(fileURLWithPath: package.executablePath).deletingLastPathComponent().path
+            return .command(
+                executable: URL(fileURLWithPath: "/bin/bash"),
+                arguments: ["-c", #""$1" -C "$2" fetch --tags --quiet origin && "$1" -C "$2" -c advice.detachedHead=false checkout --quiet "v$3""#,
+                    "upkeep-nvm", git, directory, version],
+                failureMessage: "nvm update failed"
+            )
+        },
         .ghcup: adapter { command($0, ["install", $0.registryIdentifier ?? $0.name, $1, "--set"]) },
         .swiftly: adapter { package, _ in command(package, ["update", package.registryIdentifier ?? package.currentVersion, "--assume-yes"]) },
         .conda: adapter { command($0, ["install", "-n", "base", "-y", "\($0.registryIdentifier ?? $0.name)=\($1)"]) },

@@ -75,7 +75,8 @@ enum DeveloperPackageScanAdapters {
         .swiftly: adapter(.swiftly) { path, _ in await scanSwiftly(path) },
         .conda: adapter(.conda) { path, _ in await scanConda(path) },
         .sdkman: adapter(.sdkman) { path, _ in await scanSDKMAN(path) },
-        .claudeCode: adapter(.claudeCode) { path, _ in await scanClaudeCode(path) }
+        .claudeCode: adapter(.claudeCode) { path, _ in await scanClaudeCode(path) },
+        .nvm: adapter(.nvm) { path, _ in await scanNVM(path) }
     ]
 
     private static func adapter(

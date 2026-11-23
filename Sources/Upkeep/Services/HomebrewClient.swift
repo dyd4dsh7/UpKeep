@@ -16,6 +16,7 @@ struct HomebrewClient: Sendable {
 
     func inventory(includePrereleases: Bool = false) async throws -> [HomebrewPackage] {
         guard let brew = Self.brewURL else { return [] }
+        await HomebrewCatalogRefresh.shared.refreshIfDue(brew: brew)
         let data = try await runWithRetry(brew, ["info", "--json=v2", "--installed"])
         let response: InfoResponse
         do { response = try JSONDecoder().decode(InfoResponse.self, from: data) }

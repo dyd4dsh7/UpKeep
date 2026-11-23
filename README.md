@@ -25,7 +25,7 @@
 
 ## Why Upkeep
 
-- **One list for everything.** Apps, Homebrew, macOS, packages from 36 developer
+- **One list for everything.** Apps, Homebrew, macOS, packages from 37 developer
   tools (npm, pip, Cargo, Go, Docker, Conda, and more), and local AI models share one
   **All Updates** view, with a live count in the toolbar, menu bar, and Dock.
 - **Uses what you already have.** Upkeep works through the tools installed on your
@@ -72,8 +72,8 @@ If a release has no build attached, [build from source](#build-from-source).
 | **Electron update servers** | The release manifest (such as `latest-mac.yml`) of apps that use electron-updater's generic provider |
 | **Homebrew** | Installed formulae and casks, including dependencies |
 | **GitHub Releases** | Repos found in app or Electron update metadata, trusted mappings, or a repo you verify |
-| **macOS** | Apple's Software Update catalog and full installers |
-| **Developer packages** | Global packages from 36 managers, including npm, pnpm, Yarn, Bun, pip, uv, Conda, RubyGems, Cargo, Go, and Docker images |
+| **macOS** | Apple's Software Update catalog (macOS, Safari, and Command Line Tools for Xcode) and full installers |
+| **Developer packages** | Global packages from 37 managers, including npm, pnpm, Yarn, Bun, pip, uv, Conda, RubyGems, Cargo, Go, and Docker images |
 | **Local AI models** | Ollama registry manifests, LM Studio's Hugging Face repos, and the Hugging Face cache |
 
 Apps with their own updater are recognised and handed to it: TestFlight, Setapp,
@@ -145,11 +145,17 @@ that is behind its cask is reported and one that updated itself is not. A cask
 whose app isn't installed keeps Homebrew's answer. Casks are matched to apps by
 the app bundles they install as well as by name.
 
+`brew info` never refreshes Homebrew's cached catalog, so before reading your
+packages Upkeep runs `brew update --auto-update`, the refresh Homebrew runs
+before installs, at most once an hour (or every `HOMEBREW_AUTO_UPDATE_SECS`). It
+skips the refresh when `HOMEBREW_NO_AUTO_UPDATE` is set in the environment or in
+a Homebrew `brew.env` file. Nothing is installed or upgraded.
+
 ### Developer packages
 
 Upkeep lists global packages for the managers you have installed:
 
-- **JavaScript:** Node.js, Bun, Deno, npm, pnpm, Yarn, Volta, and fnm
+- **JavaScript:** Node.js, nvm itself, Bun, Deno, npm, pnpm, Yarn, Volta, and fnm
 - **Python:** Python/pip, pipx, uv, Poetry (official installer), Conda base
   environments, and pixi global packages
 - **Ruby and Rust:** RubyGems, Rustup, and Cargo
@@ -166,7 +172,9 @@ Upkeep lists global packages for the managers you have installed:
 It keeps the executable path it found (such as an NVM Node install) when
 updating, and lets you pick a specific published version.
 
-Some managers have their own update rules. swiftly toolchains update within
+nvm is checked as a git checkout against its latest GitHub release and updated
+with nvm's documented steps, only when the checkout is clean and on a release
+tag. Some managers have their own update rules. swiftly toolchains update within
 their minor release, GHCup tools are compared with GHCup's recommended version,
 SDKMAN! candidates keep their vendor (a Temurin JDK is not offered Zulu), and
 opam packages follow your last `opam update`. Poetry is checked only when the

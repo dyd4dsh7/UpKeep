@@ -27,6 +27,9 @@ struct MacOSUpdateClient: Sendable {
     /// 0.8–2 s). Automatic full scans reuse a successful listing for an hour;
     /// the macOS page's own check always asks Apple again.
     static let updateListingMaximumAge: TimeInterval = 60 * 60
+    /// Every product type, as Software Update shows: macOS, Safari, and
+    /// Command Line Tools for Xcode. `--product-types macOS` hid the others.
+    static let updateListingArguments = ["--list"]
 
     func scan(includeInstallers: Bool = true) async -> Report {
         await scan(checkUpdates: true, includeInstallers: includeInstallers, reuseRecentListings: true)
@@ -40,7 +43,7 @@ struct MacOSUpdateClient: Sendable {
         var warnings: [String] = []
         // The two listings are independent; run them together.
         async let updatesCommand: (data: Data?, error: Error?) = checkUpdates
-            ? listing(["--list", "--product-types", "macOS"], cache: .updatesShared,
+            ? listing(Self.updateListingArguments, cache: .updatesShared,
                       maximumAge: Self.updateListingMaximumAge, reuseRecent: reuseRecentListings)
             : (Data(), nil)
         async let installersCommand: (data: Data?, error: Error?) = includeInstallers
@@ -52,7 +55,7 @@ struct MacOSUpdateClient: Sendable {
         if let error = installersResult.error { warnings.append("Full installers: \(error.localizedDescription)") }
         let updatesOutput = updatesResult.data ?? Data()
         let installersOutput = installersResult.data ?? Data()
-        let updates = parseUpdates(String(data: updatesOutput, encoding: .utf8) ?? "")
+        let updates = parseSoftwareUpdateList(String(data: updatesOutput, encoding: .utf8) ?? "")
         let installers = parseInstallers(String(data: installersOutput, encoding: .utf8) ?? "")
         let version = ProcessInfo.processInfo.operatingSystemVersionString
         // SystemVersion.plist holds the same values sw_vers prints, without
@@ -88,7 +91,7 @@ struct MacOSUpdateClient: Sendable {
     }
 }
 
-private func parseUpdates(_ output: String) -> [MacOSUpdate] {
+func parseSoftwareUpdateList(_ output: String) -> [MacOSUpdate] {
     let blocks = output.components(separatedBy: "* Label:").dropFirst()
     return blocks.compactMap { block in
         let lines = block.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)

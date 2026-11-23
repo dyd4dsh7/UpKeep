@@ -88,7 +88,7 @@ enum DeveloperPackageUninstallAdapters {
             return command(package, ["remove", "-y", package.registryIdentifier ?? package.name])
         case .dart:
             return command(package, ["pub", "global", "deactivate", package.registryIdentifier ?? package.name])
-        case .pixi, .poetry, .flutter, .ghcup, .swiftly, .conda, .sdkman, .claudeCode:
+        case .pixi, .poetry, .flutter, .ghcup, .swiftly, .conda, .sdkman, .claudeCode, .nvm:
             // Shared environments, SDKs and toolchains are removed with the tool itself.
             throw AdapterError.unsupportedPackage(package.name)
         }

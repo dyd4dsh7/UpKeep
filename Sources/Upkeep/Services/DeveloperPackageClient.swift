@@ -84,6 +84,7 @@ struct DeveloperPackageClient: Sendable {
         if enabledManagers.contains(.conda) { tools.append(contentsOf: condaExecutables().map { (.conda, $0) }) }
         if enabledManagers.contains(.sdkman), let script = sdkmanInitScript() { tools.append((.sdkman, script)) }
         if enabledManagers.contains(.claudeCode), let launcher = claudeCodeNativeLauncher() { tools.append((.claudeCode, launcher)) }
+        if enabledManagers.contains(.nvm), let script = nvmCheckoutScript() { tools.append((.nvm, script)) }
 
         var seenTargets = Set<String>()
         tools = tools.filter { seenTargets.insert("\($0.0.rawValue):\($0.1)").inserted }
@@ -252,7 +253,7 @@ struct DeveloperPackageClient: Sendable {
             discovered = []
         case .dart:
             discovered = await pubDevVersions(package.registryIdentifier ?? package.name)
-        case .pixi, .krew, .juliaup, .opam, .poetry, .flutter, .ghcup, .swiftly, .conda, .sdkman, .claudeCode:
+        case .pixi, .krew, .juliaup, .opam, .poetry, .flutter, .ghcup, .swiftly, .conda, .sdkman, .claudeCode, .nvm:
             discovered = [package.currentVersion, package.latestVersion]
         case .githubCLI:
             discovered = await latestPublisherReleaseVersions(repository: package.registryIdentifier ?? package.name)

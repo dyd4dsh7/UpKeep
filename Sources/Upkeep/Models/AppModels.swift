@@ -999,6 +999,7 @@ enum DeveloperPackageManager: String, Codable, CaseIterable, Identifiable, Senda
     case conda = "Conda"
     case sdkman = "SDKMAN!"
     case claudeCode = "Claude Code"
+    case nvm = "nvm"
     var id: Self { self }
     /// Docker images change by content digest, and SDKMAN identifiers carry a
     /// vendor suffix ("21.0.5-tem") that reads like a prerelease. Their
@@ -1009,7 +1010,7 @@ enum DeveloperPackageManager: String, Codable, CaseIterable, Identifiable, Senda
         case .node, .bun, .deno, .npm, .pnpm, .yarn, .volta, .fnm: true
         case .vsCode, .uv, .pipx, .python, .rubyGems, .rustup, .cargo,
              .githubCLI, .go, .composer, .dotnet, .macPorts, .nix, .mise, .asdf, .dockerImages,
-             .pixi, .krew, .juliaup, .opam, .dart, .poetry, .flutter, .ghcup, .swiftly, .conda, .sdkman, .claudeCode: false
+             .pixi, .krew, .juliaup, .opam, .dart, .poetry, .flutter, .ghcup, .swiftly, .conda, .sdkman, .claudeCode, .nvm: false
         }
     }
     var assetName: String {
@@ -1050,6 +1051,7 @@ enum DeveloperPackageManager: String, Codable, CaseIterable, Identifiable, Senda
         case .conda: "conda"
         case .sdkman: "sdkman"
         case .claudeCode: "claude"
+        case .nvm: "nvm"
         }
     }
     var packageLabel: String {
@@ -1087,6 +1089,7 @@ enum DeveloperPackageManager: String, Codable, CaseIterable, Identifiable, Senda
         case .conda: "Conda package"
         case .sdkman: "SDKMAN! candidate"
         case .claudeCode: "Command-line coding agent"
+        case .nvm: "Node.js version manager"
         }
     }
     var homepage: URL? {
@@ -1127,6 +1130,7 @@ enum DeveloperPackageManager: String, Codable, CaseIterable, Identifiable, Senda
         case .conda: URL(string: "https://anaconda.org/conda-forge")
         case .sdkman: URL(string: "https://sdkman.io")
         case .claudeCode: URL(string: "https://code.claude.com/docs/en/setup")
+        case .nvm: URL(string: "https://github.com/nvm-sh/nvm")
         }
     }
 }

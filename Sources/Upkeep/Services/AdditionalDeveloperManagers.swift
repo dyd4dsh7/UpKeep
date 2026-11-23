@@ -498,3 +498,60 @@ func scanClaudeCode(_ path: String) async -> ManagerScanResult {
             installationContext: "\(channel.capitalized) channel")
     ], warning: latest == nil && channel != "rc" ? "Claude Code: the release check failed." : nil)
 }
+
+// MARK: - nvm
+
+/// nvm installs as a git checkout of nvm-sh/nvm (`$NVM_DIR`, default ~/.nvm).
+/// Its own upgrade instructions fetch tags and check out the newest release.
+func nvmCheckoutScript(environment: [String: String] = ProcessInfo.processInfo.environment) -> String? {
+    let directory = environment["NVM_DIR"].flatMap { $0.isEmpty ? nil : ($0 as NSString).expandingTildeInPath }
+        ?? homeDirectory.appendingPathComponent(".nvm").path
+    let script = (directory as NSString).appendingPathComponent("nvm.sh")
+    let fileManager = FileManager.default
+    guard fileManager.fileExists(atPath: script),
+          fileManager.fileExists(atPath: (directory as NSString).appendingPathComponent(".git")) else { return nil }
+    return script
+}
+
+/// A real git binary. `/usr/bin/git` is a shim that asks to install the
+/// Command Line Tools when they are missing, which a scan must never trigger.
+func realGitExecutable() -> String? {
+    [
+        "/opt/homebrew/bin/git", "/usr/local/bin/git",
+        "/Library/Developer/CommandLineTools/usr/bin/git",
+        "/Applications/Xcode.app/Contents/Developer/usr/bin/git"
+    ].first { FileManager.default.isExecutableFile(atPath: $0) }
+}
+
+/// `version` from nvm's package.json.
+func nvmVersion(packageJSON: Data) -> String? {
+    struct Package: Decodable { let version: String }
+    return (try? JSONDecoder().decode(Package.self, from: packageJSON))?.version
+}
+
+func scanNVM(_ script: String) async -> ManagerScanResult {
+    let directory = URL(fileURLWithPath: script).deletingLastPathComponent()
+    guard let version = (try? Data(contentsOf: directory.appendingPathComponent("package.json"))).flatMap(nvmVersion) else {
+        return ManagerScanResult(manager: .nvm, packages: [], warning: nil)
+    }
+    // Only a clean checkout of a release tag follows nvm's documented upgrade.
+    var updatable = false
+    if let git = realGitExecutable().map(URL.init(fileURLWithPath:)) {
+        let tag = await captureDeveloperStandardOutput(git, ["-C", directory.path, "describe", "--tags", "--exact-match", "HEAD"])
+        let status = await captureDeveloperStandardOutput(git, ["-C", directory.path, "status", "--porcelain", "--untracked-files=no"])
+        updatable = tag.status == 0 && status.status == 0
+            && String(decoding: status.data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+    var latest: String?
+    if let url = URL(string: "https://api.github.com/repos/nvm-sh/nvm/releases/latest"),
+       let data = await fetchRegistryData(url) {
+        struct Release: Decodable { let tag_name: String }
+        latest = (try? JSONDecoder().decode(Release.self, from: data))?.tag_name
+            .trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
+    }
+    return ManagerScanResult(manager: .nvm, packages: [
+        DeveloperPackage(name: "nvm", currentVersion: version, latestVersion: latest ?? version,
+            manager: .nvm, executablePath: script, registryIdentifier: "nvm-sh/nvm",
+            installationContext: directory.path, canUpdateAutomatically: updatable)
+    ], warning: latest == nil ? "nvm: the GitHub release check failed." : nil)
+}

@@ -536,6 +536,7 @@ private struct DeveloperPackageDetailContent: View {
         case .conda: return URL(string: "https://anaconda.org/conda-forge/\(encoded)")
         case .sdkman: return URL(string: "https://sdkman.io/sdks/\(encoded)")
         case .claudeCode: return URL(string: "https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md")
+        case .nvm: return URL(string: "https://github.com/nvm-sh/nvm/releases")
         }
     }
 

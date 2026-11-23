@@ -13,7 +13,7 @@ import Testing
     // asdf and fnm publish no official logo, so they keep a system symbol. Docker
     // and Hugging Face logos are not bundled until their brand terms are reviewed.
     let withoutBundledLogo: Set<DeveloperPackageManager> = [
-        .asdf, .fnm, .dockerImages, .pixi, .krew, .juliaup, .opam, .dart, .poetry, .flutter, .ghcup, .swiftly, .conda, .sdkman, .claudeCode
+        .asdf, .fnm, .dockerImages, .pixi, .krew, .juliaup, .opam, .dart, .poetry, .flutter, .ghcup, .swiftly, .conda, .sdkman, .claudeCode, .nvm
     ]
     for manager in DeveloperPackageManager.allCases where !withoutBundledLogo.contains(manager) {
         #expect(ThirdPartyLogo.bundledNames.contains(manager.assetName), "No logo for \(manager.rawValue)")
