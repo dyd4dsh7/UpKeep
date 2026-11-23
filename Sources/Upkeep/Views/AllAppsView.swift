@@ -28,7 +28,7 @@ struct AllAppsView: View {
                     } content: {
                         ItemIdentityView(
                             title: app.name,
-                            detail: sourceSummary(for: app) + (app.bundleIdentifier.map(duplicateBundleIDs.contains) == true ? " · " + app.url.deletingLastPathComponent().path : ""),
+                            detail: rowDetail(for: app, isDuplicate: app.bundleIdentifier.map(duplicateBundleIDs.contains) == true),
                             isRunning: store.isRunning(app),
                             prereleaseChannel: update?.prereleaseChannel ?? app.prereleaseChannel,
                             prereleaseIsInstalled: update?.prereleaseIsInstalled ?? (app.prereleaseChannel != nil),
@@ -98,6 +98,7 @@ struct AllAppsView: View {
                 }
                 .upkeepContentList()
                 .upkeepStateTransition()
+                .task(id: visibleApps.map(\.id)) { await store.loadDescriptions(for: visibleApps) }
             }
         }
         .upkeepAnimated(for: visibleApps.map(\.id))
@@ -363,6 +364,13 @@ struct AllAppsView: View {
         store.update(for: app)
     }
 
+    /// Copies of the same app show where each one is; others say what the app is.
+    private func rowDetail(for app: InstalledApp, isDuplicate: Bool) -> String {
+        let summary = sourceSummary(for: app)
+        if isDuplicate { return summary + " · " + app.url.deletingLastPathComponent().path }
+        return store.itemDescription(for: app).map { $0 + " · " + summary } ?? summary
+    }
+
     private func sourceSummary(for app: InstalledApp) -> String {
         let sources = store.sources(for: app)
         guard let first = sources.first else {
@@ -446,6 +454,7 @@ struct AppDetailView: View {
                         .font(.body.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
+                ItemDescriptionText(text: store.itemDescription(for: app))
                 HStack(spacing: 6) {
                     if store.isRunning(app) { RunningBadge() }
                     ForEach(store.sources(for: app)) { source in SourceBadge(source: source) }
@@ -469,6 +478,7 @@ struct AppDetailView: View {
                     lastChecked: store.lastChecked(for: app)
                 )
             }
+            .task(id: app.id) { await store.loadDescriptions(for: [app]) }
     }
 
     private var technicalDisclosure: some View {

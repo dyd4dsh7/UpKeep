@@ -267,6 +267,8 @@ struct UpkeepDependencies: Sendable {
     let directAppInstaller: any DirectAppInstalling
     let applicationLifecycle: any ApplicationLifecycleManaging
     let appUninstaller: any AppUninstalling
+    let itemDescriber: any ItemDescribing
+    let descriptionCacheURL: URL?
     let externalVerificationInterval: Duration
     let makeCVEClient: (@MainActor @Sendable () -> CVEInventoryClient)?
 
@@ -282,6 +284,8 @@ struct UpkeepDependencies: Sendable {
         directAppInstaller: any DirectAppInstalling = DirectAppInstaller(),
         applicationLifecycle: any ApplicationLifecycleManaging = WorkspaceApplicationLifecycle(),
         appUninstaller: any AppUninstalling = AppUninstaller(),
+        itemDescriber: any ItemDescribing = ItemDescriptionClient(),
+        descriptionCacheURL: URL? = ItemDescriptionCache.defaultURL,
         externalVerificationInterval: Duration = .seconds(3),
         makeCVEClient: (@MainActor @Sendable () -> CVEInventoryClient)? = nil
     ) {
@@ -296,6 +300,8 @@ struct UpkeepDependencies: Sendable {
         self.directAppInstaller = directAppInstaller
         self.applicationLifecycle = applicationLifecycle
         self.appUninstaller = appUninstaller
+        self.itemDescriber = itemDescriber
+        self.descriptionCacheURL = descriptionCacheURL
         self.externalVerificationInterval = externalVerificationInterval
         self.makeCVEClient = makeCVEClient
     }

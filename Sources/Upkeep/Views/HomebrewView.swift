@@ -276,7 +276,12 @@ private struct PackageRow: View, Equatable {
         var details = [package.kind.rawValue]
         if package.isRevisionUpdate { details.append("Rebuild update") }
         if package.isDependency { details.append("Dependency") }
-        if package.kind == .cask { details.append("May require password") }
+        // The description leads so a narrow list still shows it.
+        if let description = store.itemDescription(for: package) {
+            details.insert(description, at: 0)
+        } else if package.kind == .cask {
+            details.append("May require password")
+        }
         return details.joined(separator: " · ")
     }
 
@@ -297,7 +302,7 @@ struct PackageDetail: View {
                     } detail: {
                         Text(package.isOutdated ? "\(package.installedVersion) → \(package.currentVersion)" : package.installedVersion)
                             .font(.callout.monospacedDigit()).foregroundStyle(package.isOutdated ? Color.accentColor : .secondary)
-                        if let description = package.description { Text(description).foregroundStyle(.secondary) }
+                        ItemDescriptionText(text: store.itemDescription(for: package))
                         ItemCheckStatus(
                             isRefreshing: store.isRefreshing(package),
                             lastChecked: store.lastChecked(for: package)

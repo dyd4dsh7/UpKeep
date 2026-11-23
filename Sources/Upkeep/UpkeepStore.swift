@@ -111,6 +111,7 @@ final class UpkeepStore: ObservableObject {
     let updateExecutionState = UpkeepUpdateExecutionState()
     let mutationCoordinator = MutationCoordinator()
     var diagnostics = UpkeepDiagnosticsState()
+    let descriptions: ItemDescriptionState
 
     private let refreshScheduler = RefreshScheduler()
     private let fullScanCoordinator = FullScanCoordinator()
@@ -142,6 +143,8 @@ final class UpkeepStore: ObservableObject {
         self.externalUpdateVerifier = ExternalUpdateVerifier(discovery: dependencies.applicationDiscovery,
             interval: dependencies.externalVerificationInterval)
         self.scanState = UpkeepScanState(lastChecked: settings.lastCompletedScanDate)
+        self.descriptions = ItemDescriptionState(describer: dependencies.itemDescriber,
+                                                 cacheURL: dependencies.descriptionCacheURL)
         bindFeatureState()
     }
 

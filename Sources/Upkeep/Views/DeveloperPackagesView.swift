@@ -89,10 +89,13 @@ struct DeveloperPackagesView: View {
     }
 
     private func packageList(_ packages: [DeveloperPackage]) -> some View {
-        List(packages, selection: $store.navigation.selectedDeveloperPackageID) { package in
+        let repeatedNames = DeveloperPackageRow.repeatedNames(in: packages)
+        return List(packages, selection: $store.navigation.selectedDeveloperPackageID) { package in
             DeveloperPackageRow(
                 store: store,
                 package: package,
+                description: store.itemDescription(for: package),
+                isRepeatedName: repeatedNames.contains(package.name),
                 isSelected: package.id == store.selectedDeveloperPackageID,
                 isRefreshing: store.isRefreshing(package),
                 exclusion: store.exclusion(for: package),
@@ -104,6 +107,7 @@ struct DeveloperPackagesView: View {
         .upkeepContentList()
         .onAppear { ensurePackageSelection(in: packages) }
         .onChange(of: packages.map(\.id)) { _, _ in ensurePackageSelection(in: packages) }
+        .task(id: packages.map(\.id)) { await store.loadDescriptions(for: packages) }
     }
 
     private var sortedPackages: [DeveloperPackage] {
@@ -185,16 +189,26 @@ func openDeveloperPackageFolder(_ package: DeveloperPackage) {
     NSWorkspace.shared.open(folderURL)
 }
 
-private struct DeveloperPackageRow: View, Equatable {
+struct DeveloperPackageRow: View, Equatable {
     let store: UpkeepStore
     let package: DeveloperPackage
+    let description: String?
+    let isRepeatedName: Bool
     let isSelected: Bool
     let isRefreshing: Bool
     let exclusion: UpdateExclusion?
     let isWorking: Bool
 
+    static func repeatedNames(in packages: [DeveloperPackage]) -> Set<String> {
+        var seen = Set<String>(), repeated = Set<String>()
+        for package in packages where !seen.insert(package.name).inserted { repeated.insert(package.name) }
+        return repeated
+    }
+
     nonisolated static func == (left: Self, right: Self) -> Bool {
         left.package == right.package
+            && left.description == right.description
+            && left.isRepeatedName == right.isRepeatedName
             && left.isSelected == right.isSelected
             && left.isRefreshing == right.isRefreshing
             && left.exclusion == right.exclusion
@@ -261,10 +275,27 @@ private struct DeveloperPackageRow: View, Equatable {
         }
     }
 
+    /// The description comes first so a narrow list still shows it. Repeated
+    /// names, such as one Node.js per nvm version, keep the label that tells
+    /// them apart.
     private var rowDetail: String {
-        [package.manager.rawValue, package.installationContext ?? URL(fileURLWithPath: package.executablePath).deletingLastPathComponent().path]
-            .compactMap { $0 }
-            .joined(separator: " · ")
+        Self.rowDetail(for: package, description: description, isRepeatedName: isRepeatedName)
+    }
+
+    static func rowDetail(for package: DeveloperPackage, description: String?, isRepeatedName: Bool) -> String {
+        let folder = URL(fileURLWithPath: package.executablePath).deletingLastPathComponent().path
+        let parts: [String?]
+        switch (description, isRepeatedName, package.installationContext) {
+        case let (_, true, context?):
+            parts = [package.manager.rawValue, context]
+        case let (description?, true, nil):
+            parts = [description, folder]
+        case let (description?, false, _):
+            parts = [description, package.manager.rawValue]
+        case (nil, _, _):
+            parts = [package.manager.rawValue, package.installationContext ?? folder]
+        }
+        return parts.compactMap { $0 }.joined(separator: " · ")
     }
 
 }
@@ -293,6 +324,7 @@ private struct DeveloperPackageDetailContent: View {
                         PackageManagerIcon(manager: package.manager, size: 44)
                     } detail: {
                         Text(package.manager.packageLabel).foregroundStyle(.secondary)
+                        ItemDescriptionText(text: store.itemDescription(for: package))
                         ItemCheckStatus(
                             isRefreshing: store.isRefreshing(package),
                             lastChecked: store.lastChecked(for: package)
@@ -386,6 +418,7 @@ private struct DeveloperPackageDetailContent: View {
         .onAppear {
             detailState.prepare(for: package)
         }
+        .task(id: package.id) { await store.loadDescriptions(for: [package]) }
         .onChange(of: package.id) { _, _ in
             detailState.prepare(for: package)
         }

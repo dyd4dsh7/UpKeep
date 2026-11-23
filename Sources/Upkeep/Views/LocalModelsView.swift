@@ -46,6 +46,7 @@ struct LocalModelsView: View {
             LocalModelRow(
                 store: store,
                 model: model,
+                description: store.itemDescription(for: model),
                 isSelected: model.id == store.selectedLocalModelID,
                 exclusion: store.exclusion(for: model),
                 isWorking: store.isWorking(.localModel(model.id)),
@@ -57,6 +58,7 @@ struct LocalModelsView: View {
         .upkeepContentList()
         .onAppear { ensureModelSelection(in: models) }
         .onChange(of: models.map(\.id)) { _, _ in ensureModelSelection(in: models) }
+        .task(id: models.map(\.id)) { await store.loadDescriptions(for: models) }
     }
 
     private var sortedModels: [LocalLLMModel] {
@@ -75,6 +77,7 @@ struct LocalModelsView: View {
 private struct LocalModelRow: View, Equatable {
     let store: UpkeepStore
     let model: LocalLLMModel
+    let description: String?
     let isSelected: Bool
     let exclusion: UpdateExclusion?
     let isWorking: Bool
@@ -82,6 +85,7 @@ private struct LocalModelRow: View, Equatable {
 
     nonisolated static func == (left: Self, right: Self) -> Bool {
         left.model == right.model
+            && left.description == right.description
             && left.isSelected == right.isSelected
             && left.exclusion == right.exclusion
             && left.isWorking == right.isWorking
@@ -91,7 +95,7 @@ private struct LocalModelRow: View, Equatable {
         StandardItemRow(isSelected: isSelected) {
             LocalModelRuntimeIcon(runtime: model.runtime, size: 36)
         } content: {
-            LocalModelIdentityView(model: model)
+            LocalModelIdentityView(model: model, description: description)
         } accessories: {
             UpdateVersionAccessory(
                 currentVersion: model.installedRevision,
@@ -151,7 +155,7 @@ struct LocalModelDetail: View {
                         LocalModelRuntimeIcon(runtime: model.runtime, size: 44)
                     } detail: {
                         if let variant = model.variant { Text(variant).font(.title3).foregroundStyle(.secondary).textSelection(.enabled) }
-
+                        ItemDescriptionText(text: store.itemDescription(for: model))
                     }
                 } content: {
                     if model.isOutdated {
@@ -177,6 +181,7 @@ struct LocalModelDetail: View {
                     }
                 }
                 .localModelUninstallConfirmation($modelPendingUninstall)
+                .task(id: model.id) { await store.loadDescriptions(for: [model]) }
         } else {
             WorkspaceEmptyState("Select a model", systemImage: "brain.head.profile")
         }

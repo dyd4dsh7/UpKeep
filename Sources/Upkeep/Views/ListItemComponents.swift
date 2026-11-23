@@ -465,14 +465,28 @@ struct UpdateVersionAccessory: View {
 
 struct LocalModelIdentityView: View {
     let model: LocalLLMModel
+    var description: String?
 
     var body: some View {
         ItemIdentityView(
             title: model.name,
-            detail: model.variant.map { "\(model.runtime.rawValue) · \($0)" }
-                ?? model.runtime.rawValue,
+            detail: [description, model.runtime.rawValue, model.variant].compactMap { $0 }.joined(separator: " · "),
             prereleaseChannel: model.prereleaseChannel
         )
+    }
+}
+
+/// The "what is this" line under an item's name in its details panel.
+struct ItemDescriptionText: View {
+    let text: String?
+
+    var body: some View {
+        if let text {
+            Text(text)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+        }
     }
 }
 

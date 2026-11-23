@@ -136,5 +136,6 @@ struct AppStoreClient: Sendable {
         let version: String
         let releaseNotes: String?
         let trackViewUrl: String?
+        var description: String? = nil
     }
 }

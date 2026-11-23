@@ -136,7 +136,8 @@ enum UIFixture {
         let store = UpkeepStore(settings: settings, dependencies: UpkeepDependencies(scanner: services,
             applicationDiscovery: services, homebrew: services, developerPackages: services,
             packageCleanup: services, localModels: services, history: services, externalOpener: services,
-            directAppInstaller: services, applicationLifecycle: services, makeCVEClient: makeCVEClient ?? { UIFixture.cveInventoryClient }))
+            directAppInstaller: services, applicationLifecycle: services,
+            itemDescriber: OfflineItemDescriber(), descriptionCacheURL: nil, makeCVEClient: makeCVEClient ?? { UIFixture.cveInventoryClient }))
         if showsDialogs {
             DiagnosticsStore.shared.record(.info, category: .scan, "Update scan started")
             DiagnosticsStore.shared.record(.warning, category: .source, "Fixture publisher returned a partial result", metadata: [

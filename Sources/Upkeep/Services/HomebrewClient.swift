@@ -198,7 +198,7 @@ private func caskCatalogCacheURL() -> URL? {
 /// catalog in memory until the file changes, so scans neither re-read nor
 /// re-decode the full catalog.
 struct SlimCaskCatalog: Codable {
-    static let currentFormat = 1
+    static let currentFormat = 2
     let format: Int
     let casks: [Entry]
 
@@ -208,18 +208,19 @@ struct SlimCaskCatalog: Codable {
         let v: String
         let a: Bool?
         let apps: [String]?
+        let d: String?
     }
 
     init(_ catalog: [CatalogCask]) {
         format = Self.currentFormat
         casks = catalog.map {
             Entry(t: $0.token, n: $0.name, v: $0.version, a: $0.autoUpdates ? true : nil,
-                  apps: $0.artifactAppNames.isEmpty ? nil : $0.artifactAppNames)
+                  apps: $0.artifactAppNames.isEmpty ? nil : $0.artifactAppNames, d: $0.desc)
         }
     }
 
     var catalog: [CatalogCask] {
-        casks.map { CatalogCask(token: $0.t, name: $0.n, version: $0.v, autoUpdates: $0.a ?? false, artifactAppNames: $0.apps ?? []) }
+        casks.map { CatalogCask(token: $0.t, name: $0.n, version: $0.v, autoUpdates: $0.a ?? false, artifactAppNames: $0.apps ?? [], desc: $0.d) }
     }
 
     static func decode(_ data: Data) -> [CatalogCask]? {
@@ -600,23 +601,26 @@ struct CatalogCask: Decodable, Sendable {
     let version: String
     let autoUpdates: Bool
     let artifactAppNames: [String]
+    let desc: String?
 
     init(
         token: String,
         name: [String],
         version: String,
         autoUpdates: Bool = false,
-        artifactAppNames: [String] = []
+        artifactAppNames: [String] = [],
+        desc: String? = nil
     ) {
         self.token = token
         self.name = name
         self.version = version
         self.autoUpdates = autoUpdates
         self.artifactAppNames = artifactAppNames
+        self.desc = desc
     }
 
     private enum CodingKeys: String, CodingKey {
-        case token, name, version, artifacts
+        case token, name, version, artifacts, desc
         case autoUpdates = "auto_updates"
     }
 
@@ -626,6 +630,7 @@ struct CatalogCask: Decodable, Sendable {
         name = try container.decode([String].self, forKey: .name)
         version = try container.decode(String.self, forKey: .version)
         autoUpdates = try container.decodeIfPresent(Bool.self, forKey: .autoUpdates) ?? false
+        desc = try? container.decodeIfPresent(String.self, forKey: .desc)
         let artifacts = try? container.decode([CatalogArtifact].self, forKey: .artifacts)
         artifactAppNames = artifacts?.flatMap(\.appNames) ?? []
     }
