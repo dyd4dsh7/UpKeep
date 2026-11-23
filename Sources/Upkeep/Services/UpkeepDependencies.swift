@@ -103,12 +103,17 @@ protocol HomebrewManaging: Sendable {
     func uninstall(_ package: HomebrewPackage) async throws
     /// Runs `brew pin` or `brew unpin` for a formula.
     func setPinned(_ package: HomebrewPackage, _ pinned: Bool) async throws
+    /// Whether Homebrew has a formula with exactly this name.
+    func formulaExists(_ name: String) async -> Bool
+    func installFormula(_ name: String) async throws
 }
 
 extension HomebrewManaging {
     func services() async throws -> [HomebrewService] { throw ScopedScanError.unavailable }
     func uninstall(_ package: HomebrewPackage) async throws { throw ScopedScanError.unavailable }
     func setPinned(_ package: HomebrewPackage, _ pinned: Bool) async throws { throw ScopedScanError.unavailable }
+    func formulaExists(_ name: String) async -> Bool { false }
+    func installFormula(_ name: String) async throws { throw ScopedScanError.unavailable }
 }
 
 typealias DeveloperScanProgressReporter = @Sendable (DeveloperPackageClient.Report, Set<DeveloperPackageManager>) async -> Void

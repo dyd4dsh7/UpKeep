@@ -128,6 +128,26 @@ struct HomebrewClient: Sendable {
         try await execute(["upgrade", "--cask", token])
     }
 
+    func formulaExists(_ name: String) async -> Bool {
+        guard let brew = Self.brewURL, Self.isFormulaName(name),
+              let result = try? await CommandRunner.run(brew, ["info", "--json=v2", "--formula", name], timeout: 60),
+              result.status == 0,
+              let object = try? JSONSerialization.jsonObject(with: result.output) as? [String: Any],
+              let formulae = object["formulae"] as? [[String: Any]] else { return false }
+        return formulae.contains { ($0["name"] as? String) == name }
+    }
+
+    func installFormula(_ name: String) async throws {
+        guard Self.isFormulaName(name) else { throw BrewError.failed("“\(name)” is not a Homebrew formula name.") }
+        try await execute(["install", "--formula", name])
+    }
+
+    /// Formula names are lowercase letters, digits, and - _ . + @.
+    static func isFormulaName(_ name: String) -> Bool {
+        !name.isEmpty && !name.hasPrefix("-")
+            && name.unicodeScalars.allSatisfy { CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789-_.+@").contains($0) }
+    }
+
     func setPinned(_ package: HomebrewPackage, _ pinned: Bool) async throws {
         guard package.kind == .formula else { throw BrewError.failed("Homebrew can only pin formulae, not casks.") }
         try await execute([pinned ? "pin" : "unpin", package.token])

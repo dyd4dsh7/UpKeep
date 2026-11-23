@@ -171,3 +171,87 @@ private func makeNpmPrefix(_ root: URL, packages: [String]) throws -> URL {
     let nvm = DuplicateMember.developer(package("pnpm", .npm, context: "NVM Node 24.22.1", executable: "/x/bin/npm"))
     #expect(nvm.place == "NVM Node 24.22.1")
 }
+
+// MARK: - pnpm's shared global folder and Homebrew replacements
+
+@Test func pnpmGlobalsFoundThroughEachNodeVersionAreOneInstall() {
+    let data = Data(#"[{"path":"/Users/test/Library/pnpm/global/v11","dependencies":{"@pnpm/exe":{"version":"12.3.1"}}}]"#.utf8)
+    let directory = parsePNPMGlobalDirectory(data)
+    #expect(directory == "/Users/test/Library/pnpm/global/v11")
+    #expect(pnpmGlobalContext(directory!, home: "/Users/test") == "pnpm global · ~/Library/pnpm")
+    // The same context gives the same package ID, so the scan lists it once.
+    let first = DeveloperPackage(name: "@pnpm/exe", currentVersion: "12.3.1", latestVersion: "12.3.1", manager: .pnpm,
+                                 executablePath: "/a/v24/bin/pnpm", installationContext: "pnpm global · ~/Library/pnpm")
+    let second = DeveloperPackage(name: "@pnpm/exe", currentVersion: "12.3.1", latestVersion: "12.3.1", manager: .pnpm,
+                                  executablePath: "/a/v26/bin/pnpm", installationContext: "pnpm global · ~/Library/pnpm")
+    #expect(first.id == second.id)
+    #expect(groups(packages: [first, second]).isEmpty)
+}
+
+@Test func copiesInDifferentNodeVersionsAreMarkedPerVersion() {
+    let perVersion = groups(packages: [package("pnpm", .npm, context: "NVM Node 24.22.1"), package("pnpm", .npm, context: "NVM Node 26.13.0")])
+    #expect(perVersion.first?.isPerNodeVersion == true)
+    let mixed = groups(packages: [package("pnpm", .npm, executable: "/opt/homebrew/bin/npm"), package("pnpm", .npm, context: "NVM Node 26.13.0")])
+    #expect(mixed.first?.isPerNodeVersion == false)
+}
+
+@Test func onlyFormulaNamesAreInstalled() {
+    #expect(HomebrewClient.isFormulaName("pnpm") && HomebrewClient.isFormulaName("python@3.12"))
+    #expect(!HomebrewClient.isFormulaName("@openai/codex"))
+    #expect(!HomebrewClient.isFormulaName("--force"))
+    #expect(!HomebrewClient.isFormulaName("PNPM"))
+}
+
+private actor ReplacingBrew: HomebrewManaging {
+    var installed: [String] = []
+    let available: Set<String>
+    let installFails: Bool
+    init(available: Set<String>, installFails: Bool = false) { self.available = available; self.installFails = installFails }
+    func package(token: String, kind: HomebrewPackageKind, includePrereleases: Bool) async throws -> HomebrewPackage? { nil }
+    func upgrade(_ package: HomebrewPackage) async throws {}
+    func adopt(_ item: AdoptableApp) async throws {}
+    func installOrReplace(_ item: AdoptableApp) async throws {}
+    func upgradeCask(token: String) async throws {}
+    func formulaExists(_ name: String) async -> Bool { available.contains(name) }
+    func installFormula(_ name: String) async throws {
+        if installFails { throw ScopedScanError.unavailable }
+        installed.append(name)
+    }
+}
+
+@MainActor
+@Test func homebrewCanReplaceJavaScriptToolsInstalledMoreThanOnce() async {
+    let suite = "Upkeep.ReplaceTests.\(UUID().uuidString)"
+    defer { UserDefaults.standard.removeTestDomain(forName: suite) }
+    let brew = ReplacingBrew(available: ["pnpm"])
+    let store = CVEStoreFixture.makeStore(settings: AppSettings(defaults: UserDefaults(testSuiteName: suite)!), homebrew: brew)
+    store.developerPackages = [package("pnpm", .npm, context: "NVM Node 24.22.1"), package("pnpm", .npm, context: "NVM Node 26.13.0"),
+                               package("left-pad", .npm, context: "NVM Node 24.22.1"), package("left-pad", .npm, context: "NVM Node 26.13.0")]
+    let found = store.duplicateGroups
+    let pnpm = try! #require(found.first { $0.title == "pnpm" })
+    let leftPad = try! #require(found.first { $0.title == "left-pad" })
+    #expect(await store.homebrewReplacement(for: pnpm) == "pnpm")
+    #expect(await store.homebrewReplacement(for: leftPad) == nil)
+
+    await store.replaceWithHomebrew(pnpm, formula: "pnpm")
+    #expect(await brew.installed == ["pnpm"])
+
+    // Once Homebrew has the formula installed, the group is no longer offered it.
+    store.homebrewPackages = [HomebrewPackage(token: "pnpm", displayName: "pnpm", description: nil, homepage: nil, license: nil,
+        installedVersion: "12.23.0", currentVersion: "12.23.0", kind: .formula, isOutdated: false, isDependency: false, dependencies: [])]
+    #expect(await store.homebrewReplacement(for: pnpm) == nil)
+}
+
+@MainActor
+@Test func aFailedHomebrewInstallRemovesNothing() async {
+    let suite = "Upkeep.ReplaceTests.\(UUID().uuidString)"
+    defer { UserDefaults.standard.removeTestDomain(forName: suite) }
+    let store = CVEStoreFixture.makeStore(settings: AppSettings(defaults: UserDefaults(testSuiteName: suite)!),
+                                          homebrew: ReplacingBrew(available: ["pnpm"], installFails: true))
+    let copies = [package("pnpm", .npm, context: "NVM Node 24.22.1"), package("pnpm", .npm, context: "NVM Node 26.13.0")]
+    store.developerPackages = copies
+    let group = try! #require(store.duplicateGroups.first)
+    await store.replaceWithHomebrew(group, formula: "pnpm")
+    #expect(store.developerPackages == copies)
+    #expect(store.errorMessage != nil)
+}

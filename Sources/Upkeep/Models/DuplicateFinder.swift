@@ -120,6 +120,15 @@ struct DuplicateGroup: Identifiable, Hashable, Sendable {
     let members: [DuplicateMember]
 
     /// The copy with the highest version.
+    /// Every copy is a global package of a different nvm Node.js version, so
+    /// each one only runs while its Node.js version is active.
+    var isPerNodeVersion: Bool {
+        kind == .packageCopies && members.allSatisfy {
+            if case let .developer(package) = $0 { return package.installationContext?.hasPrefix("NVM Node") == true }
+            return false
+        }
+    }
+
     /// The first copy with the highest version, when copies share it.
     var newestID: String? {
         members.reduce(nil as DuplicateMember?) { best, member in
@@ -149,6 +158,10 @@ enum DuplicateFinder {
         isHomebrewInstalled: (String) -> Bool = { DeveloperPackageUninstallAdapters.homebrewPlan(for: $0) != nil }
     ) -> [DuplicateGroup] {
         var groups: [DuplicateGroup] = []
+        // One install found twice (for example pnpm's shared global folder seen
+        // through two Node.js versions) has one ID and must count once.
+        var seenIDs = Set<String>()
+        let developerPackages = developerPackages.filter { seenIDs.insert($0.id).inserted }
 
         let appsByID = Dictionary(grouping: apps.filter { !$0.isUpkeep }) { $0.bundleIdentifier?.lowercased() ?? "" }
         for (bundleID, copies) in appsByID where !bundleID.isEmpty && copies.count > 1 {

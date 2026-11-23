@@ -17,6 +17,8 @@ enum OperationID: Hashable, Sendable {
     case developerRefresh(String)
     case developerScan(DeveloperPackageManager?)
     case packageCleanup(String)
+    /// Installing a Homebrew formula to replace a duplicate group.
+    case duplicateReplacement(String)
     case localModelScan
     case localModelRuntimeScan(LocalModelRuntime)
     case homebrewInventoryScan

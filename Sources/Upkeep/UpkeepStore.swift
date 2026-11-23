@@ -134,6 +134,8 @@ final class UpkeepStore: ObservableObject {
     private var versionCacheRequests: [String: UUID] = [:]
     /// Tries automatic updates again after they waited for power or a network.
     private var automaticUpdateRetryTask: Task<Void, Never>?
+    /// Whether Homebrew has a formula by this name, looked up once per session.
+    private var homebrewFormulaAvailability: [String: Bool] = [:]
     static let automaticUpdateRetryDelay: Duration = .seconds(30 * 60)
     private let externalUpdateVerifier: ExternalUpdateVerifier
 
@@ -2268,6 +2270,45 @@ final class UpkeepStore: ObservableObject {
         return await Task.detached(priority: .utility) {
             ActiveInstallations.activeIDs(in: groups, path: path)
         }.value
+    }
+
+    /// A Homebrew formula that can replace a JavaScript tool installed with
+    /// npm, pnpm or Yarn more than once, so one copy works whichever Node.js
+    /// version is active.
+    func homebrewReplacement(for group: DuplicateGroup) async -> String? {
+        guard group.kind == .packageCopies, settings.checkHomebrew,
+              case let .developer(first)? = group.members.first,
+              [.npm, .pnpm, .yarn].contains(first.manager) else { return nil }
+        let name = first.name.lowercased()
+        guard HomebrewClient.isFormulaName(name),
+              !homebrewPackages.contains(where: { $0.kind == .formula && $0.token == name }) else { return nil }
+        if let known = homebrewFormulaAvailability[name] { return known ? name : nil }
+        let exists = await dependencies.homebrew.formulaExists(name)
+        homebrewFormulaAvailability[name] = exists
+        return exists ? name : nil
+    }
+
+    /// Installs the Homebrew formula, then removes the copies it replaces. If
+    /// the install fails, nothing is removed.
+    func replaceWithHomebrew(_ group: DuplicateGroup, formula: String) async {
+        let operationID = OperationID.duplicateReplacement(group.id)
+        guard !isWorking(operationID) else { return }
+        updateExecutionState.activeOperations.insert(operationID)
+        let installed = await mutationCoordinator.withAccess(to: [.packageEnvironment("homebrew")], otherwise: false) {
+            await execute(label: formula, activity: operationID, metadata: [
+                "Source": "Homebrew formula \(formula)", "Action": "Install to replace duplicates"
+            ]) { try await self.dependencies.homebrew.installFormula(formula) }
+        }
+        updateExecutionState.activeOperations.remove(operationID)
+        guard installed else { return }
+        for member in group.members where canRemove(member) {
+            await remove(member, rescan: false)
+        }
+        await scan()
+    }
+
+    func isReplacingWithHomebrew(_ group: DuplicateGroup) -> Bool {
+        isWorking(.duplicateReplacement(group.id))
     }
 
     func canRemove(_ member: DuplicateMember) -> Bool {

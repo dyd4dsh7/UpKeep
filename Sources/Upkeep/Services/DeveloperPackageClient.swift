@@ -594,10 +594,12 @@ func scanPNPM(_ path: String) async -> ManagerScanResult {
         return failedManagerScan(.pnpm, command: "inventory", result: installedResult)
     }
     let outdated = try? JSONDecoder().decode([String: NPMOutdated].self, from: outdatedResult.data)
+    let context = parsePNPMGlobalDirectory(installedResult.data).map { pnpmGlobalContext($0) }
+        ?? nvmInstallationContext(for: path)
     let packages = installed.map { name, version in
         DeveloperPackage(
             name: name, currentVersion: version, latestVersion: outdated?[name]?.latest ?? version,
-            manager: .pnpm, executablePath: path, installationContext: nvmInstallationContext(for: path)
+            manager: .pnpm, executablePath: path, installationContext: context
         )
     }
     return ManagerScanResult(
@@ -1671,7 +1673,11 @@ func developerCommandTemporaryDirectory(
 private struct NPMList: Decodable { let dependencies: [String: NPMInstalled] }
 private struct NPMInstalled: Decodable { let version: String }
 private struct NPMOutdated: Decodable { let latest: String }
-private struct PNPMRoot: Decodable { let dependencies: [String: PNPMEntry]?; let devDependencies: [String: PNPMEntry]? }
+private struct PNPMRoot: Decodable {
+    let path: String?
+    let dependencies: [String: PNPMEntry]?
+    let devDependencies: [String: PNPMEntry]?
+}
 private struct PNPMEntry: Decodable { let version: String }
 private struct BunGlobalManifest: Decodable {
     let dependencies: [String: String]?
@@ -1698,6 +1704,24 @@ struct GoInstalledTool: Sendable {
 private struct ComposerOutdated: Decodable {
     let installed: [Package]
     struct Package: Decodable { let name: String; let version: String; let latest: String? }
+}
+
+/// pnpm keeps global packages in one folder whichever Node.js runs pnpm, so
+/// the same packages are found through every nvm Node.js version's pnpm.
+func parsePNPMGlobalDirectory(_ data: Data) -> String? {
+    let decoder = JSONDecoder()
+    let roots = (try? decoder.decode([PNPMRoot].self, from: data)) ?? (try? decoder.decode(PNPMRoot.self, from: data)).map { [$0] }
+    return roots?.compactMap(\.path).first
+}
+
+/// "pnpm global · ~/Library/pnpm" for ~/Library/pnpm/global/v11. Packages
+/// found through different pnpm executables share this context, so they are
+/// listed once.
+func pnpmGlobalContext(_ directory: String, home: String = NSHomeDirectory()) -> String {
+    var folder = directory
+    if let range = folder.range(of: "/global/") { folder = String(folder[..<range.lowerBound]) }
+    if folder.hasPrefix(home) { folder = "~" + folder.dropFirst(home.count) }
+    return "pnpm global · " + folder
 }
 
 func parsePNPMInstalledPackages(_ data: Data) -> [String: String]? {
