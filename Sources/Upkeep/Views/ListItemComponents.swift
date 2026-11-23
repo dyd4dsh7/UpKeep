@@ -348,16 +348,45 @@ struct ItemStatusView: View {
     }
 }
 
+/// An installed version with no update. It sits in the same column as the
+/// current version of an update row ("3.2.0 → 3.3.0"), so versions line up
+/// down the list whether or not a row has an update.
 struct InstalledVersionView: View {
+    @Environment(\.listColumns) private var columns
     let version: String
+    /// Off for lists that never show a version change, such as macOS
+    /// updates, where the version sits beside its button.
+    var alignsWithTransitions = true
 
     var body: some View {
+        if alignsWithTransitions { columnAligned } else { compact }
+    }
+
+    private var compact: some View {
         Text(version)
             .font(.system(.callout, design: .monospaced))
             .foregroundStyle(.secondary)
             .lineLimit(1)
             .minimumScaleFactor(0.75)
-            .frame(width: 104, alignment: .trailing)
+            .frame(width: columns.latestVersion, alignment: .trailing)
+    }
+
+    private var columnAligned: some View {
+        // Mirrors VersionTransitionView's layout with the arrow and new
+        // version left out, so the columns match to the point.
+        HStack(spacing: 5) {
+            Text(version)
+                .foregroundStyle(.secondary)
+                .truncationMode(.middle)
+                .frame(width: columns.currentVersion, alignment: .trailing)
+            Image(systemName: "arrow.right").font(.caption).hidden()
+            Color.clear.frame(width: columns.latestVersion, height: 1)
+        }
+        .font(.system(.callout, design: .monospaced))
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
+        .frame(width: columns.versionTransition, alignment: .trailing)
+        .accessibilityElement(children: .combine)
     }
 }
 

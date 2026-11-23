@@ -230,7 +230,7 @@ struct GlobalSearchView: View {
                 prereleaseChannel: update.prereleaseChannel
             )
         } accessories: {
-            InstalledVersionView(version: update.version)
+            InstalledVersionView(version: update.version, alignsWithTransitions: false)
             Button("Show Update") { store.revealInventoryResult(.macOS(update.id)) }
                 .listRowPrimaryAction()
                 .help("Show this item in the macOS workspace")

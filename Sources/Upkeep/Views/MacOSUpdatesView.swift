@@ -116,7 +116,7 @@ struct MacOSUpdatesView: View {
                 prereleaseChannel: update.prereleaseChannel
             )
         } accessories: {
-            InstalledVersionView(version: update.version)
+            InstalledVersionView(version: update.version, alignsWithTransitions: false)
             Button {
                 Task { await store.prepareMacOSUpdate(update) }
             } label: {
