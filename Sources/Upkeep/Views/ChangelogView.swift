@@ -118,6 +118,9 @@ private struct UpkeepRelease: Identifiable {
     static let fullChangelogURL = URL(string: "https://github.com/\(SelfUpdate.repository)/blob/main/CHANGELOG.md")!
 
     static let all = [
+        UpkeepRelease(version: "0.25.23", date: "24 November 2026", changes: [
+            "Clears the selection after an uninstall instead of jumping to another item."
+        ]),
         UpkeepRelease(version: "0.25.22", date: "23 November 2026", changes: [
             "Lets you uninstall every app except those macOS protects, including Upkeep itself.",
             "Adds Uninstall for local AI models and for nearly every developer package."

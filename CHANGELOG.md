@@ -4,6 +4,10 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+## 0.25.23 — 2026-11-24
+
+- After an uninstall, nothing is selected instead of the list jumping to another app, package or model. Selecting an item or changing section works as before.
+
 ## 0.25.22 — 2026-11-23
 
 - Almost everything Upkeep lists can now be uninstalled. Apps: every app except those macOS protects, such as Safari; Upkeep can move itself to the Trash and quit. Homebrew: every formula and cask.
