@@ -4,6 +4,12 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+## 0.25.22 — 2026-11-23
+
+- Almost everything Upkeep lists can now be uninstalled. Apps: every app except those macOS protects, such as Safari; Upkeep can move itself to the Trash and quit. Homebrew: every formula and cask.
+- Local AI models can be uninstalled. Ollama models are removed with `ollama rm`; LM Studio model files and Hugging Face cache folders are moved to the Trash.
+- Developer packages gain uninstall for npm, pnpm and Yarn themselves, mise, asdf, GHCup, swiftly, pixi, conda, SDKMAN, Docker images (refused while a container uses the image), Go tools, MacPorts (asks for an administrator password), Xcode simulator runtimes, and tools installed with Homebrew or the official Node.js and Go installers. Bun, Deno, Claude Code, Poetry, Flutter, nvm and the Google Cloud CLI installed in their own folder are moved to the Trash; remove any lines they added to your shell profile yourself. Tools whose installation Upkeep can't identify still have no Uninstall.
+
 ## 0.25.21 — 2026-11-23
 
 - Homebrew formulae and casks can now be uninstalled from the package's details panel, its options menu, or by right-clicking it in the list. Upkeep runs `brew uninstall`, quits a cask's app first if it is running, and warns when other installed formulae depend on the package. Casks may ask for an administrator password in Terminal.
