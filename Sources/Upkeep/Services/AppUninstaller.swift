@@ -1,26 +1,38 @@
 import Foundation
 
 protocol AppUninstalling: Sendable {
-    /// Moves an application bundle to the Trash so the user can still restore it.
-    func moveToTrash(_ url: URL) async throws
-    /// Moves an app's settings and caches to the Trash. Returns the items that
-    /// could not be moved, such as containers macOS protects.
-    func moveDataToTrash(_ urls: [URL]) async -> [URL]
+    /// Moves an application bundle to the Trash so the user can still restore
+    /// it. Returns where it went, or nil when Finder moved it.
+    @discardableResult
+    func moveToTrash(_ url: URL) async throws -> URL?
+    /// Moves an app's settings and caches to the Trash. Items that cannot be
+    /// moved, such as containers macOS protects, are reported as failed.
+    func moveDataToTrash(_ urls: [URL]) async -> AppDataTrashResult
+}
+
+struct AppDataTrashResult: Sendable {
+    var moved: [TrashedItem] = []
+    var failed: [URL] = []
 }
 
 extension AppUninstalling {
-    func moveDataToTrash(_ urls: [URL]) async -> [URL] {
-        urls.filter { url in
+    func moveDataToTrash(_ urls: [URL]) async -> AppDataTrashResult {
+        var result = AppDataTrashResult()
+        for url in urls {
             do {
-                try FileManager.default.trashItem(at: url, resultingItemURL: nil)
-                return false
+                var trashed: NSURL?
+                try FileManager.default.trashItem(at: url, resultingItemURL: &trashed)
+                if let trashed = trashed as URL? {
+                    result.moved.append(TrashedItem(originalPath: url.path, trashPath: trashed.path))
+                }
             } catch {
                 DiagnosticsStore.shared.record(.warning, category: .command, "App data could not be moved to the Trash", metadata: [
                     "Path": url.path, "Error": error.localizedDescription
                 ])
-                return true
+                result.failed.append(url)
             }
         }
+        return result
     }
 }
 
@@ -100,9 +112,11 @@ struct AppUninstaller: AppUninstalling {
         return info.st_flags & UInt32(SF_RESTRICTED) != 0
     }
 
-    func moveToTrash(_ url: URL) async throws {
+    func moveToTrash(_ url: URL) async throws -> URL? {
         do {
-            try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+            var trashed: NSURL?
+            try FileManager.default.trashItem(at: url, resultingItemURL: &trashed)
+            return trashed as URL?
         } catch {
             // App Store and installer-package apps are owned by root. Finder can
             // still trash them after asking for an administrator password.
@@ -111,6 +125,8 @@ struct AppUninstaller: AppUninstalling {
                 "Direct move error": error.localizedDescription
             ])
             try await trashWithFinder(url)
+            // Finder does not say where in the Trash it put the app.
+            return nil
         }
     }
 

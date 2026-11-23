@@ -271,6 +271,7 @@ struct UpkeepDependencies: Sendable {
     let descriptionCacheURL: URL?
     /// ~/Library, where app data removed with an uninstall is found.
     let appDataLibrary: URL
+    let unattendedConditions: any UnattendedConditionsChecking
     let externalVerificationInterval: Duration
     let makeCVEClient: (@MainActor @Sendable () -> CVEInventoryClient)?
 
@@ -289,6 +290,7 @@ struct UpkeepDependencies: Sendable {
         itemDescriber: any ItemDescribing = ItemDescriptionClient(),
         descriptionCacheURL: URL? = ItemDescriptionCache.defaultURL,
         appDataLibrary: URL = AppDataLocator.defaultLibrary,
+        unattendedConditions: any UnattendedConditionsChecking = LiveUnattendedConditions(),
         externalVerificationInterval: Duration = .seconds(3),
         makeCVEClient: (@MainActor @Sendable () -> CVEInventoryClient)? = nil
     ) {
@@ -306,6 +308,7 @@ struct UpkeepDependencies: Sendable {
         self.itemDescriber = itemDescriber
         self.descriptionCacheURL = descriptionCacheURL
         self.appDataLibrary = appDataLibrary
+        self.unattendedConditions = unattendedConditions
         self.externalVerificationInterval = externalVerificationInterval
         self.makeCVEClient = makeCVEClient
     }

@@ -132,6 +132,9 @@ final class UpkeepStore: ObservableObject {
     private var searchProjection: (generation: UInt64, query: String, results: GlobalSearchResults)?
     private var versionCache: [String: [String]] = [:]
     private var versionCacheRequests: [String: UUID] = [:]
+    /// Tries automatic updates again after they waited for power or a network.
+    private var automaticUpdateRetryTask: Task<Void, Never>?
+    static let automaticUpdateRetryDelay: Duration = .seconds(30 * 60)
     private let externalUpdateVerifier: ExternalUpdateVerifier
 
     init(
@@ -2025,12 +2028,53 @@ final class UpkeepStore: ObservableObject {
             try await self.dependencies.developerPackages.uninstall(package)
         }
         if succeeded {
+            await recordUninstall(name: package.name, version: package.currentVersion, kind: .developer,
+                                  note: "Uninstalled with \(package.manager.rawValue).")
             developerPackages.removeAll { $0.id == package.id }
             if selectedDeveloperPackageID == package.id {
                 clearSelectionAfterUninstall { $0.selectedDeveloperPackageID = nil }
             }
             await scan()
         }
+    }
+
+    /// Adds an uninstall to History. A failure to save it is logged but does
+    /// not undo or fail the uninstall.
+    private func recordUninstall(name: String, version: String, build: String? = nil, kind: UpdateRecordKind,
+                                 note: String, trashed: [TrashedItem] = []) async {
+        let record = UpdateRecord(id: UUID(), date: Date(), name: name, fromVersion: version, toVersion: "",
+            kind: kind, originalAppPath: nil, backupPath: nil, recoveryNote: note,
+            fromBuildVersion: build, action: .uninstall, trashedItems: trashed.isEmpty ? nil : trashed)
+        do { try await dependencies.history.add(record) }
+        catch {
+            DiagnosticsStore.shared.record(.warning, category: .update, "Uninstall could not be added to History", metadata: [
+                "Item": name, "Error": error.localizedDescription
+            ])
+        }
+        updateHistory = await dependencies.history.records()
+    }
+
+    /// Moves an uninstalled item, and any data removed with it, back from the
+    /// Trash. Items whose original location is taken again are left alone.
+    func putBack(_ record: UpdateRecord) async {
+        guard record.canPutBack, let items = record.trashedItems else { return }
+        let operationID = OperationID.historyRestore(record.id)
+        guard !isWorking(operationID) else { return }
+        updateExecutionState.activeOperations.insert(operationID)
+        defer { updateExecutionState.activeOperations.remove(operationID) }
+        let succeeded = await execute(label: "Put back \(record.name)", activity: operationID, metadata: [
+            "Source": "History", "Items": "\(items.count)"
+        ]) {
+            let fileManager = FileManager.default
+            for item in items where fileManager.fileExists(atPath: item.trashPath)
+                && !fileManager.fileExists(atPath: item.originalPath) {
+                let original = URL(fileURLWithPath: item.originalPath)
+                try fileManager.createDirectory(at: original.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try fileManager.moveItem(at: URL(fileURLWithPath: item.trashPath), to: original)
+            }
+        }
+        updateHistory = await dependencies.history.records()
+        if succeeded, record.kind == .app { await scan() }
     }
 
     /// Clears a selection without letting the list jump to the next item.
@@ -2087,6 +2131,7 @@ final class UpkeepStore: ObservableObject {
         let cask = uninstallingCask(for: app)
         // Found before the app goes, while it can still be told apart from others.
         let data = removingData ? appData(for: app) : []
+        var trashedApp: URL?
         let succeeded = await execute(label: app.name, activity: operationID, metadata: [
             "Source": cask.map { "Homebrew cask \($0.token)" } ?? "Trash",
             "App data": removingData ? "\(data.count) items" : "Kept",
@@ -2100,22 +2145,29 @@ final class UpkeepStore: ObservableObject {
             if let cask {
                 try await self.dependencies.homebrew.uninstall(cask)
             } else {
-                try await self.dependencies.appUninstaller.moveToTrash(app.url)
+                trashedApp = try await self.dependencies.appUninstaller.moveToTrash(app.url)
             }
         }
         guard succeeded else { return }
+        var trashed = trashedApp.map { [TrashedItem(originalPath: app.url.path, trashPath: $0.path)] } ?? []
         if app.isUpkeep {
             // Upkeep is now in the Trash; quit so it is not left running from there.
             NSApplication.shared.terminate(nil)
             return
         }
         if !data.isEmpty {
-            let failed = await dependencies.appUninstaller.moveDataToTrash(data.map(\.url))
+            let result = await dependencies.appUninstaller.moveDataToTrash(data.map(\.url))
+            trashed += result.moved
+            let failed = result.failed
             if !failed.isEmpty {
                 let locations = AppDataLocator.locationSummary(data.filter { failed.contains($0.url) })
                 errorMessage = "\(app.name) was uninstalled, but some of its data in \(locations) could not be moved to the Trash. macOS protects some app data; you can remove it in Finder."
             }
         }
+        await recordUninstall(name: app.name, version: app.installedVersion, build: app.buildVersion, kind: .app,
+            note: cask.map { "Uninstalled with Homebrew (brew uninstall --cask \($0.token))." }
+                ?? (trashedApp == nil ? "Moved to the Trash by Finder. Use Put Back in the Trash to restore it." : "Moved to the Trash."),
+            trashed: trashed)
         if let cask { homebrewPackages.removeAll { $0.id == cask.id } }
         apps.removeAll { $0.id == app.id }
         updates.removeAll { $0.app.id == app.id }
@@ -2153,6 +2205,8 @@ final class UpkeepStore: ObservableObject {
             try await self.dependencies.homebrew.uninstall(package)
         }
         guard succeeded else { return }
+        await recordUninstall(name: package.displayName, version: package.installedVersion, kind: .homebrew,
+            note: "Uninstalled with Homebrew (brew uninstall\(package.kind == .cask ? " --cask" : "") \(package.token)).")
         homebrewPackages.removeAll { $0.id == package.id }
         if selectedPackageID == package.id { clearSelectionAfterUninstall { $0.selectedPackageID = nil } }
         if let app {
@@ -2181,6 +2235,8 @@ final class UpkeepStore: ObservableObject {
             "Action": "Uninstall"
         ]) { try await self.dependencies.localModels.uninstall(model) }
         guard succeeded else { return }
+        await recordUninstall(name: model.name, version: model.installedRevision, kind: .model,
+                              note: "Uninstalled from \(model.runtime.rawValue).")
         localModels.removeAll { $0.id == model.id }
         if selectedLocalModelID == model.id { clearSelectionAfterUninstall { $0.selectedLocalModelID = nil } }
     }
@@ -2311,8 +2367,21 @@ final class UpkeepStore: ObservableObject {
     /// Runs after a scheduled check when Automatic updates is on.
     @discardableResult
     func installAutomaticUpdates() async -> BatchUpdateSummary? {
+        automaticUpdateRetryTask?.cancel()
+        automaticUpdateRetryTask = nil
         let items = automaticUpdateItems
         guard !items.isEmpty, updateExecutionState.activeOperations.isEmpty else { return nil }
+        if let reason = await dependencies.unattendedConditions.reasonToWait() {
+            DiagnosticsStore.shared.record(.info, category: .scan, "Automatic updates are waiting", metadata: [
+                "Reason": reason, "Items": "\(items.count)", "Next try": "30 minutes"
+            ])
+            automaticUpdateRetryTask = Task { [weak self] in
+                try? await Task.sleep(for: Self.automaticUpdateRetryDelay)
+                guard !Task.isCancelled else { return }
+                await self?.installAutomaticUpdates()
+            }
+            return nil
+        }
         DiagnosticsStore.shared.record(.info, category: .scan, "Installing automatic updates", metadata: [
             "Setting": settings.automaticUpdates.title,
             "Items": items.map(\.name).joined(separator: ", ")

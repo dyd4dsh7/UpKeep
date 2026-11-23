@@ -52,6 +52,7 @@ enum CVEStoreFixture {
         includeCVEInventory: Bool = false,
         appUninstaller: any AppUninstalling = AppUninstaller(),
         appDataLibrary: URL = AppDataLocator.defaultLibrary,
+        unattendedConditions: any UnattendedConditionsChecking = ReadyForUnattendedUpdates(),
         makeCVEClient: (@MainActor @Sendable () -> CVEInventoryClient)? = nil
     ) -> UpkeepStore {
         let services = CVEStoreFixtureServices(includeCVEInventory: includeCVEInventory)
@@ -61,6 +62,7 @@ enum CVEStoreFixture {
             history: services, externalOpener: services, directAppInstaller: services,
             applicationLifecycle: services, appUninstaller: appUninstaller,
             itemDescriber: OfflineItemDescriber(), descriptionCacheURL: nil, appDataLibrary: appDataLibrary,
+            unattendedConditions: unattendedConditions,
             makeCVEClient: makeCVEClient ?? { CVEStoreFixture.cveInventoryClient }))
         store.apps = services.apps
         store.updates = services.updates
@@ -72,6 +74,11 @@ enum CVEStoreFixture {
         }
         return store
     }
+}
+
+struct ReadyForUnattendedUpdates: UnattendedConditionsChecking {
+    var reason: String?
+    func reasonToWait() async -> String? { reason }
 }
 
 private enum CVEStoreFixtureError: LocalizedError {

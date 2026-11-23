@@ -936,6 +936,17 @@ enum UpdateRecordKind: String, Codable, Sendable {
 
 }
 
+enum UpdateRecordAction: String, Codable, Sendable {
+    case update
+    case uninstall
+}
+
+/// Where an uninstalled item went in the Trash, so History can put it back.
+struct TrashedItem: Codable, Hashable, Sendable {
+    let originalPath: String
+    let trashPath: String
+}
+
 struct UpdateRecord: Identifiable, Codable, Hashable, Sendable {
     let id: UUID
     let date: Date
@@ -948,6 +959,25 @@ struct UpdateRecord: Identifiable, Codable, Hashable, Sendable {
     let recoveryNote: String?
     var fromBuildVersion: String? = nil
     var toBuildVersion: String? = nil
+    /// nil for records saved before uninstalls were recorded; those are updates.
+    var action: UpdateRecordAction? = nil
+    /// The removed item first, then any app data moved with it.
+    var trashedItems: [TrashedItem]? = nil
+
+    var isUninstall: Bool { action == .uninstall }
+
+    /// The uninstalled item is still in the Trash and nothing has taken its place.
+    var canPutBack: Bool {
+        guard isUninstall, let item = trashedItems?.first else { return false }
+        return FileManager.default.fileExists(atPath: item.trashPath)
+            && !FileManager.default.fileExists(atPath: item.originalPath)
+    }
+
+    /// The uninstalled item is back where it was, by Put Back or reinstalling.
+    var isBackInPlace: Bool {
+        guard isUninstall, let item = trashedItems?.first else { return false }
+        return FileManager.default.fileExists(atPath: item.originalPath)
+    }
 
     var fromVersionLabel: String { versionLabel(fromVersion, build: fromBuildVersion) }
     var toVersionLabel: String { versionLabel(toVersion, build: toBuildVersion) }

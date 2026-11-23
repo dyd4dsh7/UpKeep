@@ -140,12 +140,14 @@ private actor RecordingAppUninstaller: AppUninstalling {
     var trashedData: [URL] = []
     let protected: Set<String>
     init(protected: Set<String> = []) { self.protected = protected }
-    func moveToTrash(_ url: URL) async throws { trashedApps.append(url) }
-    func moveDataToTrash(_ urls: [URL]) async -> [URL] {
+    func moveToTrash(_ url: URL) async throws -> URL? { trashedApps.append(url); return nil }
+    func moveDataToTrash(_ urls: [URL]) async -> AppDataTrashResult {
         // Protected by the Library folder they are in, such as Containers.
         let isProtected = { (url: URL) in self.protected.contains(url.deletingLastPathComponent().lastPathComponent) }
-        trashedData += urls.filter { !isProtected($0) }
-        return urls.filter(isProtected)
+        let moved = urls.filter { !isProtected($0) }
+        trashedData += moved
+        return AppDataTrashResult(moved: moved.map { TrashedItem(originalPath: $0.path, trashPath: "/fixture/.Trash/" + $0.lastPathComponent) },
+                                  failed: urls.filter(isProtected))
     }
 }
 
@@ -247,4 +249,66 @@ private actor RecordingAppUninstaller: AppUninstalling {
     let results = await client.describe([.app(game), tool])
     #expect(results[game.key] == .found("Bongo cat needs your help."))
     #expect(results[tool.key] == .found("Entity Framework Core Tools for the .NET Command-Line Interface."))
+}
+
+@MainActor
+@Test func automaticUpdatesWaitForPowerAndAnUnmeteredNetwork() async {
+    let suite = "Upkeep.AutomaticUpdateTests.\(UUID().uuidString)"
+    defer { UserDefaults.standard.removeTestDomain(forName: suite) }
+    let settings = AppSettings(defaults: UserDefaults(testSuiteName: suite)!)
+    settings.automaticUpdates = .homebrewFormulae
+    let formula = HomebrewPackage(token: "jq", displayName: "jq", description: nil, homepage: nil, license: nil,
+                                  installedVersion: "1.0.0", currentVersion: "1.0.1", kind: .formula, isOutdated: true,
+                                  isDependency: false, dependencies: [])
+
+    let waiting = CVEStoreFixture.makeStore(settings: settings,
+        unattendedConditions: ReadyForUnattendedUpdates(reason: "the Mac is on battery power"))
+    waiting.updates = []; waiting.homebrewPackages = [formula]
+    #expect(await waiting.installAutomaticUpdates() == nil)
+
+    let ready = CVEStoreFixture.makeStore(settings: settings)
+    ready.updates = []; ready.homebrewPackages = [formula]
+    // The fixture refuses real upgrades, so the attempt is reported as failed.
+    let summary = await ready.installAutomaticUpdates()
+    #expect(summary?.results.count == 1)
+}
+
+@Test func meteredAndOfflineNetworksDelayAutomaticUpdates() {
+    #expect(LiveUnattendedConditions.reasonToWait(status: .satisfied, isExpensive: false, isConstrained: false) == nil)
+    #expect(LiveUnattendedConditions.reasonToWait(status: .satisfied, isExpensive: true, isConstrained: false)?.contains("metered") == true)
+    #expect(LiveUnattendedConditions.reasonToWait(status: .satisfied, isExpensive: false, isConstrained: true)?.contains("Low Data Mode") == true)
+    #expect(LiveUnattendedConditions.reasonToWait(status: .unsatisfied, isExpensive: false, isConstrained: false) != nil)
+}
+
+@MainActor
+@Test func putBackMovesUninstalledItemsBackFromTheTrash() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("UpkeepPutBack-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let original = root.appendingPathComponent("Models/model.gguf")
+    let trash = root.appendingPathComponent("Trash/model.gguf")
+    let dataOriginal = root.appendingPathComponent("Library/Caches/model")
+    let dataTrash = root.appendingPathComponent("Trash/model-cache")
+    try FileManager.default.createDirectory(at: trash.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data("weights".utf8).write(to: trash)
+    try FileManager.default.createDirectory(at: dataTrash, withIntermediateDirectories: true)
+    let record = UpdateRecord(id: UUID(), date: Date(), name: "Model", fromVersion: "abc", toVersion: "",
+        kind: .model, originalAppPath: nil, backupPath: nil, recoveryNote: nil, action: .uninstall,
+        trashedItems: [TrashedItem(originalPath: original.path, trashPath: trash.path),
+                       TrashedItem(originalPath: dataOriginal.path, trashPath: dataTrash.path)])
+    #expect(record.canPutBack && !record.isBackInPlace)
+
+    let suite = "Upkeep.PutBackTests.\(UUID().uuidString)"
+    defer { UserDefaults.standard.removeTestDomain(forName: suite) }
+    let store = CVEStoreFixture.makeStore(settings: AppSettings(defaults: UserDefaults(testSuiteName: suite)!))
+    await store.putBack(record)
+    #expect(FileManager.default.fileExists(atPath: original.path))
+    #expect(FileManager.default.fileExists(atPath: dataOriginal.path))
+    #expect(!FileManager.default.fileExists(atPath: trash.path))
+    #expect(!record.canPutBack && record.isBackInPlace)
+}
+
+@Test func olderHistoryRecordsReadAsUpdates() throws {
+    let json = #"{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","date":0,"name":"Editor","fromVersion":"1","toVersion":"2","kind":"App"}"#
+    let record = try JSONDecoder().decode(UpdateRecord.self, from: Data(json.utf8))
+    #expect(!record.isUninstall && record.trashedItems == nil && !record.canPutBack)
 }

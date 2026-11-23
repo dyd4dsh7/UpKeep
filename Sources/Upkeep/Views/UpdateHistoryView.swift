@@ -34,11 +34,11 @@ struct UpdateHistoryView: View {
         VStack(spacing: 0) {
             if snapshot.records.isEmpty {
                 WorkspaceEmptyState(
-                    kindFilter == nil ? "No update history" : "No matching updates",
+                    kindFilter == nil ? "No history yet" : "No matching history",
                     systemImage: kindFilter == nil ? "clock" : "line.3.horizontal.decrease.circle",
                     description: Text(kindFilter == nil
-                        ? "Upkeep creates a recovery record before supported updates."
-                        : "Choose another update type to see its history.")
+                        ? "Updates and uninstalls made with Upkeep appear here, with a way to restore them where possible."
+                        : "Choose another type to see its history.")
                 ).frame(maxWidth: .infinity, maxHeight: .infinity)
                     .upkeepStateTransition()
             } else {
@@ -134,18 +134,29 @@ struct UpdateHistoryView: View {
         } content: {
             ItemIdentityView(
                 title: record.name,
-                detail: record.kind.rawValue + " · " + record.date.formatted(date: .omitted, time: .shortened)
+                detail: [record.kind.rawValue, record.isUninstall ? "Uninstalled" : nil,
+                         record.date.formatted(date: .omitted, time: .shortened)]
+                    .compactMap { $0 }.joined(separator: " · ")
             )
         } accessories: {
-            VersionTransitionView(current: record.fromVersionLabel, latest: record.toVersionLabel)
+            if record.isUninstall {
+                Text(record.fromVersionLabel)
+                    .font(.callout.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            } else {
+                VersionTransitionView(current: record.fromVersionLabel, latest: record.toVersionLabel)
+            }
             recoveryControl(for: record)
         }
-        .help(record.recoveryNote ?? "Updated with Upkeep")
+        .help(record.recoveryNote ?? (record.isUninstall ? "Uninstalled with Upkeep" : "Updated with Upkeep"))
     }
 
     @ViewBuilder
     private func recoveryControl(for record: UpdateRecord) -> some View {
-        if record.canRevertDirectly {
+        if record.isUninstall {
+            uninstallControl(for: record)
+        } else if record.canRevertDirectly {
             Button { store.pendingRevert = record } label: {
                 WorkingActionLabel(
                     isWorking: store.isWorking(.historyRestore(record.id)),
@@ -162,6 +173,28 @@ struct UpdateHistoryView: View {
                 .listRowPrimaryAction()
         } else {
             ItemStatusView(title: "Manual", systemImage: "wrench.and.screwdriver")
+        }
+    }
+
+    @ViewBuilder
+    private func uninstallControl(for record: UpdateRecord) -> some View {
+        if record.canPutBack {
+            Button { Task { await store.putBack(record) } } label: {
+                WorkingActionLabel(
+                    isWorking: store.isWorking(.historyRestore(record.id)),
+                    idleTitle: "Put Back",
+                    workingTitle: "Putting Back…"
+                )
+            }
+            .listRowPrimaryAction()
+            .disabled(store.isWorking(.historyRestore(record.id)))
+            .help("Move \(record.name) back from the Trash to where it was")
+        } else if record.isBackInPlace {
+            ItemStatusView(title: "Back in place", systemImage: "checkmark.circle")
+        } else if record.trashedItems != nil {
+            ItemStatusView(title: "Not in Trash", systemImage: "trash.slash")
+        } else {
+            ItemStatusView(title: "Uninstalled", systemImage: "trash")
         }
     }
 

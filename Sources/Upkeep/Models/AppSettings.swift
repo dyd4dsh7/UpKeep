@@ -63,8 +63,8 @@ enum AutomaticUpdateScope: String, CaseIterable, Identifiable, Sendable {
     var detail: String {
         switch self {
         case .off: "Upkeep only checks. You choose what to install."
-        case .homebrewFormulae: "After each scheduled check, Upkeep upgrades outdated Homebrew formulae that aren’t major versions or prereleases."
-        case .recommended: "After each scheduled check, Upkeep installs recommended updates: stable, non-major versions it can finish itself. App updates are backed up first. Running apps and Homebrew casks wait for you."
+        case .homebrewFormulae: "After each scheduled check, Upkeep upgrades outdated Homebrew formulae that aren’t major versions or prereleases. It waits while the Mac is on battery, in Low Power Mode, or on a metered network."
+        case .recommended: "After each scheduled check, Upkeep installs recommended updates: stable, non-major versions it can finish itself. App updates are backed up first. Running apps and Homebrew casks wait for you, and nothing installs while the Mac is on battery, in Low Power Mode, or on a metered network."
         }
     }
 }

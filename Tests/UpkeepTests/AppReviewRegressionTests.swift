@@ -432,9 +432,10 @@ private actor ReviewUninstaller: AppUninstalling {
     var trashed: [URL] = []
     var fails = false
     func setFails(_ value: Bool) { fails = value }
-    func moveToTrash(_ url: URL) async throws {
+    func moveToTrash(_ url: URL) async throws -> URL? {
         if fails { throw ReviewError.historyWrite }
         trashed.append(url)
+        return URL(fileURLWithPath: "/fixture/.Trash").appendingPathComponent(url.lastPathComponent)
     }
 }
 @MainActor private final class ReviewFixture {
@@ -2033,6 +2034,11 @@ func cancelledDirectMutationReconcilesObservedVersionWithoutReportingSuccess(bat
     #expect(f.store.updates.isEmpty)
     #expect(f.store.selectedApp == nil)
     #expect(f.store.errorMessage == nil)
+    // History records the uninstall and where the app went in the Trash.
+    let record = await f.history.records().last
+    #expect(record?.isUninstall == true && record?.kind == .app && record?.name == app.name)
+    #expect(record?.fromVersion == app.installedVersion)
+    #expect(record?.trashedItems == [TrashedItem(originalPath: app.url.path, trashPath: "/fixture/.Trash/\(app.url.lastPathComponent)")])
 }
 
 @MainActor
@@ -2097,6 +2103,9 @@ private func reviewPackage(_ token: String, kind: HomebrewPackageKind, name: Str
     #expect(f.store.apps.isEmpty)
     #expect(f.store.selectedPackageID == nil)
     #expect(f.store.selectedApp == nil)
+    let record = await f.history.records().last
+    #expect(record?.isUninstall == true && record?.kind == .homebrew && record?.trashedItems == nil)
+    #expect(record?.recoveryNote?.contains("brew uninstall --cask review-fixture") == true)
 }
 
 @MainActor
@@ -2108,6 +2117,7 @@ private func reviewPackage(_ token: String, kind: HomebrewPackageKind, name: Str
     await f.store.uninstallHomebrewPackage(formula)
     #expect(f.store.homebrewPackages == [formula])
     #expect(f.store.errorMessage != nil)
+    #expect(await f.history.records().isEmpty)
 }
 
 @MainActor
@@ -2140,6 +2150,7 @@ private actor UninstallRecordingModels: LocalModelManaging {
     f.store.localModels = [model, other]; f.store.selectedLocalModelID = model.id
     await f.store.uninstallLocalModel(model)
     #expect(await models.uninstalled == [model.id])
+    #expect(await f.history.records().last?.kind == .model)
     #expect(f.store.localModels == [other])
     #expect(f.store.selectedLocalModelID == nil)
     // The list does not jump to the next model until the user picks one.
