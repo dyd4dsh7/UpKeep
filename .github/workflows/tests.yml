@@ -1,0 +1,36 @@
+name: Tests
+
+# Runs the test suite on every push to main and every pull request. It only
+# builds and tests: it has no secrets, signs nothing, and publishes nothing.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: swift test
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      # Upkeep needs Swift 6.3+ and the macOS 26 SDK. Use the newest released
+      # Xcode on the runner image rather than a beta.
+      - name: Select Xcode
+        run: |
+          latest="$(ls -d /Applications/Xcode_*.app 2>/dev/null | grep -vi -e beta -e rc | sort -V | tail -n 1)"
+          if [ -n "$latest" ]; then sudo xcode-select -s "$latest"; fi
+          xcodebuild -version
+          swift --version
+
+      - name: Build and test
+        run: swift test -Xswiftc -warnings-as-errors

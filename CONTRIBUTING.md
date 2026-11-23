@@ -8,7 +8,7 @@ so its scope and safety expectations can be agreed.
 
 Use macOS with Xcode 26.6 or newer (Swift 6.3+), or matching Apple Command Line
 Tools. The SDK must be macOS 26 or newer; the deployment target remains macOS 14.
-There is no hosted CI; run the tests below before opening a pull request. Homebrew
+GitHub Actions runs the same tests on every pull request; run them locally first. Homebrew
 and other package managers are optional integrations, not build dependencies. You
 do not need signing credentials to contribute.
 

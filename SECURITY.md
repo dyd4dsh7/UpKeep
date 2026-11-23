@@ -53,8 +53,8 @@ code signature. The private update-signing key must never be committed, shared,
 or attached to an issue or pull request; a leaked key would let someone else
 publish updates that installed copies accept.
 
-Releases are built and signed on the maintainer's Mac; the repository has no CI
-and stores no signing secrets. Builds signed with a Developer ID are notarized,
+Releases are built and signed on the maintainer's Mac. The repository's only CI
+workflow runs the tests with read-only access; it stores no signing secrets. Builds signed with a Developer ID are notarized,
 stapled, and checked with Gatekeeper. Builds without one are signed locally and
 say so in their release notes. Debug builds and forks use different signing
 identities.
