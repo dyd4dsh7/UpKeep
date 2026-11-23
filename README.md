@@ -25,7 +25,7 @@
 
 ## Why Upkeep
 
-- **One list for everything.** Apps, Homebrew, macOS, packages from 35 developer
+- **One list for everything.** Apps, Homebrew, macOS, packages from 36 developer
   tools (npm, pip, Cargo, Go, Docker, Conda, and more), and local AI models share one
   **All Updates** view, with a live count in the toolbar, menu bar, and Dock.
 - **Uses what you already have.** Upkeep works through the tools installed on your
@@ -73,12 +73,19 @@ If a release has no build attached, [build from source](#build-from-source).
 | **Homebrew** | Installed formulae and casks, including dependencies |
 | **GitHub Releases** | Repos found in app or Electron update metadata, trusted mappings, or a repo you verify |
 | **macOS** | Apple's Software Update catalog and full installers |
-| **Developer packages** | Global packages from 35 managers, including npm, pnpm, Yarn, Bun, pip, uv, Conda, RubyGems, Cargo, Go, and Docker images |
+| **Developer packages** | Global packages from 36 managers, including npm, pnpm, Yarn, Bun, pip, uv, Conda, RubyGems, Cargo, Go, and Docker images |
 | **Local AI models** | Ollama registry manifests, LM Studio's Hugging Face repos, and the Hugging Face cache |
 
 Apps with their own updater are recognised and handed to it: TestFlight, Setapp,
 Microsoft AutoUpdate, Steam, Adobe Creative Cloud, JetBrains Toolbox, Epic Games,
-Spotify, Discord, standalone Tailscale, and macOS-managed apps.
+Spotify, Discord, standalone Tailscale, and macOS-managed apps, including Apple's
+utilities such as Feedback Assistant.
+
+Microsoft Office and Teams are also checked for updates: Upkeep reads the app ID
+and channel (such as Beta or Preview) that Microsoft AutoUpdate records for each
+app, compares the installed build with Microsoft's published manifest for that
+channel, and opens AutoUpdate to install. It does not run `msupdate`, which can
+start downloads.
 
 ## Features
 
@@ -151,6 +158,8 @@ Upkeep lists global packages for the managers you have installed:
 - **Language toolchains:** Flutter, Dart global packages, swiftly (Swift),
   juliaup (Julia), GHCup (Haskell), opam (OCaml), and SDKMAN! (Java and JVM tools)
 - **Kubernetes:** Krew kubectl plugins
+- **AI tools:** Claude Code installed with its native installer, on the release
+  channel set in its settings (npm and Homebrew copies update with those managers)
 - **System managers:** MacPorts, Nix, mise, and asdf
 - **Containers:** Docker images pulled from a public registry
 

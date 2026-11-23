@@ -174,13 +174,14 @@ enum AppUpdateManagement: String, Codable, Hashable, Sendable {
     case discord = "Discord"
     case epicGames = "Epic Games"
     case tailscale = "Tailscale"
+    case claudeCode = "Claude Code"
     case macOS = "macOS"
 
     var isExternallyManaged: Bool {
         switch self {
         case .testFlight, .setapp, .microsoftAutoUpdate, .steam,
              .adobeCreativeCloud, .jetBrainsToolbox, .spotify, .discord, .epicGames,
-             .tailscale, .macOS:
+             .tailscale, .claudeCode, .macOS:
             true
         case .direct, .appStore: false
         }
@@ -198,6 +199,7 @@ enum AppUpdateManagement: String, Codable, Hashable, Sendable {
         case .discord: "Open Discord"
         case .epicGames: "Open Epic Games"
         case .tailscale: "Open Tailscale"
+        case .claudeCode: "Open Claude Code Docs"
         case .macOS: "Open Software Update"
         case .appStore: "Open App Store"
         case .direct: "Open App"
@@ -216,6 +218,7 @@ enum AppUpdateManagement: String, Codable, Hashable, Sendable {
         case .discord: "bubble.left.and.bubble.right.fill"
         case .epicGames: "gamecontroller.fill"
         case .tailscale: "network"
+        case .claudeCode: "terminal.fill"
         case .macOS: "gear.badge"
         case .appStore: "storefront.fill"
         case .direct: "arrow.up.forward.app"
@@ -234,6 +237,7 @@ enum AppUpdateManagement: String, Codable, Hashable, Sendable {
         case .discord: "Discord manages updates through its built-in updater."
         case .epicGames: "This app or game is managed by Epic Games Launcher."
         case .tailscale: "This standalone edition uses Tailscale’s built-in updater."
+        case .claudeCode: "Claude Code creates this helper and keeps it with the Claude Code command-line tool."
         case .macOS: "This Apple app is updated as part of macOS."
         case .appStore: "This app is updated through the Mac App Store."
         case .direct: "This app is updated by its developer."
@@ -485,15 +489,21 @@ struct AvailableUpdate: Identifiable, Hashable, Sendable {
     }
     var canInstallDirectly: Bool { directInstallURL != nil }
 
+    /// Microsoft AutoUpdate apps report updates from Microsoft's manifests but
+    /// install through AutoUpdate itself.
+    private var opensManagingUpdater: Bool { source == .developer && app.updateManagement == .microsoftAutoUpdate }
+
     var actionTitle: String {
         if app.isUpkeep { return "Update…" }
         if canInstallDirectly { return "Update" }
+        if opensManagingUpdater { return app.updateManagement.actionTitle }
         return primaryCandidate.actionTitle
     }
 
     var actionDescription: String {
         if app.isUpkeep { return "Download and verify the signed release, then quit, replace, and reopen Upkeep" }
         if canInstallDirectly { return "Download, verify, and install with Upkeep" }
+        if opensManagingUpdater { return "Install it with \(app.updateManagement.rawValue)" }
         if requiresInAppInstallation { return "Open the app to run its built-in updater" }
         return switch source {
         case .homebrew: "Install with Homebrew"
@@ -988,6 +998,7 @@ enum DeveloperPackageManager: String, Codable, CaseIterable, Identifiable, Senda
     case swiftly = "swiftly"
     case conda = "Conda"
     case sdkman = "SDKMAN!"
+    case claudeCode = "Claude Code"
     var id: Self { self }
     /// Docker images change by content digest, and SDKMAN identifiers carry a
     /// vendor suffix ("21.0.5-tem") that reads like a prerelease. Their
@@ -998,7 +1009,7 @@ enum DeveloperPackageManager: String, Codable, CaseIterable, Identifiable, Senda
         case .node, .bun, .deno, .npm, .pnpm, .yarn, .volta, .fnm: true
         case .vsCode, .uv, .pipx, .python, .rubyGems, .rustup, .cargo,
              .githubCLI, .go, .composer, .dotnet, .macPorts, .nix, .mise, .asdf, .dockerImages,
-             .pixi, .krew, .juliaup, .opam, .dart, .poetry, .flutter, .ghcup, .swiftly, .conda, .sdkman: false
+             .pixi, .krew, .juliaup, .opam, .dart, .poetry, .flutter, .ghcup, .swiftly, .conda, .sdkman, .claudeCode: false
         }
     }
     var assetName: String {
@@ -1038,6 +1049,7 @@ enum DeveloperPackageManager: String, Codable, CaseIterable, Identifiable, Senda
         case .swiftly: "swift"
         case .conda: "conda"
         case .sdkman: "sdkman"
+        case .claudeCode: "claude"
         }
     }
     var packageLabel: String {
@@ -1074,6 +1086,7 @@ enum DeveloperPackageManager: String, Codable, CaseIterable, Identifiable, Senda
         case .swiftly: "Swift toolchain"
         case .conda: "Conda package"
         case .sdkman: "SDKMAN! candidate"
+        case .claudeCode: "Command-line coding agent"
         }
     }
     var homepage: URL? {
@@ -1113,6 +1126,7 @@ enum DeveloperPackageManager: String, Codable, CaseIterable, Identifiable, Senda
         case .swiftly: URL(string: "https://www.swift.org/install")
         case .conda: URL(string: "https://anaconda.org/conda-forge")
         case .sdkman: URL(string: "https://sdkman.io")
+        case .claudeCode: URL(string: "https://code.claude.com/docs/en/setup")
         }
     }
 }

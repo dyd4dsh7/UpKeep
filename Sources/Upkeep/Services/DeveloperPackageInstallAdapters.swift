@@ -105,6 +105,8 @@ enum DeveloperPackageInstallAdapters {
         .dart: adapter { command($0, ["pub", "global", "activate", $0.registryIdentifier ?? $0.name, $1]) },
         .poetry: adapter { command($0, ["self", "update", $1]) },
         .flutter: adapter { package, _ in command(package, ["upgrade"]) },
+        // `claude install <version>` installs that native build and repoints the launcher.
+        .claudeCode: adapter { command($0, ["install", $1]) },
         .ghcup: adapter { command($0, ["install", $0.registryIdentifier ?? $0.name, $1, "--set"]) },
         .swiftly: adapter { package, _ in command(package, ["update", package.registryIdentifier ?? package.currentVersion, "--assume-yes"]) },
         .conda: adapter { command($0, ["install", "-n", "base", "-y", "\($0.registryIdentifier ?? $0.name)=\($1)"]) },

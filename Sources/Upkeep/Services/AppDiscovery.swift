@@ -11,13 +11,13 @@ enum AppDiscovery {
     /// Re-reads one application bundle without enumerating either Applications folder.
     static func discover(at url: URL) async -> InstalledApp? {
         await Task.detached(priority: .userInitiated) {
-            app(at: url, microsoftRegisteredPaths: microsoftAutoUpdateRegisteredPaths())
+            app(at: url, microsoftRegistrations: microsoftAutoUpdateRegistrations())
         }.value
     }
 
     private static func discoverSynchronously() -> [InstalledApp] {
         let fileManager = FileManager.default
-        let microsoftRegisteredPaths = microsoftAutoUpdateRegisteredPaths()
+        let microsoftRegistrations = microsoftAutoUpdateRegistrations()
         let roots = [
             URL(fileURLWithPath: "/Applications", isDirectory: true),
             fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Applications", isDirectory: true)
@@ -35,7 +35,7 @@ enum AppDiscovery {
 
             for case let url as URL in enumerator where url.pathExtension.lowercased() == "app" {
                 guard seenPaths.insert(url.standardizedFileURL.path).inserted,
-                      let app = app(at: url, microsoftRegisteredPaths: microsoftRegisteredPaths)
+                      let app = app(at: url, microsoftRegistrations: microsoftRegistrations)
                 else { continue }
                 discovered.append(app)
             }
@@ -46,7 +46,7 @@ enum AppDiscovery {
         }
     }
 
-    private static func app(at url: URL, microsoftRegisteredPaths: Set<String>) -> InstalledApp? {
+    private static func app(at url: URL, microsoftRegistrations: [String: MicrosoftAutoUpdateRegistration]) -> InstalledApp? {
         if let wrapped = wrappedIOSApp(at: url) { return wrapped }
         let infoURL = url.appendingPathComponent("Contents/Info.plist")
         guard let infoData = try? Data(contentsOf: infoURL, options: .mappedIfSafe),
@@ -58,9 +58,7 @@ enum AppDiscovery {
         else { return nil }
         let dates = try? url.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey])
         let bundleIdentifier = info["CFBundleIdentifier"] as? String
-        let name = (info["CFBundleDisplayName"] as? String)
-            ?? (info["CFBundleName"] as? String)
-            ?? url.deletingPathExtension().lastPathComponent
+        let name = displayName(info: info, fallback: url.deletingPathExtension().lastPathComponent)
         let shortVersion = (info["CFBundleShortVersionString"] as? String)
             ?? (info["CFBundleVersion"] as? String)
             ?? "Unknown"
@@ -85,7 +83,6 @@ enum AppDiscovery {
         )
         let chromiumUpdateChannel = chromiumUpdateChannel(bundleIdentifier: bundleIdentifier)
         let braveUpdateChannel = braveUpdateChannel(bundleIdentifier: bundleIdentifier)
-        let vendorUpdateProduct = VendorUpdateProduct.product(bundleIdentifier: bundleIdentifier)
         let steamAppID = steamAppID(at: url)
         let management = updateManagement(
             bundleIdentifier: bundleIdentifier,
@@ -97,8 +94,13 @@ enum AppDiscovery {
             ),
             hasSetappFramework: containsSetappFramework(in: contentsURL),
             isSteamLauncher: steamAppID != nil,
-            microsoftRegisteredPaths: microsoftRegisteredPaths
+            microsoftRegisteredPaths: Set(microsoftRegistrations.keys)
         )
+        // Microsoft AutoUpdate records each app's ID and channel; its public
+        // manifests give the newest build for that channel.
+        let vendorUpdateProduct: VendorUpdateProduct? = management == .microsoftAutoUpdate
+            ? microsoftRegistrations[url.standardizedFileURL.path].map { .microsoftAutoUpdate($0) }
+            : VendorUpdateProduct.product(bundleIdentifier: bundleIdentifier)
         let managedStatus = managedUpdateStatus(
             management: management,
             steamAppID: steamAppID
@@ -164,8 +166,7 @@ enum AppDiscovery {
         )
         let dates = try? url.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey])
         return InstalledApp(
-            name: (info["CFBundleDisplayName"] as? String) ?? (info["CFBundleName"] as? String)
-                ?? url.deletingPathExtension().lastPathComponent,
+            name: displayName(info: info, fallback: url.deletingPathExtension().lastPathComponent),
             bundleIdentifier: info["CFBundleIdentifier"] as? String,
             installedVersion: (info["CFBundleShortVersionString"] as? String)
                 ?? (info["CFBundleVersion"] as? String) ?? "Unknown",
@@ -218,15 +219,19 @@ enum AppDiscovery {
             return .appStore
         }
 
+        let standardizedPath = URL(fileURLWithPath: appPath).standardizedFileURL.path
         if isSteamLauncher || identifier == "com.valvesoftware.steam" { return .steam }
         if identifier == "com.apple.safari" { return .macOS }
+        // Apple's utilities outside the App Store, such as Feedback Assistant,
+        // come with macOS or its beta program.
+        if identifier.hasPrefix("com.apple."), standardizedPath.hasPrefix("/Applications/Utilities/") { return .macOS }
+        if identifier == "com.anthropic.claude-code-url-handler" { return .claudeCode }
         if identifier == "io.tailscale.ipn.macsys" { return .tailscale }
         if identifier == "com.spotify.client" { return .spotify }
         if identifier == "com.hnc.discord" { return .discord }
         if identifier == "com.epicgames.epicgameslauncher" { return .epicGames }
         if identifier == "com.jetbrains.toolbox" { return .jetBrainsToolbox }
 
-        let standardizedPath = URL(fileURLWithPath: appPath).standardizedFileURL.path
         if microsoftRegisteredPaths.contains(standardizedPath) || microsoftAutoUpdateBundleIdentifiers.contains(identifier) {
             return .microsoftAutoUpdate
         }
@@ -478,10 +483,46 @@ enum AppDiscovery {
         )
     }
 
-    private static func microsoftAutoUpdateRegisteredPaths() -> Set<String> {
-        guard let applications = UserDefaults(suiteName: "com.microsoft.autoupdate2")?
-            .dictionary(forKey: "Applications") else { return [] }
-        return Set(applications.keys.map { URL(fileURLWithPath: $0).standardizedFileURL.path })
+    /// Apps registered with Microsoft AutoUpdate, keyed by standardized path.
+    private static func microsoftAutoUpdateRegistrations() -> [String: MicrosoftAutoUpdateRegistration] {
+        guard let defaults = UserDefaults(suiteName: "com.microsoft.autoupdate2") else { return [:] }
+        return microsoftAutoUpdateRegistrations(
+            applications: defaults.dictionary(forKey: "Applications") ?? [:],
+            globalChannel: defaults.string(forKey: "ChannelName")
+        )
+    }
+
+    /// Each entry carries its "Application ID" (such as MSWD2019) and may pin
+    /// its own "ChannelName"; otherwise the global channel applies.
+    static func microsoftAutoUpdateRegistrations(
+        applications: [String: Any],
+        globalChannel: String?
+    ) -> [String: MicrosoftAutoUpdateRegistration] {
+        var output: [String: MicrosoftAutoUpdateRegistration] = [:]
+        for (path, value) in applications {
+            let entry = value as? [String: Any]
+            let identifier = entry?["Application ID"] as? String ?? ""
+            let channel = MicrosoftAutoUpdateChannel(name: entry?["ChannelName"] as? String ?? globalChannel)
+            output[URL(fileURLWithPath: path).standardizedFileURL.path] = MicrosoftAutoUpdateRegistration(
+                applicationID: identifier.range(of: #"^[A-Za-z][A-Za-z0-9]{3,15}$"#, options: .regularExpression) == nil
+                    ? nil : identifier,
+                channel: channel
+            )
+        }
+        return output
+    }
+
+    /// Display names can carry invisible format characters, such as the
+    /// left-to-right mark at the start of WhatsApp's.
+    static func displayName(info: [String: Any], fallback: String) -> String {
+        let candidates = [info["CFBundleDisplayName"] as? String, info["CFBundleName"] as? String, fallback]
+        for case let candidate? in candidates {
+            let cleaned = String(String.UnicodeScalarView(candidate.unicodeScalars.filter {
+                $0.properties.generalCategory != .format
+            })).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cleaned.isEmpty { return cleaned }
+        }
+        return fallback
     }
 
     private static let microsoftAutoUpdateBundleIdentifiers: Set<String> = [

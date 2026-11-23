@@ -445,3 +445,56 @@ private func pyPIStableVersion(_ package: String) async -> String? {
           let data = await fetchRegistryData(url) else { return nil }
     return (try? JSONDecoder().decode(Response.self, from: data))?.info.version
 }
+
+// MARK: - Claude Code (native installer)
+
+/// The native installer links `~/.local/bin/claude` to a build in
+/// `~/.local/share/claude/versions/<version>`. npm and Homebrew installs are
+/// covered by those managers.
+func claudeCodeNativeLauncher(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> String? {
+    let launcher = home.appendingPathComponent(".local/bin/claude").path
+    guard let target = try? FileManager.default.destinationOfSymbolicLink(atPath: launcher),
+          claudeCodeNativeVersion(linkTarget: target) != nil else { return nil }
+    return launcher
+}
+
+/// ".../.local/share/claude/versions/2.1.330" → "2.1.330".
+func claudeCodeNativeVersion(linkTarget: String) -> String? {
+    let url = URL(fileURLWithPath: linkTarget)
+    guard url.deletingLastPathComponent().path.hasSuffix(".local/share/claude/versions") else { return nil }
+    let version = url.lastPathComponent
+    return version.first?.isNumber == true ? version : nil
+}
+
+/// `autoUpdatesChannel` in Claude Code's settings: "latest" (the default when
+/// unset), "stable", or "rc", which has no published pointer.
+func claudeCodeUpdateChannel(settings: Data?) -> String {
+    guard let settings,
+          let object = try? JSONSerialization.jsonObject(with: settings) as? [String: Any],
+          let channel = object["autoUpdatesChannel"] as? String, !channel.isEmpty else { return "latest" }
+    return channel
+}
+
+func scanClaudeCode(_ path: String) async -> ManagerScanResult {
+    guard let target = try? FileManager.default.destinationOfSymbolicLink(atPath: path),
+          let version = claudeCodeNativeVersion(linkTarget: target) else {
+        return ManagerScanResult(manager: .claudeCode, packages: [], warning: nil)
+    }
+    let configuration = environmentPath("CLAUDE_CONFIG_DIR") ?? homeDirectory.appendingPathComponent(".claude")
+    let channel = claudeCodeUpdateChannel(settings: try? Data(contentsOf: configuration.appendingPathComponent("settings.json")))
+    var latest: String?
+    if ["latest", "stable"].contains(channel),
+       let url = URL(string: "https://downloads.claude.ai/claude-code-releases/\(channel)"),
+       let data = await fetchRegistryData(url),
+       let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+       text.first?.isNumber == true, !text.contains(where: \.isWhitespace) {
+        latest = text
+    }
+    // A build newer than the channel (for example latest while following stable) stays put.
+    let offered = latest.map { VersionComparator.isNewer($0, than: version) ? $0 : version } ?? version
+    return ManagerScanResult(manager: .claudeCode, packages: [
+        DeveloperPackage(name: "Claude Code", currentVersion: version, latestVersion: offered,
+            manager: .claudeCode, executablePath: path, registryIdentifier: "claude-code",
+            installationContext: "\(channel.capitalized) channel")
+    ], warning: latest == nil && channel != "rc" ? "Claude Code: the release check failed." : nil)
+}

@@ -74,7 +74,8 @@ enum DeveloperPackageScanAdapters {
         .ghcup: adapter(.ghcup) { path, _ in await scanGHCup(path) },
         .swiftly: adapter(.swiftly) { path, _ in await scanSwiftly(path) },
         .conda: adapter(.conda) { path, _ in await scanConda(path) },
-        .sdkman: adapter(.sdkman) { path, _ in await scanSDKMAN(path) }
+        .sdkman: adapter(.sdkman) { path, _ in await scanSDKMAN(path) },
+        .claudeCode: adapter(.claudeCode) { path, _ in await scanClaudeCode(path) }
     ]
 
     private static func adapter(

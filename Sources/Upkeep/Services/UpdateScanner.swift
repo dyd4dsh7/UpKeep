@@ -31,9 +31,11 @@ func enabledAppUpdateSources(
         if checkSparkle, app.sparkleFeedURL != nil { sources.append(.sparkle) }
         if checkGitHub, app.githubRepository != nil { sources.append(.github) }
         return sources
-    case .testFlight, .setapp, .microsoftAutoUpdate, .steam,
+    case .microsoftAutoUpdate:
+        return app.vendorUpdateProduct == nil ? [] : [.developer]
+    case .testFlight, .setapp, .steam,
          .adobeCreativeCloud, .jetBrainsToolbox, .spotify, .discord, .epicGames,
-         .tailscale, .macOS:
+         .tailscale, .claudeCode, .macOS:
         return []
     }
 }

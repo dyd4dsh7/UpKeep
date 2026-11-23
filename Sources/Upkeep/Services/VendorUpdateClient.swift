@@ -8,6 +8,7 @@ enum VendorUpdateProduct: Hashable, Sendable {
     case zoom
     case slack
     case onePassword
+    case microsoftAutoUpdate(MicrosoftAutoUpdateRegistration)
 
     static func product(bundleIdentifier: String?) -> VendorUpdateProduct? {
         guard let identifier = bundleIdentifier?.lowercased() else { return nil }
@@ -47,6 +48,44 @@ enum VendorUpdateProduct: Hashable, Sendable {
         case .zoom: "Zoom"
         case .slack: "Slack"
         case .onePassword: "1Password"
+        case .microsoftAutoUpdate: "Microsoft AutoUpdate"
+        }
+    }
+}
+
+/// Microsoft AutoUpdate channels and the manifest folder each one reads.
+/// The channel names and IDs were checked against AutoUpdate's preferences and
+/// Microsoft's CDN; "InsiderFast", "External" and "InsiderSlow" are older names.
+enum MicrosoftAutoUpdateChannel: String, Hashable, Sendable {
+    case production = "Current"
+    case preview = "Preview"
+    case beta = "Beta"
+
+    init(name: String?) {
+        switch name?.lowercased() {
+        case "beta", "insiderfast": self = .beta
+        case "preview", "external", "insiderslow": self = .preview
+        default: self = .production
+        }
+    }
+
+    var manifestFolder: String {
+        switch self {
+        case .production: "C1297A47-86C4-4C1F-97FA-950631F94777"
+        case .preview: "1ac37578-5a24-40fb-892e-b89d85b6dfaa"
+        case .beta: "4B2D7701-0A4F-49C8-B4CB-0C2D4043F51F"
+        }
+    }
+}
+
+struct MicrosoftAutoUpdateRegistration: Hashable, Sendable {
+    /// Such as MSWD2019 for Word. Nil when AutoUpdate did not record one.
+    let applicationID: String?
+    let channel: MicrosoftAutoUpdateChannel
+
+    var manifestURL: URL? {
+        applicationID.flatMap {
+            URL(string: "https://officecdnmac.microsoft.com/pr/\(channel.manifestFolder)/MacAutoupdate/0409\($0).xml")
         }
     }
 }
@@ -73,6 +112,19 @@ struct VendorUpdateClient: Sendable {
             guard let release = try await latestRelease(for: product, app: app),
                   Self.isNewer(release, than: app, product: product)
             else { return nil }
+            if case let .microsoftAutoUpdate(registration) = product {
+                // AutoUpdate installs the update; the build number confirms it afterwards.
+                return AvailableUpdate(
+                    app: app,
+                    availableVersion: release.version,
+                    source: .developer,
+                    releaseNotes: "Available from Microsoft AutoUpdate (\(registration.channel.rawValue) channel).",
+                    actionURL: URL(fileURLWithPath: Self.microsoftAutoUpdateApplication),
+                    homebrewToken: nil,
+                    availableBuildVersion: release.build,
+                    usesBuildVersionOnly: true
+                )
+            }
             return AvailableUpdate(
                 app: app,
                 availableVersion: release.version,
@@ -90,9 +142,11 @@ struct VendorUpdateClient: Sendable {
         }
     }
 
+    static let microsoftAutoUpdateApplication = "/Library/Application Support/Microsoft/MAU2.0/Microsoft AutoUpdate.app"
+
     static func isNewer(_ release: VendorRelease, than app: InstalledApp, product: VendorUpdateProduct) -> Bool {
         switch product {
-        case .jetBrains, .zoom:
+        case .jetBrains, .zoom, .microsoftAutoUpdate:
             // Marketing strings carry annotations ("7.2.5 (90525)") or omit patch
             // builds; the build number is exact for both.
             if let build = release.build, let installed = app.buildVersion {
@@ -128,6 +182,12 @@ struct VendorUpdateClient: Sendable {
         case .onePassword:
             let url = URL(string: "https://releases.1password.com/mac/stable/index.xml")!
             return try Self.onePasswordRelease(from: await fetch(url, key: "1password-mac-stable"))
+        case let .microsoftAutoUpdate(registration):
+            guard let url = registration.manifestURL else { return nil }
+            return try Self.microsoftAutoUpdateRelease(
+                from: await fetch(url, key: "mau-\(registration.channel.manifestFolder)-\(registration.applicationID ?? "")"),
+                installedVersion: app.installedVersion
+            )
         }
     }
 
@@ -204,6 +264,37 @@ struct VendorUpdateClient: Sendable {
             throw UpdateSourceError.malformedData("Slack did not return a release version.")
         }
         return VendorRelease(version: version, build: nil)
+    }
+
+    /// A Microsoft AutoUpdate manifest: a plist array with one entry per
+    /// baseline build, each naming the "Update Version" it moves to. Entries
+    /// for another architecture or a newer macOS are skipped.
+    static func microsoftAutoUpdateRelease(
+        from data: Data,
+        installedVersion: String,
+        operatingSystem: OperatingSystemVersion = ProcessInfo.processInfo.operatingSystemVersion
+    ) throws -> VendorRelease? {
+        guard let entries = try PropertyListSerialization.propertyList(from: data, format: nil) as? [[String: Any]] else {
+            throw UpdateSourceError.malformedData("The Microsoft AutoUpdate manifest is not a list.")
+        }
+        #if arch(arm64)
+        let architectures: Set<String> = ["arm64", "arm64e", "universal"]
+        #else
+        let architectures: Set<String> = ["x86_64", "universal"]
+        #endif
+        let system = "\(operatingSystem.majorVersion).\(operatingSystem.minorVersion).\(operatingSystem.patchVersion)"
+        let builds = entries.compactMap { entry -> String? in
+            if let architecture = (entry["Architecture"] as? String)?.lowercased(), !architectures.contains(architecture) {
+                return nil
+            }
+            if let minimum = entry["Minimum OS"] as? String, VersionComparator.isNewer(minimum, than: system) { return nil }
+            return entry["Update Version"] as? String
+        }
+        guard let build = builds.max(by: { VersionComparator.compare($0, $1) == .orderedAscending }) else { return nil }
+        // Show as many components as the app's own version: Word "16.117", Teams in full.
+        let count = max(1, installedVersion.split(separator: ".").count)
+        let version = build.split(separator: ".").prefix(count).joined(separator: ".")
+        return VendorRelease(version: version, build: build)
     }
 
     /// The stable feed lists every release, oldest first.

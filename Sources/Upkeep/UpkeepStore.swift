@@ -462,7 +462,7 @@ final class UpkeepStore: ObservableObject {
         case .microsoftAutoUpdate: app.updateManagement == .microsoftAutoUpdate
         case .steam: app.updateManagement == .steam
         case .otherUpdaters:
-            [.adobeCreativeCloud, .jetBrainsToolbox, .spotify, .discord, .epicGames, .tailscale]
+            [.adobeCreativeCloud, .jetBrainsToolbox, .spotify, .discord, .epicGames, .tailscale, .claudeCode]
                 .contains(app.updateManagement)
         case .sparkle: app.updateManagement == .direct && app.sparkleFeedURL != nil
         case .homebrewApps: homebrewPackage(for: app) != nil
@@ -486,6 +486,7 @@ final class UpkeepStore: ObservableObject {
             detected.formUnion(update.candidates.map(\.source))
         }
         if app.updateManagement == .appStore { detected.insert(.appStore) }
+        if app.updateManagement == .microsoftAutoUpdate, app.usesDeveloperUpdateService { detected.insert(.developer) }
         if homebrewPackage(for: app) != nil { detected.insert(.homebrew) }
         if app.updateManagement == .direct {
             if app.usesDeveloperUpdateService { detected.insert(.developer) }
@@ -1853,6 +1854,8 @@ final class UpkeepStore: ObservableObject {
             target = fileManager.fileExists(atPath: installed.path) ? installed : app.url
         case .tailscale:
             target = app.url
+        case .claudeCode:
+            target = URL(string: "https://code.claude.com/docs/en/setup")
         case .macOS:
             target = URL(string: "x-apple.systempreferences:com.apple.Software-Update-Settings.extension")
         case .appStore:
