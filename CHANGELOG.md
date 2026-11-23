@@ -4,6 +4,11 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+## 0.25.31 — 2026-11-24
+
+- Homebrew Adoption no longer offers a cask that conflicts with one already installed. For example, UTM was offered as utm@beta while the utm cask was installed, and adopting it failed because both casks install UTM.app.
+- Homebrew Adoption is only offered for apps directly in /Applications. Homebrew can only adopt an app there, and for an app elsewhere, such as ~/Applications, it installed a second copy instead.
+
 ## 0.25.30 — 2026-11-24
 
 - Fixed pnpm global packages appearing once for every nvm Node.js version. pnpm keeps them in one shared folder, so Duplicates showed one install as several copies, and keeping one could have removed it. They are now listed once.
