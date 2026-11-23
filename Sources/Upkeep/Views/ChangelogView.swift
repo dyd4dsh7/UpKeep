@@ -118,6 +118,9 @@ private struct UpkeepRelease: Identifiable {
     static let fullChangelogURL = URL(string: "https://github.com/\(SelfUpdate.repository)/blob/main/CHANGELOG.md")!
 
     static let all = [
+        UpkeepRelease(version: "0.25.21", date: "23 November 2026", changes: [
+            "Adds Uninstall for Homebrew formulae and casks."
+        ]),
         UpkeepRelease(version: "0.25.20", date: "23 November 2026", changes: [
             "Adds Uninstall for every app, using Homebrew for cask apps and the Trash for the rest."
         ]),

@@ -4,6 +4,10 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+## 0.25.21 — 2026-11-23
+
+- Homebrew formulae and casks can now be uninstalled from the package's details panel, its options menu, or by right-clicking it in the list. Upkeep runs `brew uninstall`, quits a cask's app first if it is running, and warns when other installed formulae depend on the package. Casks may ask for an administrator password in Terminal.
+
 ## 0.25.20 — 2026-11-23
 
 - Every app can now be uninstalled from its details panel, its options menu, or by right-clicking it in the list. Apps installed with Homebrew are removed with `brew uninstall --cask`; other apps are moved to the Trash, so they can be restored. A running app is quit first, and settings in your Library folder are kept. App Store and other administrator-owned apps are moved through Finder, which asks for your password. Upkeep itself and apps that come with macOS can't be uninstalled.
