@@ -11,6 +11,7 @@ enum OperationID: Hashable, Sendable {
     case macOSUpdate(String)
     case historyRestore(UUID)
     case applicationRefresh(String)
+    case applicationUninstall(String)
     case homebrewRefresh(String)
     case appManagementPermissionCheck
     case developerRefresh(String)

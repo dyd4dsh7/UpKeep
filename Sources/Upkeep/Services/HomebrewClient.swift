@@ -128,6 +128,13 @@ struct HomebrewClient: Sendable {
         try await execute(["upgrade", "--cask", token])
     }
 
+    func uninstall(_ package: HomebrewPackage) async throws {
+        var arguments = ["uninstall"]
+        if package.kind == .cask { arguments.append("--cask") }
+        arguments.append(package.token)
+        try await execute(arguments)
+    }
+
     private func execute(_ arguments: [String]) async throws {
         guard let brew = Self.brewURL else { throw BrewError.notInstalled }
         do {

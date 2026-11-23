@@ -7,6 +7,7 @@ struct AllAppsView: View {
     let title: String
     let systemImage: String
     @UpkeepState private var projection = AllAppsProjection()
+    @UpkeepState private var appPendingUninstall: InstalledApp?
 
     var body: some View {
         let visibleApps = displayedApps
@@ -87,6 +88,11 @@ struct AllAppsView: View {
                         Button("Open") { NSWorkspace.shared.open(app.url) }
                         Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([app.url]) }
                         Button("View Details") { store.selectedApp = app }
+                        if store.canUninstall(app) {
+                            Divider()
+                            Button("Uninstall…", role: .destructive) { appPendingUninstall = app }
+                                .disabled(store.isWorking(.applicationUninstall(app.id)))
+                        }
                     }
                     }
                 }
@@ -101,6 +107,7 @@ struct AllAppsView: View {
                 systemImage: systemImage)
         }
         .toolbar { listToolbar }
+        .appUninstallConfirmation($appPendingUninstall)
     }
 
     private func hasHomebrewAdoptionOption(
@@ -413,6 +420,7 @@ struct AppDetailView: View {
         }
         .frame(minHeight: 0)
         .onChange(of: app.id) { _, _ in showsFullReleaseNotes = false }
+        .appUninstallConfirmation($detailState.appPendingUninstall)
         .sheet(isPresented: $detailState.showsAppleSiliconMigration) {
             AppleSiliconMigrationView(app: app).environment(\.upkeepStoreReference, store)
         }
@@ -750,6 +758,21 @@ struct AppDetailView: View {
                 Label(sourceActionTitle, systemImage: sourceActionSystemImage)
             }
         }
+        if store.canUninstall(app) {
+            Button(role: .destructive) { detailState.appPendingUninstall = app } label: {
+                Label {
+                    WorkingActionLabel(
+                        isWorking: store.isWorking(.applicationUninstall(app.id)),
+                        idleTitle: "Uninstall",
+                        workingTitle: "Uninstalling…"
+                    )
+                } icon: {
+                    Image(systemName: "trash")
+                }
+            }
+            .disabled(store.isWorking(.applicationUninstall(app.id)))
+            .help(store.uninstallingCask(for: app).map { "Uninstall with Homebrew (\($0.token))" } ?? "Move \(app.name) to the Trash")
+        }
     }
 
     private var primaryActionTitle: String {
@@ -799,6 +822,11 @@ struct AppDetailView: View {
         Divider()
         Button("Open") { NSWorkspace.shared.open(app.url) }
         Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([app.url]) }
+        if store.canUninstall(app) {
+            Divider()
+            Button("Uninstall…", role: .destructive) { detailState.appPendingUninstall = app }
+                .disabled(store.isWorking(.applicationUninstall(app.id)))
+        }
     }
 
     private var hasHomebrewAdoptionOption: Bool {
@@ -990,6 +1018,7 @@ private final class AppDetailState: ObservableObject {
     @Published var showsTechnicalDetails = false
     @Published var githubRepositoryEntry = ""
     @Published var isSavingGitHubRepository = false
+    @Published var appPendingUninstall: InstalledApp?
 }
 
 
@@ -1065,5 +1094,40 @@ final class AllAppsProjection {
         }
         duplicates = (generation, shared)
         return shared
+    }
+}
+
+private struct AppUninstallConfirmation: ViewModifier {
+    @UpkeepStoreReference private var store
+    @Binding var app: InstalledApp?
+
+    func body(content: Content) -> some View {
+        content.confirmationDialog(
+            app.map { "Uninstall \($0.name)?" } ?? "Uninstall App?",
+            isPresented: Binding(get: { app != nil }, set: { if !$0 { app = nil } }),
+            titleVisibility: .visible,
+            presenting: app
+        ) { app in
+            Button(store.uninstallingCask(for: app) == nil ? "Move to Trash" : "Uninstall", role: .destructive) {
+                Task { await store.uninstallApp(app) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { app in
+            Text(message(for: app))
+        }
+    }
+
+    private func message(for app: InstalledApp) -> String {
+        let quit = store.isRunning(app) ? "Upkeep will quit \(app.name) first. " : ""
+        if let cask = store.uninstallingCask(for: app) {
+            return quit + "Homebrew will uninstall the \(cask.token) cask and remove \(app.name). Settings and data in your Library folder are kept."
+        }
+        return quit + "\(app.name) will be moved to the Trash. Settings and data in your Library folder are kept. macOS may ask for an administrator password."
+    }
+}
+
+extension View {
+    func appUninstallConfirmation(_ app: Binding<InstalledApp?>) -> some View {
+        modifier(AppUninstallConfirmation(app: app))
     }
 }

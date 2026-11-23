@@ -428,6 +428,15 @@ private actor ReviewInstaller: DirectAppInstalling {
         running.removeAll { apps.contains($0) }
     }
 }
+private actor ReviewUninstaller: AppUninstalling {
+    var trashed: [URL] = []
+    var fails = false
+    func setFails(_ value: Bool) { fails = value }
+    func moveToTrash(_ url: URL) async throws {
+        if fails { throw ReviewError.historyWrite }
+        trashed.append(url)
+    }
+}
 @MainActor private final class ReviewFixture {
     let suite = "Upkeep.AppReviewTests.\(UUID().uuidString)"
     deinit { UserDefaults.standard.removeTestDomain(forName: suite) }
@@ -437,6 +446,7 @@ private actor ReviewInstaller: DirectAppInstalling {
     let installer: ReviewInstaller
     let lifecycle = ReviewLifecycle()
     let opener = ReviewOpener()
+    let uninstaller = ReviewUninstaller()
     let store: UpkeepStore
     init(history: ReviewHistory = ReviewHistory(), installer: ReviewInstaller = ReviewInstaller(),
          discoveredApp: InstalledApp = reviewApp(version: "1.1", build: "11"), developerReport: DeveloperPackageClient.Report = .empty,
@@ -449,7 +459,7 @@ private actor ReviewInstaller: DirectAppInstalling {
             scanner: scanner, applicationDiscovery: discovery ?? ReviewDiscovery(app: discoveredApp), homebrew: homebrew,
             developerPackages: developer ?? ReviewDeveloper(report: developerReport), localModels: models ?? ReviewModels(), history: history,
             externalOpener: opener, directAppInstaller: progressInstaller ?? installer, applicationLifecycle: lifecycle,
-            externalVerificationInterval: .milliseconds(1)
+            appUninstaller: uninstaller, externalVerificationInterval: .milliseconds(1)
         ))
     }
     func cleanUp() { defaults.removeTestDomain(forName: suite) }
@@ -2007,4 +2017,44 @@ func cancelledDirectMutationReconcilesObservedVersionWithoutReportingSuccess(bat
     #expect(!f.store.updateExecutionState.isBatchStopRequested)
     #expect(!f.store.isWorking(.unifiedBatch))
     #expect(f.store.updatePhase(for: BatchUpdateItem.model(model).updateOperationID) == nil)
+}
+
+@MainActor
+@Test func uninstallQuitsRunningAppMovesItToTrashAndForgetsIt() async {
+    let f = ReviewFixture()
+    defer { f.cleanUp() }
+    let app = reviewApp()
+    f.store.apps = [app]; f.store.updates = [reviewUpdate(app)]; f.store.selectedApp = app
+    f.lifecycle.running = [app]
+    await f.store.uninstallApp(app)
+    #expect(f.lifecycle.quitCalls == [[app]])
+    #expect(await f.uninstaller.trashed == [app.url])
+    #expect(f.store.apps.isEmpty)
+    #expect(f.store.updates.isEmpty)
+    #expect(f.store.selectedApp == nil)
+    #expect(f.store.errorMessage == nil)
+}
+
+@MainActor
+@Test func failedUninstallKeepsTheApp() async {
+    let f = ReviewFixture()
+    defer { f.cleanUp() }
+    let app = reviewApp()
+    f.store.apps = [app]
+    await f.uninstaller.setFails(true)
+    await f.store.uninstallApp(app)
+    #expect(f.store.apps == [app])
+    #expect(f.store.errorMessage != nil)
+}
+
+@MainActor
+@Test func upkeepCannotUninstallItself() async {
+    let app = reviewApp(identifier: InstalledApp.upkeepBundleIdentifier)
+    let f = ReviewFixture(discoveredApp: app)
+    defer { f.cleanUp() }
+    f.store.apps = [app]
+    #expect(!f.store.canUninstall(app))
+    await f.store.uninstallApp(app)
+    #expect(await f.uninstaller.trashed.isEmpty)
+    #expect(f.store.apps == [app])
 }

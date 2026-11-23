@@ -100,10 +100,12 @@ protocol HomebrewManaging: Sendable {
     func adopt(_ item: AdoptableApp) async throws
     func installOrReplace(_ item: AdoptableApp) async throws
     func upgradeCask(token: String) async throws
+    func uninstall(_ package: HomebrewPackage) async throws
 }
 
 extension HomebrewManaging {
     func services() async throws -> [HomebrewService] { throw ScopedScanError.unavailable }
+    func uninstall(_ package: HomebrewPackage) async throws { throw ScopedScanError.unavailable }
 }
 
 typealias DeveloperScanProgressReporter = @Sendable (DeveloperPackageClient.Report, Set<DeveloperPackageManager>) async -> Void
@@ -262,6 +264,7 @@ struct UpkeepDependencies: Sendable {
     let externalOpener: any ExternalOpening
     let directAppInstaller: any DirectAppInstalling
     let applicationLifecycle: any ApplicationLifecycleManaging
+    let appUninstaller: any AppUninstalling
     let externalVerificationInterval: Duration
     let makeCVEClient: (@MainActor @Sendable () -> CVEInventoryClient)?
 
@@ -276,6 +279,7 @@ struct UpkeepDependencies: Sendable {
         externalOpener: any ExternalOpening = WorkspaceExternalOpener(),
         directAppInstaller: any DirectAppInstalling = DirectAppInstaller(),
         applicationLifecycle: any ApplicationLifecycleManaging = WorkspaceApplicationLifecycle(),
+        appUninstaller: any AppUninstalling = AppUninstaller(),
         externalVerificationInterval: Duration = .seconds(3),
         makeCVEClient: (@MainActor @Sendable () -> CVEInventoryClient)? = nil
     ) {
@@ -289,6 +293,7 @@ struct UpkeepDependencies: Sendable {
         self.externalOpener = externalOpener
         self.directAppInstaller = directAppInstaller
         self.applicationLifecycle = applicationLifecycle
+        self.appUninstaller = appUninstaller
         self.externalVerificationInterval = externalVerificationInterval
         self.makeCVEClient = makeCVEClient
     }
