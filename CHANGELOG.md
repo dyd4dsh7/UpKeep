@@ -4,6 +4,12 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+## 0.25.30 — 2026-11-24
+
+- Fixed pnpm global packages appearing once for every nvm Node.js version. pnpm keeps them in one shared folder, so Duplicates showed one install as several copies, and keeping one could have removed it. They are now listed once.
+- Duplicates explains when copies belong to different nvm Node.js versions, where each copy only runs while its version is active, and warns that keeping one leaves the command available only with that version.
+- JavaScript tools installed more than once that Homebrew also packages, such as pnpm, offer Use Homebrew Instead: Homebrew installs the tool once for every Node.js version, then the copies are removed. Nothing is removed if the install fails.
+
 ## 0.25.29 — 2026-11-24
 
 - Duplicates has a clearer layout: groups are cards under one heading per kind, each copy shows where it lives instead of repeating its name, and Keep is the main button only on the recommended copy.

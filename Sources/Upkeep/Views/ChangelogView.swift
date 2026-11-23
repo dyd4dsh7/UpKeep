@@ -118,6 +118,10 @@ private struct UpkeepRelease: Identifiable {
     static let fullChangelogURL = URL(string: "https://github.com/\(SelfUpdate.repository)/blob/main/CHANGELOG.md")!
 
     static let all = [
+        UpkeepRelease(version: "0.25.30", date: "24 November 2026", changes: [
+            "Fixes pnpm global packages being listed once per Node.js version.",
+            "Adds Use Homebrew Instead for JavaScript tools installed in several Node.js versions."
+        ]),
         UpkeepRelease(version: "0.25.29", date: "24 November 2026", changes: [
             "Redesigns Duplicates and marks the copy Terminal or macOS uses, so you keep the right one."
         ]),
