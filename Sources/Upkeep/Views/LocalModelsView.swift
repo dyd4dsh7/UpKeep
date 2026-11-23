@@ -151,11 +151,17 @@ struct LocalModelDetail: View {
     var body: some View {
         if let model {
             InfoPanel {
-                    InfoPanelHeader(title: model.name) {
-                        LocalModelRuntimeIcon(runtime: model.runtime, size: 44)
-                    } detail: {
-                        if let variant = model.variant { Text(variant).font(.title3).foregroundStyle(.secondary).textSelection(.enabled) }
-                        ItemDescriptionText(text: store.itemDescription(for: model))
+                    InfoPanelHeader(title: model.name, subtitle: store.itemDescription(for: model)) {
+                        LocalModelRuntimeIcon(runtime: model.runtime, size: InfoPanelHeader<EmptyView, EmptyView>.iconSize)
+                    } facts: {
+                        InspectorVersionChip(current: model.installedRevision,
+                                             latest: model.isOutdated ? model.latestRevision : nil)
+                        InfoChip(text: model.runtime.rawValue)
+                        if let variant = model.variant { InfoChip(text: variant) }
+                        if let size = model.sizeBytes {
+                            InfoChip(text: ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
+                        }
+                        if let channel = model.prereleaseChannel { PrereleaseBadge(channel: channel, isChip: true) }
                     }
                 } content: {
                     if model.isOutdated {

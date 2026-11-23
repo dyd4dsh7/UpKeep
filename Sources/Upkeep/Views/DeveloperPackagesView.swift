@@ -320,15 +320,21 @@ private struct DeveloperPackageDetailContent: View {
 
     var body: some View {
         InfoPanel {
-                    InfoPanelHeader(title: package.name) {
-                        PackageManagerIcon(manager: package.manager, size: 44)
-                    } detail: {
-                        Text(package.manager.packageLabel).foregroundStyle(.secondary)
-                        ItemDescriptionText(text: store.itemDescription(for: package))
-                        ItemCheckStatus(
-                            isRefreshing: store.isRefreshing(package),
-                            lastChecked: store.lastChecked(for: package)
-                        )
+                    InfoPanelHeader(
+                        title: package.name,
+                        subtitle: store.itemDescription(for: package) ?? package.manager.packageLabel,
+                        status: ItemCheckStatus(isRefreshing: store.isRefreshing(package),
+                                                lastChecked: store.lastChecked(for: package))
+                    ) {
+                        PackageManagerIcon(manager: package.manager, size: InfoPanelHeader<EmptyView, EmptyView>.iconSize)
+                    } facts: {
+                        InspectorVersionChip(current: package.currentVersion,
+                                             latest: package.isOutdated ? package.latestVersion : nil)
+                        InfoChip(text: package.manager.rawValue)
+                        if let context = package.installationContext { InfoChip(text: context) }
+                        if let channel = package.prereleaseChannel {
+                            PrereleaseBadge(channel: channel, isInstalled: package.prereleaseIsInstalled, isChip: true)
+                        }
                     }
                 } content: {
                 CVESecuritySummary(item: CVEInventoryItem(package))

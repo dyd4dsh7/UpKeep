@@ -297,17 +297,26 @@ struct PackageDetail: View {
     var body: some View {
         if let package {
             InfoPanel {
-                    InfoPanelHeader(title: package.displayName) {
-                        Image(systemName: "shippingbox.fill").font(.system(size: 32)).foregroundStyle(.secondary)
-                    } detail: {
-                        Text(package.isOutdated ? "\(package.installedVersion) → \(package.currentVersion)" : package.installedVersion)
-                            .font(.callout.monospacedDigit()).foregroundStyle(package.isOutdated ? Color.accentColor : .secondary)
-                        ItemDescriptionText(text: store.itemDescription(for: package))
-                        ItemCheckStatus(
-                            isRefreshing: store.isRefreshing(package),
-                            lastChecked: store.lastChecked(for: package)
-                        )
-
+                    InfoPanelHeader(
+                        title: package.displayName,
+                        subtitle: store.itemDescription(for: package),
+                        status: ItemCheckStatus(isRefreshing: store.isRefreshing(package),
+                                                lastChecked: store.lastChecked(for: package))
+                    ) {
+                        // A cask shows the app it installs; formulae show Homebrew.
+                        if let app = store.homebrewPackageApp(for: package) {
+                            AppIcon(url: app.url, size: InfoPanelHeader<EmptyView, EmptyView>.iconSize)
+                        } else {
+                            PackageSourceIcon(name: "homebrew", size: InfoPanelHeader<EmptyView, EmptyView>.iconSize)
+                        }
+                    } facts: {
+                        InspectorVersionChip(current: package.installedVersion,
+                                             latest: package.isOutdated ? package.currentVersion : nil)
+                        InfoChip(text: package.kind.rawValue, tint: .orange)
+                        if package.isDependency { InfoChip(text: "Dependency") }
+                        if let channel = package.prereleaseChannel {
+                            PrereleaseBadge(channel: channel, isInstalled: package.prereleaseIsInstalled, isChip: true)
+                        }
                     }
                 } content: {
                     CVESecuritySummary(item: CVEInventoryItem(package))
@@ -438,19 +447,6 @@ struct PackageDetail: View {
     }
 
     private func label(_ text: String) -> some View { Text(text).foregroundStyle(.secondary) }
-}
-
-private struct FlowLayout: Layout {
-    let spacing: CGFloat
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? 500; var x: CGFloat = 0; var y: CGFloat = 0; var line: CGFloat = 0
-        for view in subviews { let size = view.sizeThatFits(.unspecified); if x + size.width > width { x = 0; y += line + spacing; line = 0 }; x += size.width + spacing; line = max(line, size.height) }
-        return CGSize(width: width, height: y + line)
-    }
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var x = bounds.minX; var y = bounds.minY; var line: CGFloat = 0
-        for view in subviews { let size = view.sizeThatFits(.unspecified); if x + size.width > bounds.maxX { x = bounds.minX; y += line + spacing; line = 0 }; view.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size)); x += size.width + spacing; line = max(line, size.height) }
-    }
 }
 
 private struct HomebrewUninstallConfirmation: ViewModifier {

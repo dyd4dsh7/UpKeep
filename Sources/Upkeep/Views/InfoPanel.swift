@@ -2,29 +2,13 @@ import SwiftUI
 
 /// The single inspector layout for applications, packages, and models.
 struct InfoPanel<Header: View, Content: View>: View {
-    @UpkeepStoreReference private var store
     @Environment(\.colorScheme) private var scheme
     @ViewBuilder let header: Header
     @ViewBuilder let content: Content
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(alignment: .top, spacing: 8) {
-                header
-                Button {
-                    store.clearInspectorSelection()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .symbolRenderingMode(.hierarchical)
-                        .frame(width: 28, height: 28)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.borderless)
-                .foregroundStyle(.secondary)
-                .help("Close details")
-                .accessibilityLabel("Close details")
-                // No Escape shortcut: it would steal Escape from search and text fields.
-            }
+            header
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, UpkeepLayout.pageInset)
                 .padding(.vertical, 20)
@@ -43,61 +27,197 @@ struct InfoPanel<Header: View, Content: View>: View {
     }
 }
 
-struct InfoPanelHeader<Icon: View, Detail: View>: View {
+/// The top of every details panel: who the item is, then what state it is in.
+///
+///     [icon]  Name
+///             What it is, in one or two lines
+///     [1.0 → 1.1] [Running] [GitHub]
+///     Last checked 2 min ago
+struct InfoPanelHeader<Icon: View, Facts: View>: View {
+    static var iconSize: CGFloat { 56 }
+
     let title: String
+    var subtitle: String?
+    var status: ItemCheckStatus?
     @ViewBuilder let icon: Icon
-    @ViewBuilder let detail: Detail
+    @ViewBuilder let facts: Facts
+
+    init(
+        title: String,
+        subtitle: String? = nil,
+        status: ItemCheckStatus? = nil,
+        @ViewBuilder icon: () -> Icon,
+        @ViewBuilder facts: () -> Facts
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.status = status
+        self.icon = icon()
+        self.facts = facts()
+    }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            icon.frame(width: 44, height: 44)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.title2.weight(.semibold)).lineLimit(2)
-                    .tracking(-0.35)
-                    .accessibilityAddTraits(.isHeader)
-                    .textSelection(.enabled)
-                VStack(alignment: .leading, spacing: 8) {
-                    detail
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 14) {
+                icon.frame(width: Self.iconSize, height: Self.iconSize)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.title2.weight(.semibold))
+                        .tracking(-0.35)
+                        .lineLimit(2)
+                        .accessibilityAddTraits(.isHeader)
+                        .textSelection(.enabled)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(3)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                            .help(subtitle)
+                    }
                 }
-                .font(.callout)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                InspectorCloseButton()
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 10) {
+                FlowLayout(spacing: 6) { facts }
+                status
+            }
         }
     }
 }
 
-/// The installed version and the version an update brings, for an inspector header.
-struct InspectorVersionChange: View {
-    let current: String
-    let latest: String
+/// Closes the details panel. It sits level with the item's icon and name,
+/// and fills in on hover like other toolbar-style buttons.
+struct InspectorCloseButton: View {
+    @UpkeepStoreReference private var store
+    @State private var isHovering = false
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) { versions }
-            VStack(alignment: .leading, spacing: 2) { versions }
+        Button {
+            store.clearInspectorSelection()
+        } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(isHovering ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                .frame(width: 26, height: 26)
+                .background(Color.primary.opacity(isHovering ? 0.14 : 0.07), in: Circle())
+                .contentShape(Circle())
         }
-        .font(.body.monospacedDigit())
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Version \(current), update to \(latest)")
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: isHovering)
+        .help("Close details")
+        .accessibilityLabel("Close details")
+        // No Escape shortcut: it would steal Escape from search and text fields.
     }
+}
 
-    @ViewBuilder
-    private var versions: some View {
-        Text(current)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .truncationMode(.middle)
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Image(systemName: "arrow.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
-            Text(latest)
-                .fontWeight(.semibold)
-                .foregroundStyle(.tint)
+/// A small capsule label for a fact about the selected item. Neutral unless
+/// given a tint.
+struct InfoChip: View {
+    let text: String
+    var systemImage: String?
+    var tint: Color?
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if let systemImage {
+                Image(systemName: systemImage).font(.system(size: 9, weight: .bold))
+            }
+            Text(text).lineLimit(1).truncationMode(.middle)
+        }
+        .font(.caption.weight(.medium))
+        .padding(.horizontal, 8)
+        .frame(height: 22)
+        .foregroundStyle(tint.map(AnyShapeStyle.init) ?? AnyShapeStyle(.secondary))
+        .background((tint ?? .primary).opacity(tint == nil ? 0.07 : 0.13), in: Capsule())
+    }
+}
+
+/// The installed version, and the version an update brings, as a header chip.
+struct InspectorVersionChip: View {
+    let current: String
+    var latest: String?
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Text(current)
+                .foregroundStyle(latest == nil ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
                 .lineLimit(1)
                 .truncationMode(.middle)
+            if let latest {
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.tertiary)
+                Text(latest)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.tint)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .layoutPriority(1)
+            }
         }
-        .layoutPriority(1)
+        .font(.caption.monospaced())
+        .padding(.horizontal, 8)
+        .frame(height: 22)
+        .background(latest == nil ? Color.primary.opacity(0.07) : Color.accentColor.opacity(0.13), in: Capsule())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(latest.map { "Version \(current), update to \($0)" } ?? "Version \(current)")
+    }
+}
+
+/// Lays views out left to right, wrapping onto new lines. A view wider than
+/// the line is narrowed to fit, so long versions truncate instead of spilling.
+struct FlowLayout: Layout {
+    var spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? 500
+        let rows = arrange(subviews, width: width)
+        let height = rows.last.map { $0.y + $0.height } ?? 0
+        return CGSize(width: proposal.width ?? rows.map(\.width).max() ?? 0, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for row in arrange(subviews, width: bounds.width) {
+            for item in row.items {
+                subviews[item.index].place(
+                    at: CGPoint(x: bounds.minX + item.x, y: bounds.minY + row.y + (row.height - item.size.height) / 2),
+                    proposal: ProposedViewSize(item.size)
+                )
+            }
+        }
+    }
+
+    private struct Row { var items: [(index: Int, x: CGFloat, size: CGSize)] = []; var y: CGFloat = 0; var width: CGFloat = 0; var height: CGFloat = 0 }
+
+    private func arrange(_ subviews: Subviews, width: CGFloat) -> [Row] {
+        var rows: [Row] = []
+        var row = Row()
+        for index in subviews.indices {
+            var size = subviews[index].sizeThatFits(.unspecified)
+            if size.width > width {
+                size = subviews[index].sizeThatFits(ProposedViewSize(width: width, height: size.height))
+                size.width = min(size.width, width)
+            }
+            let x = row.items.isEmpty ? 0 : row.width + spacing
+            if !row.items.isEmpty, x + size.width > width {
+                let nextY = row.y + row.height + spacing
+                rows.append(row)
+                row = Row(y: nextY)
+                row.items.append((index, 0, size))
+                row.width = size.width
+                row.height = size.height
+                continue
+            }
+            row.items.append((index, x, size))
+            row.width = x + size.width
+            row.height = max(row.height, size.height)
+        }
+        if !row.items.isEmpty { rows.append(row) }
+        return rows
     }
 }
 

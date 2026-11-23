@@ -19,7 +19,7 @@ struct ItemCheckStatus: View {
             }
         }
         .font(.caption)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.tertiary)
         .accessibilityElement(children: .combine)
     }
 }

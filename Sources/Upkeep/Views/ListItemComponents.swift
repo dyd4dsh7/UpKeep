@@ -310,17 +310,27 @@ struct MenuSelectionLabel: View {
 struct PrereleaseBadge: View {
     let channel: PrereleaseChannel
     var isInstalled = false
+    /// Details-panel headers use the larger chip size.
+    var isChip = false
 
     var body: some View {
-        Text(isInstalled ? "INSTALLED \(channel.rawValue)" : channel.rawValue)
-            .font(.caption2.weight(.bold))
-            .foregroundStyle(foregroundColor)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(backgroundColor, in: Capsule())
-            .accessibilityLabel(isInstalled
-                ? "Installed \(channel.rawValue) prerelease"
-                : "\(channel.rawValue) prerelease")
+        if isChip {
+            InfoChip(text: title, tint: foregroundColor).accessibilityLabel(accessibilityText)
+        } else {
+            Text(title)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(foregroundColor)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(backgroundColor, in: Capsule())
+                .accessibilityLabel(accessibilityText)
+        }
+    }
+
+    private var title: String { isInstalled ? "INSTALLED \(channel.rawValue)" : channel.rawValue }
+
+    private var accessibilityText: String {
+        isInstalled ? "Installed \(channel.rawValue) prerelease" : "\(channel.rawValue) prerelease"
     }
 
     private var foregroundColor: Color {
@@ -476,19 +486,6 @@ struct LocalModelIdentityView: View {
     }
 }
 
-/// The "what is this" line under an item's name in its details panel.
-struct ItemDescriptionText: View {
-    let text: String?
-
-    var body: some View {
-        if let text {
-            Text(text)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-        }
-    }
-}
 
 struct ListRowPrimaryAction: ViewModifier {
     @Environment(\.listColumns) private var columns

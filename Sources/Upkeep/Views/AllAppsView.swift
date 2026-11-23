@@ -444,41 +444,34 @@ struct AppDetailView: View {
     }
 
     private var header: some View {
-        InfoPanelHeader(title: app.name) {
-            AppIcon(url: app.url, size: 44)
-        } detail: {
-                if let update {
-                    InspectorVersionChange(current: app.installedVersion, latest: update.displayAvailableVersion)
-                } else {
-                    Text("Version \(app.installedVersion)" + buildText)
-                        .font(.body.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-                ItemDescriptionText(text: store.itemDescription(for: app))
-                HStack(spacing: 6) {
-                    if store.isRunning(app) { RunningBadge() }
-                    ForEach(store.sources(for: app)) { source in SourceBadge(source: source) }
-                    if app.updateManagement.isExternallyManaged {
-                        ManagementBadge(management: app.updateManagement)
-                    }
-                    if let channel = update?.prereleaseChannel ?? app.prereleaseChannel {
-                        PrereleaseBadge(
-                            channel: channel,
-                            isInstalled: update?.prereleaseIsInstalled ?? (app.prereleaseChannel != nil)
-                        )
-                    }
-                    if let exclusion {
-                        Label(exclusion.mode.rawValue, systemImage: exclusion.mode == .ignored ? "eye.slash.fill" : "forward.end.fill")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.orange)
-                    }
-                }
-                ItemCheckStatus(
-                    isRefreshing: store.isRefreshing(app),
-                    lastChecked: store.lastChecked(for: app)
+        InfoPanelHeader(
+            title: app.name,
+            subtitle: store.itemDescription(for: app),
+            status: ItemCheckStatus(isRefreshing: store.isRefreshing(app), lastChecked: store.lastChecked(for: app))
+        ) {
+            AppIcon(url: app.url, size: InfoPanelHeader<EmptyView, EmptyView>.iconSize)
+        } facts: {
+            InspectorVersionChip(current: app.installedVersion, latest: update?.displayAvailableVersion)
+                .help(app.buildVersion.map { "Version \(app.installedVersion), build \($0)" } ?? "Version \(app.installedVersion)")
+            if store.isRunning(app) { RunningBadge() }
+            ForEach(store.sources(for: app)) { source in SourceBadge(source: source) }
+            if app.updateManagement.isExternallyManaged {
+                ManagementBadge(management: app.updateManagement)
+            }
+            if let channel = update?.prereleaseChannel ?? app.prereleaseChannel {
+                PrereleaseBadge(
+                    channel: channel,
+                    isInstalled: update?.prereleaseIsInstalled ?? (app.prereleaseChannel != nil),
+                    isChip: true
                 )
             }
-            .task(id: app.id) { await store.loadDescriptions(for: [app]) }
+            if let exclusion {
+                InfoChip(text: exclusion.mode.rawValue,
+                         systemImage: exclusion.mode == .ignored ? "eye.slash.fill" : "forward.end.fill",
+                         tint: .orange)
+            }
+        }
+        .task(id: app.id) { await store.loadDescriptions(for: [app]) }
     }
 
     private var technicalDisclosure: some View {
@@ -968,7 +961,6 @@ struct AppDetailView: View {
         }
     }
 
-    private var buildText: String { app.buildVersion.map { " (build \($0))" } ?? "" }
     private var sourceNames: String {
         let names = store.sources(for: app).map(\.rawValue).joined(separator: ", ")
         if !names.isEmpty { return names }
@@ -1035,8 +1027,7 @@ private final class AppDetailState: ObservableObject {
 struct SourceBadge: View {
     let source: UpdateSource
     var body: some View {
-        Text(source.rawValue).font(.caption2.weight(.semibold)).padding(.horizontal, 7).padding(.vertical, 3)
-            .foregroundStyle(color).background(color.opacity(0.1), in: Capsule())
+        InfoChip(text: source.rawValue, tint: color)
     }
     private var color: Color {
         switch source {
@@ -1052,22 +1043,14 @@ struct SourceBadge: View {
 struct ManagementBadge: View {
     let management: AppUpdateManagement
     var body: some View {
-        Text(management.rawValue)
-            .font(.caption2.weight(.semibold))
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .foregroundStyle(.teal)
-            .background(Color.teal.opacity(0.1), in: Capsule())
+        InfoChip(text: management.rawValue, tint: .teal)
             .help(management.updateExplanation)
     }
 }
 
 struct RunningBadge: View {
     var body: some View {
-        Label("Running", systemImage: "circle.fill")
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(.green)
-            .labelStyle(.titleAndIcon)
+        InfoChip(text: "Running", systemImage: "circle.fill", tint: .green)
             .help("This app is currently running")
             .accessibilityLabel("Running")
     }
