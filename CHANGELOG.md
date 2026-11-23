@@ -4,6 +4,14 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+## 0.25.26 — 2026-11-24
+
+- GitHub checks no longer fail when GitHub's hourly limit runs out. When the GitHub CLI is signed in, Upkeep uses that sign-in for GitHub's API only, raising the limit from 60 to 5,000 requests an hour; turn it off in Settings › Sources. When the limit is reached, Upkeep pauses GitHub requests until it resets instead of failing each one, and nvm and other latest-release checks no longer count against it.
+- Uninstalling an app can also move its settings and caches in your Library folder to the Trash. Upkeep finds them by the app's bundle identifier, leaves Apple apps and apps with more than one copy alone, and lists which folders it found before you choose.
+- Automatic updates, in Settings › General, can install Homebrew formulae or all recommended updates after each scheduled check. It is off by default, and running apps, Homebrew casks, and major versions always wait for you.
+- `upkeep://` links open a section, search, update review, or start a check, for example from Shortcuts' Open URL action. Links never install anything.
+- Steam games and .NET tools show a description.
+
 ## 0.25.25 — 2026-11-24
 
 - The details panel has a clearer header. The icon is larger, with the name and description beside it; the version, running state, update source and package kind sit together in one row of chips; and the close button is easier to see and lines up with the icon. Apps, Homebrew, developer packages and AI models now share the same header layout, and Homebrew casks show the icon of the app they install.
