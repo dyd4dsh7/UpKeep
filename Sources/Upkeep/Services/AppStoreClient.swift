@@ -74,14 +74,31 @@ struct AppStoreClient: Sendable {
         Locale.current.region?.identifier.lowercased()
     }
 
+    /// The Mac listing comes first. For a universal purchase such as TestFlight,
+    /// `macSoftware` can return the iPhone build's newer version, which the Mac
+    /// App Store never offers. iPhone and iPad apps running on the Mac have no
+    /// Mac listing, so IDs missing from the first lookup try `macSoftware`.
+    static let lookupEntities = ["desktopSoftware", "macSoftware"]
+
     /// Looks up bundle IDs and returns results keyed by `lookupKey(bundleId)`.
     /// A bundle ID missing from the response is absent from the dictionary.
     func lookup(bundleIDs: [String]) async throws -> [String: LookupResult] {
+        var results: [String: LookupResult] = [:]
+        var remaining = bundleIDs
+        for entity in Self.lookupEntities where !remaining.isEmpty {
+            let found = try await lookup(bundleIDs: remaining, entity: entity)
+            results.merge(found) { first, _ in first }
+            remaining = remaining.filter { results[Self.lookupKey($0)] == nil }
+        }
+        return results
+    }
+
+    private func lookup(bundleIDs: [String], entity: String) async throws -> [String: LookupResult] {
         guard !bundleIDs.isEmpty else { return [:] }
         var components = URLComponents(string: "https://itunes.apple.com/lookup")
         components?.queryItems = [
             URLQueryItem(name: "bundleId", value: bundleIDs.joined(separator: ",")),
-            URLQueryItem(name: "entity", value: "macSoftware")
+            URLQueryItem(name: "entity", value: entity)
         ] + (Self.storefrontCountry.map { [URLQueryItem(name: "country", value: $0)] } ?? [])
         guard let url = components?.url else { return [:] }
         var request = URLRequest(url: url)

@@ -55,7 +55,7 @@ struct DeveloperPackageClient: Sendable {
         appendDetected(.uv, named: "uv", extra: [homePath(".local/bin/uv")], enabledManagers: enabledManagers, to: &tools)
         appendDetected(.pipx, named: "pipx", extra: [homePath(".local/bin/pipx")], enabledManagers: enabledManagers, to: &tools)
         appendDetected(.python, named: "python3", extra: ["/usr/bin/python3"], enabledManagers: enabledManagers, to: &tools)
-        appendDetected(.rubyGems, named: "gem", extra: ["/usr/bin/gem"], enabledManagers: enabledManagers, to: &tools)
+        appendDetected(.rubyGems, named: "gem", extra: rubyGemExecutableCandidates(), enabledManagers: enabledManagers, to: &tools)
         appendDetected(.rustup, named: "rustup", extra: [homePath(".cargo/bin/rustup")], enabledManagers: enabledManagers, to: &tools)
         appendDetected(.cargo, named: "cargo", extra: [homePath(".cargo/bin/cargo")], enabledManagers: enabledManagers, to: &tools)
         appendDetected(.githubCLI, named: "gh", extra: [], enabledManagers: enabledManagers, to: &tools)
@@ -390,11 +390,7 @@ func scanNode(_ path: String, preferLatestMajor: Bool) async -> ManagerScanResul
     }
     let installed = installedOutput.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
     let releases = await nodeReleaseVersions()
-    let installedMajor = installed.split(separator: ".").first.map(String.init)
-    let latest = preferLatestMajor
-        ? releases.first
-        : releases.first { $0.split(separator: ".").first.map(String.init) == installedMajor }
-    guard let latest else {
+    guard let latest = latestNodeRelease(in: releases, installed: installed, preferLatestMajor: preferLatestMajor) else {
         return ManagerScanResult(
             manager: .node,
             packages: [DeveloperPackage(
@@ -1079,7 +1075,9 @@ func scanVolta(_ path: String) async -> ManagerScanResult {
         for (name, version) in installed {
             group.addTask {
                 let latest: String
-                if name == "node" { latest = nodeReleases.first ?? version }
+                if name == "node" {
+                    latest = latestNodeRelease(in: nodeReleases, installed: version, preferLatestMajor: true) ?? version
+                }
                 else { latest = await npmRegistryLatestVersion(package: name) ?? version }
                 return DeveloperPackage(
                     name: name, currentVersion: version, latestVersion: latest,
@@ -1100,10 +1098,7 @@ func scanFNM(_ path: String) async -> ManagerScanResult {
     let installed = DeveloperInventoryParsers.parseFNMList(result.data)
     let releases = await nodeReleaseVersions()
     let packages = installed.map { version, isDefault in
-        let major = version.split(separator: ".").first.map(String.init)
-        let latest = isDefault
-            ? releases.first
-            : releases.first { $0.split(separator: ".").first.map(String.init) == major }
+        let latest = latestNodeRelease(in: releases, installed: version, preferLatestMajor: isDefault)
         return DeveloperPackage(
             name: "Node.js", currentVersion: version, latestVersion: latest ?? version,
             manager: .fnm, executablePath: path, registryIdentifier: "node",
@@ -1292,6 +1287,34 @@ private func normalizedComposerVersion(_ value: String) -> String {
 
 private func latestStableVersion(in versions: [String]) -> String? {
     versions.first { !VersionComparator.isPrerelease($0) }
+}
+
+/// nodejs.org lists alpha and RC builds first while a new major is in
+/// testing. A stable install only moves to stable releases; an installed
+/// prerelease is already on that track. `preferLatestMajor` is for the default
+/// Node, which follows the newest major; other installs stay on their major.
+func latestNodeRelease(in releases: [String], installed: String, preferLatestMajor: Bool) -> String? {
+    let allowsPrereleases = VersionComparator.isPrerelease(installed)
+    let installedMajor = installed.split(separator: ".").first.map(String.init)
+    return releases.first { release in
+        guard allowsPrereleases || !VersionComparator.isPrerelease(release) else { return false }
+        return preferLatestMajor || release.split(separator: ".").first.map(String.init) == installedMajor
+    }
+}
+
+/// The Ruby the user chose comes before macOS's own. `/usr/bin/gem` belongs to
+/// the system Ruby, whose gems macOS ships and updates; it is used only when
+/// no other Ruby is installed. Homebrew's Ruby is keg-only, so its `opt` path
+/// is checked as well as the linked one.
+func rubyGemExecutableCandidates(home: String = NSHomeDirectory()) -> [String] {
+    [
+        home + "/.rbenv/shims/gem",
+        "/opt/homebrew/opt/ruby/bin/gem",
+        "/usr/local/opt/ruby/bin/gem",
+        "/opt/homebrew/bin/gem",
+        "/usr/local/bin/gem",
+        "/usr/bin/gem"
+    ]
 }
 
 private func executable(named name: String, extra: [String]) -> String? {

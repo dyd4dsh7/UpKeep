@@ -64,7 +64,7 @@ enum DeveloperPackageInstallAdapters {
         },
         .pipx: adapter { command($0, ["install", "\($0.registryIdentifier ?? $0.name)==\($1)", "--force"]) },
         .python: adapter { command($0, ["-m", "pip", "install", "--user", "\($0.name)==\($1)"]) },
-        .rubyGems: adapter { command($0, ["install", $0.name, "--version", $1, "--user-install"]) },
+        .rubyGems: adapter { command($0, rubyGemInstallArguments(for: $0, version: $1)) },
         .rustup: adapter { package, version in
             command(
                 package,
@@ -162,4 +162,12 @@ enum DeveloperPackageInstallAdapters {
             }
         }
     }
+}
+
+/// macOS's system Ruby keeps its gems in a folder only root can write, so its
+/// updates go to the user's gem folder. Other Rubies (Homebrew, rbenv) own a
+/// writable gem folder, and installing there keeps their gem commands current.
+func rubyGemInstallArguments(for package: DeveloperPackage, version: String) -> [String] {
+    let arguments = ["install", package.name, "--version", version]
+    return package.executablePath == "/usr/bin/gem" ? arguments + ["--user-install"] : arguments
 }

@@ -4,6 +4,10 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+- App Store apps no longer show updates the Mac App Store doesn't offer. Upkeep now asks for the Mac listing first; the general listing could return the iPhone version of a universal app, such as TestFlight 4.4.1 when the Mac version was 4.4.0. iPhone and iPad apps running on the Mac still use the general listing.
+- Node.js no longer offers alpha or release-candidate builds to stable installs. nodejs.org lists Node 27's alphas first, so the default nvm Node was offered `27.0.0-alpha`. This also applies to Volta and fnm.
+- RubyGems now checks the Ruby you installed (rbenv or Homebrew) before macOS's built-in Ruby, which is used only when there is no other. Gem updates for Homebrew and rbenv Rubies now install into that Ruby's own gem folder, so their commands stay current; system Ruby updates still go to your user gem folder.
+
 ## 0.25.15 — 2026-11-23
 
 - Homebrew updates are no longer stale. `brew info` never refreshes Homebrew's cached catalog, so Upkeep now runs `brew update --auto-update` (the refresh Homebrew runs before installs) before reading your packages, at most once an hour or every `HOMEBREW_AUTO_UPDATE_SECS`. Setting `HOMEBREW_NO_AUTO_UPDATE`, in the environment or a `brew.env` file, turns it off; Homebrew's own command ignores that setting, so Upkeep checks it.
