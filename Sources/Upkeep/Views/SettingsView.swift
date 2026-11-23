@@ -16,7 +16,7 @@ struct SettingsView: View {
                 .frame(width: 186)
             Divider()
             VStack(spacing: 0) {
-                WorkspaceSummary(
+                SettingsHeader(
                     title: settings.selectedSection.rawValue,
                     detail: description(for: settings.selectedSection),
                     systemImage: icon(for: settings.selectedSection)
@@ -26,7 +26,7 @@ struct SettingsView: View {
                     .id(settings.selectedSection)
             }
         }
-        .frame(width: 830, height: 600)
+        .frame(width: 860, height: 640)
         .upkeepWorkspaceAppearance()
         .task {
             MainWindow.openAction = openWindow
@@ -88,7 +88,7 @@ struct SettingsView: View {
         case .ignored: "Manage skipped versions and ignored software."
         case .diagnostics: "Inspect update checks and export the local log."
         case .changelog: "Browse release notes by version."
-        case .about: versionText
+        case .about: "Version, updates, and project links."
         }
     }
 
@@ -487,52 +487,94 @@ struct SettingsView: View {
                         .labelsHidden()
                 }
             }
-            Section("Package Managers") {
-                TextField("Find a package manager", text: $managerSearch)
-                    .textFieldStyle(.roundedBorder)
+            Section {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Find a package manager", text: $managerSearch)
+                        .textFieldStyle(.plain)
+                }
                 if managers.isEmpty {
                     Text("No managers match your search.").foregroundStyle(.secondary)
                 }
+            } header: {
+                Text("Package Managers")
+            } footer: {
+                SettingsFooter("Upkeep only runs managers it finds on this Mac. Turn one off to skip it during checks.")
+            }
+            managerSection("Found on This Mac", managers.filter { detected.contains($0) }, detected: true)
+            managerSection("Not Found", managers.filter { !detected.contains($0) }, detected: false)
+        }
+        .formStyle(.grouped)
+    }
+
+    @ViewBuilder private func managerSection(_ title: String, _ managers: [DeveloperPackageManager], detected: Bool) -> some View {
+        if !managers.isEmpty {
+            Section {
                 ForEach(managers) { manager in
                     DeveloperManagerSettingsRow(
                         manager: manager,
-                        detected: detected.contains(manager),
+                        detected: detected,
                         isEnabled: Binding(
                             get: { settings.isManagerEnabled(manager) },
                             set: { settings.setManager(manager, enabled: $0) }
                         )
                     )
                 }
+            } header: {
+                Text("\(title) (\(managers.count))")
             }
         }
-        .formStyle(.grouped)
     }
 
     private var about: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                HStack(alignment: .center, spacing: 17) {
-                    AppBrandIcon(size: 76)
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Upkeep")
-                            .font(.title.weight(.semibold))
-                        Text("Manage updates for apps, packages, AI models, and macOS.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
+            VStack(spacing: 20) {
+                VStack(spacing: 10) {
+                    AppBrandIcon(size: 96)
+                        .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
+                    Text("Upkeep")
+                        .font(.largeTitle.weight(.bold))
+                    Text("Keeps your apps, packages, AI models, and macOS up to date.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    Text(versionText)
+                        .font(.caption.weight(.medium).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(.quaternary.opacity(0.7), in: Capsule())
+                        .textSelection(.enabled)
                 }
-                Divider()
-                LabeledContent("Version") { Text(versionText.replacingOccurrences(of: "Version ", with: "")) }
+                .padding(.top, 8)
+
                 SelfUpdateStatusRow()
-                LabeledContent("Developer") {
-                    VStack(alignment: .trailing, spacing: 5) {
-                        Text("Hayden Thorn")
-                        Link("haydenthorn.com", destination: URL(string: "https://haydenthorn.com")!)
+
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                    AboutLinkTile(title: "Release Notes", detail: "What’s new in each version", systemImage: "list.bullet.rectangle") {
+                        settings.selectedSection = .changelog
                     }
+                    AboutLinkTile(title: "Source Code", detail: "github.com/dyd4dsh7/UpKeep", systemImage: "chevron.left.forwardslash.chevron.right",
+                                  url: AboutLinks.repository)
+                    AboutLinkTile(title: "Report an Issue", detail: "Open a GitHub issue", systemImage: "ladybug",
+                                  url: AboutLinks.issues)
+                    AboutLinkTile(title: "Privacy", detail: "What Upkeep sends and stores", systemImage: "hand.raised",
+                                  url: AboutLinks.privacy)
+                    AboutLinkTile(title: "Third-Party Notices", detail: "Licences for included work", systemImage: "doc.text",
+                                  url: AboutLinks.notices)
+                    AboutLinkTile(title: "Developer", detail: "Hayden Thorn · haydenthorn.com", systemImage: "person.crop.circle",
+                                  url: AboutLinks.developer)
+                }
+
+                if let copyright = Bundle.main.object(forInfoDictionaryKey: "NSHumanReadableCopyright") as? String {
+                    Text(copyright)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
                 }
             }
-            .padding(22)
-            .upkeepSurface()
+            .frame(maxWidth: 560)
+            .frame(maxWidth: .infinity)
             .padding(UpkeepLayout.pageInset)
         }
     }
@@ -639,6 +681,94 @@ struct SettingsView: View {
 
 }
 
+private enum AboutLinks {
+    static let repository = URL(string: "https://github.com/dyd4dsh7/UpKeep")!
+    static let issues = URL(string: "https://github.com/dyd4dsh7/UpKeep/issues")!
+    static let privacy = URL(string: "https://github.com/dyd4dsh7/UpKeep/blob/main/PRIVACY.md")!
+    static let notices = URL(string: "https://github.com/dyd4dsh7/UpKeep/blob/main/THIRD_PARTY_NOTICES.md")!
+    static let developer = URL(string: "https://haydenthorn.com")!
+}
+
+/// A link or in-app destination on the About page.
+private struct AboutLinkTile: View {
+    @Environment(\.openURL) private var openURL
+    @UpkeepState private var isHovered = false
+    let title: String
+    let detail: String
+    let systemImage: String
+    var url: URL?
+    var action: (() -> Void)?
+
+    init(title: String, detail: String, systemImage: String, url: URL) {
+        self.title = title; self.detail = detail; self.systemImage = systemImage; self.url = url
+    }
+
+    init(title: String, detail: String, systemImage: String, action: @escaping () -> Void) {
+        self.title = title; self.detail = detail; self.systemImage = systemImage; self.action = action
+    }
+
+    var body: some View {
+        Button {
+            if let url { openURL(url) } else { action?() }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 30, height: 30)
+                    .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).fontWeight(.medium).foregroundStyle(.primary)
+                    Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: url == nil ? "chevron.right" : "arrow.up.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.primary.opacity(isHovered ? 0.05 : 0), in: RoundedRectangle(cornerRadius: 10))
+            .upkeepSurface(radius: 10)
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .help(url?.absoluteString ?? title)
+        .accessibilityHint(url == nil ? "Opens in Settings" : "Opens in your browser")
+    }
+}
+
+/// A compact page header for the Settings window, which is smaller than the
+/// main window and gives its space to the content.
+private struct SettingsHeader: View {
+    @Environment(\.colorScheme) private var scheme
+    let title: String
+    let detail: String
+    let systemImage: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            WorkspaceGlyph(systemImage: systemImage, size: 34)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.title2.weight(.semibold))
+                    .accessibilityAddTraits(.isHeader)
+                Text(detail)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .help(detail)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, UpkeepLayout.pageInset)
+        .padding(.vertical, 14)
+        .background(UpkeepPalette.canvas(in: scheme))
+        .overlay(alignment: .bottom) { Divider() }
+    }
+}
+
 /// Grouped-form footers trail-align on macOS; keep explanations under their card.
 struct SettingsFooter: View {
     let text: String
@@ -708,12 +838,13 @@ private struct DeveloperManagerSettingsRow: View {
         HStack(spacing: 12) {
             PackageManagerIcon(manager: manager, size: 30)
                 .frame(width: 30, height: 30)
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(manager.rawValue).fontWeight(.medium)
-                if detected {
-                    Text("Detected in inventory").font(.caption).foregroundStyle(.secondary)
-                }
+                Text(manager.packageLabel)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
+            .opacity(detected ? 1 : 0.75)
             Spacer(minLength: 16)
             Toggle(manager.rawValue, isOn: $isEnabled)
                 .labelsHidden()
