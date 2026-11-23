@@ -60,7 +60,7 @@ private func groups(apps: [InstalledApp] = [], packages: [DeveloperPackage] = []
         package("stable-aarch64-apple-darwin", .rustup)
     ])
     #expect(found.count == 1)
-    #expect(found[0].kind == .runtimeVersions && found[0].title == "Node.js — 3 versions")
+    #expect(found[0].kind == .runtimeVersions && found[0].title == "Node.js" && found[0].members.count == 3)
     #expect(found[0].members.map(\.version) == ["26.13.0", "24.22.2", "22.23.4"])
     #expect(found[0].newestID == found[0].members.first?.id)
 }
@@ -79,7 +79,7 @@ private func groups(apps: [InstalledApp] = [], packages: [DeveloperPackage] = []
 
     // When Homebrew's Node.js is not listed as a runtime, its formula joins the versions.
     let withFormula = groups(packages: [nvmNode], formulae: [formula("node")])
-    #expect(withFormula.first?.title == "Node.js — 2 versions")
+    #expect(withFormula.first?.members.count == 2)
     #expect(withFormula.first?.members.last?.id == "homebrew|\(formula("node").id)")
     #expect(DuplicateFinder.homebrewBaseName("python@3.12") == "python")
 }
@@ -114,4 +114,60 @@ private actor TrashRecorder: AppUninstalling {
     var trashed: [URL] = []
     func moveToTrash(_ url: URL) async throws -> URL? { trashed.append(url); return nil }
     func moveDataToTrash(_ urls: [URL]) async -> AppDataTrashResult { AppDataTrashResult() }
+}
+
+// MARK: - The copy in use
+
+private func makeNpmPrefix(_ root: URL, packages: [String]) throws -> URL {
+    let bin = root.appendingPathComponent("bin"), modules = root.appendingPathComponent("lib/node_modules")
+    try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+    try Data().write(to: bin.appendingPathComponent("npm"))
+    for name in packages {
+        let script = modules.appendingPathComponent(name).appendingPathComponent("bin/cli.js")
+        try FileManager.default.createDirectory(at: script.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data().write(to: script)
+        try FileManager.default.createSymbolicLink(at: bin.appendingPathComponent(URL(fileURLWithPath: name).lastPathComponent),
+                                                   withDestinationURL: script)
+    }
+    return bin
+}
+
+@Test func theCopyFirstOnPATHIsInUse() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("UpkeepActive-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let brewBin = try makeNpmPrefix(root.appendingPathComponent("homebrew"), packages: ["@openai/codex"])
+    let nvmBin = try makeNpmPrefix(root.appendingPathComponent("nvm"), packages: ["@openai/codex"])
+    let emptyBin = try makeNpmPrefix(root.appendingPathComponent("other"), packages: [])
+    let brewCopy = package("@openai/codex", .npm, "0.147.0", executable: brewBin.appendingPathComponent("npm").path)
+    let nvmCopy = package("@openai/codex", .npm, "0.171.0", context: "NVM Node 24", executable: nvmBin.appendingPathComponent("npm").path)
+    let notThere = package("@openai/codex", .npm, "0.100.0", context: "Other", executable: emptyBin.appendingPathComponent("npm").path)
+    let found = groups(packages: [brewCopy, nvmCopy, notThere])
+
+    let nvmFirst = ActiveInstallations.activeIDs(in: found, path: [emptyBin.path, nvmBin.path, brewBin.path])
+    #expect(nvmFirst == ["developer|\(nvmCopy.id)"])
+    let brewFirst = ActiveInstallations.activeIDs(in: found, path: ["/usr/bin", brewBin.path + "/", nvmBin.path])
+    #expect(brewFirst == ["developer|\(brewCopy.id)"])
+    #expect(ActiveInstallations.activeIDs(in: found, path: ["/usr/bin"]).isEmpty)
+}
+
+@Test func theAppMacOSOpensIsMarked() {
+    let primary = app("Editor", "com.example.editor", at: "/Applications/Editor.app")
+    let copy = app("Editor", "com.example.editor", at: "/Users/test/Downloads/Editor.app")
+    let found = groups(apps: [primary, copy])
+    let active = ActiveInstallations.activeIDs(in: found, path: [], defaultApp: { _ in URL(fileURLWithPath: "/Users/test/Downloads/Editor.app") })
+    #expect(active == ["app|\(copy.id)"])
+}
+
+@Test func shellStartupOutputIsIgnoredWhenReadingPATH() {
+    let output = "Welcome back!\nUPKEEP_PATH=/Users/test/.nvm/versions/node/v24/bin:/opt/homebrew/bin:relative:/usr/bin\n"
+    #expect(LoginShellPath.parse(output) == ["/Users/test/.nvm/versions/node/v24/bin", "/opt/homebrew/bin", "/usr/bin"])
+    #expect(LoginShellPath.parse("no marker").isEmpty)
+}
+
+@Test func copiesDescribeWhereTheyLive() {
+    let brew = DuplicateMember.developer(package("@openai/codex", .npm, executable: "/opt/homebrew/bin/npm"))
+    #expect(brew.place == "Homebrew’s npm")
+    #expect(brew.path == "/opt/homebrew/bin")
+    let nvm = DuplicateMember.developer(package("pnpm", .npm, context: "NVM Node 24.22.1", executable: "/x/bin/npm"))
+    #expect(nvm.place == "NVM Node 24.22.1")
 }

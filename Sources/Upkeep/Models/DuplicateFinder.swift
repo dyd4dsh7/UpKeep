@@ -43,6 +43,36 @@ enum DuplicateMember: Identifiable, Hashable, Sendable {
         }
     }
 
+    /// What sets this copy apart from the others, such as "Applications",
+    /// "Homebrew’s npm" or "NVM Node 24.22.1".
+    var place: String {
+        switch self {
+        case let .app(app):
+            let folder = app.url.deletingLastPathComponent()
+            return folder.path == FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications").path
+                ? "Your Applications folder" : FileManager.default.displayName(atPath: folder.path)
+        case let .developer(package):
+            if let context = package.installationContext { return context }
+            let path = package.executablePath
+            if path.hasPrefix("/opt/homebrew/") || path.hasPrefix("/usr/local/") { return "Homebrew’s \(package.manager.rawValue)" }
+            return package.manager.rawValue
+        case let .homebrew(package):
+            return "Homebrew \(package.kind.rawValue.lowercased())"
+        }
+    }
+
+    /// Where the copy is on disk, with the home folder shortened to ~.
+    var path: String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let raw: String
+        switch self {
+        case let .app(app): raw = app.url.path
+        case let .developer(package): raw = URL(fileURLWithPath: package.executablePath).deletingLastPathComponent().path
+        case let .homebrew(package): raw = "brew \(package.kind == .cask ? "--cask " : "")\(package.token)"
+        }
+        return raw.hasPrefix(home) ? "~" + raw.dropFirst(home.count) : raw
+    }
+
     /// What removing this copy does, for the confirmation message.
     var removalDescription: String {
         switch self {
@@ -60,16 +90,25 @@ struct DuplicateGroup: Identifiable, Hashable, Sendable {
         case runtimeVersions
         case twoInstallers
 
+        var title: String {
+            switch self {
+            case .appCopies: "Apps in more than one place"
+            case .packageCopies: "Tools installed more than once"
+            case .runtimeVersions: "Runtime versions"
+            case .twoInstallers: "Tools from two installers"
+            }
+        }
+
         var explanation: String {
             switch self {
             case .appCopies:
-                "The same app is installed in more than one place. Keeping one avoids opening or updating the wrong copy."
+                "Keeping one copy avoids opening or updating the wrong one."
             case .packageCopies:
-                "The same command-line tool is installed more than once. Only one runs when you type its name; the others use disk space and go out of date."
+                "Only one copy runs when you type its name in Terminal; the others take up space and fall behind."
             case .runtimeVersions:
-                "Several versions are installed. Projects may need a specific version, so remove only the ones you no longer use."
+                "Projects can need a particular version, so remove only versions you no longer use."
             case .twoInstallers:
-                "Two installers manage the same tool. Keeping one makes it clear which version runs and which installer updates it."
+                "Keeping one makes it clear which version runs and which installer updates it."
             }
         }
     }
@@ -143,7 +182,7 @@ enum DuplicateFinder {
             }
             guard members.count > 1 else { continue }
             groups.append(DuplicateGroup(id: "versions:\(key)", kind: .runtimeVersions,
-                                         title: "\(sorted[0].name) — \(members.count) versions", members: members))
+                                         title: sorted[0].name, members: members))
         }
 
         for formula in formulae {

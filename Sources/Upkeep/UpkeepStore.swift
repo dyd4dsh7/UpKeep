@@ -2261,6 +2261,15 @@ final class UpkeepStore: ObservableObject {
             .filter { !settings.ignoredDuplicateGroups.contains($0.id) }
     }
 
+    /// Copies Terminal or Finder uses now, from the shell's PATH and the
+    /// default app for each bundle identifier.
+    func activeDuplicateMemberIDs(_ groups: [DuplicateGroup]) async -> Set<String> {
+        let path = await LoginShellPath.shared.directories()
+        return await Task.detached(priority: .utility) {
+            ActiveInstallations.activeIDs(in: groups, path: path)
+        }.value
+    }
+
     func canRemove(_ member: DuplicateMember) -> Bool {
         switch member {
         case let .app(app): canUninstall(app)
