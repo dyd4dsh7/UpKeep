@@ -4,6 +4,10 @@ All notable changes to Upkeep are documented here.
 
 ## Unreleased
 
+## 0.25.19 — 2026-11-23
+
+- Versions line up in app and source lists. A row without an update now shows its version in the same column as the current version of rows with one, instead of at the far right.
+
 ## 0.25.18 — 2026-11-23
 
 - Settings has a smaller page header and a slightly larger window, so pages have more room. Developer settings split package managers into those found on this Mac and those not found, and say what each one is.
