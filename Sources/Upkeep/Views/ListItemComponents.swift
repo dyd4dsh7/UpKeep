@@ -185,7 +185,9 @@ struct ItemIdentityView: View {
                         .font(.caption.weight(.bold))
                         .foregroundStyle(.secondary)
                 }
-                if let prereleaseChannel {
+                // "Firefox Nightly" already names its channel; a NIGHTLY badge
+                // beside it repeats the name and costs it room.
+                if let prereleaseChannel, !PrereleaseBadge.title(title, names: prereleaseChannel) {
                     PrereleaseBadge(channel: prereleaseChannel, isInstalled: prereleaseIsInstalled)
                 }
                 if let cveItem {
@@ -317,14 +319,36 @@ struct PrereleaseBadge: View {
         if isChip {
             InfoChip(text: title, tint: foregroundColor).accessibilityLabel(accessibilityText)
         } else {
-            Text(title)
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(foregroundColor)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(backgroundColor, in: Capsule())
-                .accessibilityLabel(accessibilityText)
+            // A badge never wraps. As the row tightens it drops "INSTALLED",
+            // then shrinks to an icon, so the name keeps its room and the
+            // badge can't stack letter by letter. The tooltip says it in full.
+            ViewThatFits(in: .horizontal) {
+                capsule(Text(title))
+                capsule(Text(channel.rawValue))
+                capsule(Text(Image(systemName: "testtube.2")))
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accessibilityText)
+            .help(accessibilityText)
         }
+    }
+
+    /// Whether an item's name already says its channel, as a whole word:
+    /// "Firefox Nightly", "Xcode-beta", "Safari Technology Preview".
+    nonisolated static func title(_ title: String, names channel: PrereleaseChannel) -> Bool {
+        let words = title.uppercased().split { !$0.isLetter && !$0.isNumber }
+        return words.contains { $0 == channel.rawValue }
+    }
+
+    private func capsule(_ text: Text) -> some View {
+        text
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(foregroundColor)
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(backgroundColor, in: Capsule())
     }
 
     private var title: String { isInstalled ? "INSTALLED \(channel.rawValue)" : channel.rawValue }
@@ -448,6 +472,8 @@ struct VersionTransitionView: View {
         .frame(width: usesFixedWidth ? columns.versionTransition : nil,
                alignment: usesFixedWidth ? .trailing : .leading)
         .accessibilityElement(children: .combine)
+        // Long nightly versions truncate in the column; hovering shows them whole.
+        .help(latest.map { $0 == current ? current : "\(current) → \($0)" } ?? current)
     }
 }
 

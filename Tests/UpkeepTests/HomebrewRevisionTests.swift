@@ -33,3 +33,18 @@ import Testing
         kind: .formula, isOutdated: true, isDependency: false, dependencies: [], versionScheme: 2)
     #expect(!store.isExcluded(next))
 }
+
+@Test func formulaMovedBackToAnOlderReleaseIsMarkedAsRollback() {
+    let rollback = HomebrewPackage(token: "openssl@3", displayName: "openssl@3", description: nil,
+        homepage: nil, license: nil, installedVersion: "3.6.5", currentVersion: "3.5.9",
+        kind: .formula, isOutdated: true, isDependency: true, dependencies: [], versionScheme: 1)
+    #expect(rollback.isVersionRollback)
+    let revision = HomebrewPackage(token: "mysql@8.4", displayName: "mysql@8.4", description: nil,
+        homepage: nil, license: nil, installedVersion: "8.4.13_1", currentVersion: "8.4.13.1",
+        kind: .formula, isOutdated: true, isDependency: false, dependencies: [])
+    #expect(!revision.isVersionRollback)
+    let rebuild = HomebrewPackage(token: "example", displayName: "Example", description: nil,
+        homepage: nil, license: nil, installedVersion: "1.2_3", currentVersion: "1.2_4",
+        kind: .formula, isOutdated: true, isDependency: false, dependencies: [])
+    #expect(!rebuild.isVersionRollback)
+}

@@ -287,6 +287,7 @@ private struct PackageRow: View, Equatable {
     private var rowDetail: String {
         var details = [package.kind.rawValue]
         if package.isRevisionUpdate { details.append("Rebuild update") }
+        if package.isOutdated && package.isVersionRollback { details.append("Older version") }
         if package.isDependency { details.append("Dependency") }
         if package.isPinned { details.append("Pinned") }
         // The description leads so a narrow list still shows it.

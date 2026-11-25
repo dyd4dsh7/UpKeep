@@ -77,3 +77,38 @@ import Testing
     #expect(GitHubClient.version(from: "example-app-v1.2.0", matching: app) == "1.2.0")
     #expect(GitHubClient.version(from: "release-1.2.0", matching: app) == "1.2.0")
 }
+
+@Test func githubInstalledNightlyFollowsNewestNightlyInsteadOfStable() {
+    let app = InstalledApp(
+        name: "T3 Code (Nightly)",
+        bundleIdentifier: "com.t3tools.t3code.nightly",
+        installedVersion: "0.1.12-nightly.20261123.5151",
+        buildVersion: nil,
+        url: URL(fileURLWithPath: "/Applications/T3 Code (Nightly).app"),
+        sparkleFeedURL: nil,
+        githubRepository: "pingdotgg/t3code",
+        hasAppStoreReceipt: false
+    )
+    let releases = [
+        GitHubClient.Release(
+            tagName: "v0.1.13-nightly.20261125.5245", htmlUrl: "https://example.com/nightly", body: nil,
+            prerelease: true, draft: false
+        ),
+        GitHubClient.Release(
+            tagName: "v0.1.12", htmlUrl: "https://example.com/stable", body: nil,
+            prerelease: false, draft: false
+        )
+    ]
+
+    #expect(GitHubClient.newestRelease(in: releases, matching: app, includePrereleases: false)?.tagName
+        == "v0.1.13-nightly.20261125.5245")
+}
+
+@Test func prereleaseBadgeIsLeftOutWhenTheNameAlreadySaysTheChannel() {
+    #expect(PrereleaseBadge.title("T3 Code (Nightly)", names: .nightly))
+    #expect(PrereleaseBadge.title("Xcode-beta", names: .beta))
+    #expect(PrereleaseBadge.title("Safari Technology Preview", names: .preview))
+    #expect(!PrereleaseBadge.title("T3 Code", names: .nightly))
+    #expect(!PrereleaseBadge.title("Betaflight Configurator", names: .beta))
+    #expect(!PrereleaseBadge.title("Firefox Developer Edition", names: .development))
+}

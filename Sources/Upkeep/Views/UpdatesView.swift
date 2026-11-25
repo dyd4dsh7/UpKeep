@@ -589,6 +589,7 @@ private struct HomebrewUpdateCard: View {
                 title: package.displayName,
                 detail: package.kind.rawValue
                     + (package.isRevisionUpdate ? " · Rebuild update" : "")
+                    + (package.isVersionRollback ? " · Older version" : "")
                     + (package.isDependency ? " · Dependency" : "")
                     + (package.kind == .cask ? " · May require password" : ""),
                 prereleaseChannel: package.prereleaseChannel,

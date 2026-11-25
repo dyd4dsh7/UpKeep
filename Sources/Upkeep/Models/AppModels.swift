@@ -909,6 +909,12 @@ struct HomebrewPackage: Identifiable, Hashable, Sendable {
         kind == .formula && installedVersion.split(separator: "_").first == currentVersion.split(separator: "_").first
             && installedVersion != currentVersion
     }
+    /// Homebrew moved the formula back to an older release, usually with a
+    /// `version_scheme` bump (openssl@3 3.6.5 → 3.5.9). `brew upgrade` still
+    /// installs it, so the row says so instead of looking like an update.
+    var isVersionRollback: Bool {
+        VersionComparator.compare(currentVersion, installedVersion) == .orderedAscending
+    }
     var availablePrereleaseChannel: PrereleaseChannel? {
         VersionComparator.prereleaseChannel(for: currentVersion)
     }

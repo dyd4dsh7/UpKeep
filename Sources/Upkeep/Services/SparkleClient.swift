@@ -7,7 +7,9 @@ struct SparkleClient: Sendable {
             let data = try await Self.appcastData(from: feedURL)
 
             let parser = SparkleFeedParser(data: data, baseURL: feedURL)
-            guard let item = parser.parse(includePrereleases: includePrereleases) else {
+            // An installed prerelease keeps its channel, like GitHub and Electron feeds.
+            let followsPrereleases = includePrereleases || VersionComparator.isPrerelease(app.installedVersion)
+            guard let item = parser.parse(includePrereleases: followsPrereleases) else {
                 if parser.hasParsedItems { return nil }
                 throw UpdateSourceError.malformedData("No valid release entries were found.")
             }

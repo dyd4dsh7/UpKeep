@@ -118,11 +118,14 @@ struct GitHubClient: Sendable {
         matching app: InstalledApp,
         includePrereleases: Bool
     ) -> Release? {
-        releases
+        // An installed prerelease is already on that channel, so it keeps
+        // following it instead of being offered the older stable release.
+        let followsPrereleases = includePrereleases || VersionComparator.isPrerelease(app.installedVersion)
+        return releases
             .filter { $0.draft != true }
             .filter { version(from: $0.tagName, matching: app) != nil }
             .filter { release in
-                guard !includePrereleases else { return true }
+                guard !followsPrereleases else { return true }
                 guard release.prerelease != true,
                       let version = version(from: release.tagName, matching: app) else { return false }
                 return !VersionComparator.isPrerelease(version)
